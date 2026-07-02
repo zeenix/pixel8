@@ -1,5 +1,6 @@
-//! The sprite editor: zoomed 8x8 canvas, palette grid, tools, flags, and
-//! a sheet strip for picking sprites — the classic layout.
+//! The sprite editor: a zoomed canvas (editing 1x1 up to 8x8 sprite blocks),
+//! palette grid, tools, flags, and a sheet strip for picking sprites — the
+//! classic layout.
 
 use super::history::History;
 use crate::{
@@ -7,22 +8,30 @@ use crate::{
     ui::{self, draw_icon8, Icon8, Mouse, ICON_PENCIL},
 };
 use rico8_runtime::{
-    assets::{Assets, SpriteSheet, SPRITES_PER_ROW},
+    assets::{Assets, SpriteSheet, SHEET_H, SHEET_W, SPRITES_PER_ROW},
     clipboard::{self, ClipboardPayload, Pasted},
     fb::Framebuffer,
     palette::col,
 };
 
-// Layout.
-const CANVAS: (i32, i32) = (3, 20); // 64x64, 8x zoom
-const PAL: (i32, i32) = (74, 20); // 4x4 grid of 12px swatches
-const FLAGS: (i32, i32) = (76, 72); // 8 toggle dots
+// Layout. The right-hand panel stacks palette, size buttons, then flags —
+// mirroring PICO-8, whose size selector lives by the palette, not the toolbar.
+const CANVAS: (i32, i32) = (3, 20); // always 64x64 on screen, zoom set by size
+const PAL: (i32, i32) = (76, 20); // 4x4 grid of compact swatches
+const PAL_SW: i32 = 8; // palette swatch side (PICO-8-compact)
+const SIZE_BTNS: (i32, i32) = (76, 55); // four "1/2/4/8" block-size buttons
+const FLAGS: (i32, i32) = (74, 70); // 8 toggle dots
 const SHEET_Y: i32 = 88; // 4 rows of sprites (one page)
 const PAGE_BTNS: (i32, i32) = (104, 81); // 4 page dots
 
-// Fullscreen canvas: the 8x8 sprite at 14x zoom (112x112), filling rows 8..119.
+// Fullscreen canvas: anchored at (8, 8), zoom chosen to fit the ~112px area.
 const FS_CANVAS: (i32, i32) = (8, 8);
-const FS_ZOOM: i32 = 14;
+const FS_MAX: i32 = 112;
+
+/// Selectable block sizes, in sprites per side: 1x1, 2x2, 4x4 or 8x8 sprites
+/// (8, 16, 32 or 64 pixels). Larger blocks edit several adjacent sheet cells
+/// at once, PICO-8 style.
+const SIZES: [i32; 4] = [1, 2, 4, 8];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tool {
@@ -30,19 +39,57 @@ enum Tool {
     Eraser,
     Fill,
     Picker,
+    /// Drag to slide the canvas window across the sheet (PICO-8's hand).
+    Pan,
+}
+
+/// The toolbar, left to right. Icons are stored by value (`Icon8` is `Copy`);
+/// each slot sits at `x = 3 + i * 10`, matching the click/hover hit tests.
+const TOOLS: [(Tool, Icon8); 5] = [
+    (Tool::Pencil, ICON_PENCIL),
+    (Tool::Eraser, ICON_ERASER),
+    (Tool::Fill, ICON_FILL),
+    (Tool::Picker, ICON_PICKER),
+    (Tool::Pan, ICON_HAND),
+];
+
+/// The x of toolbar slot `i`.
+fn tool_x(i: usize) -> i32 {
+    3 + i as i32 * 10
+}
+
+/// An in-progress pan (hand tool): the screen point grabbed on press and the
+/// window origin then, so each frame re-derives the scroll from the original
+/// anchor rather than accumulating drift.
+#[derive(Clone, Copy)]
+struct PanDrag {
+    /// Screen pixel grabbed on press.
+    amx: i32,
+    amy: i32,
+    /// Window origin (sheet pixels) at press time.
+    avx: i32,
+    avy: i32,
 }
 
 pub struct SpriteEditor {
-    sprite: u32,
+    /// The canvas is a slidable window into the sheet; these are its top-left
+    /// sheet-pixel coordinates. The hand tool scrolls them freely; selecting a
+    /// sprite snaps them to a cell boundary.
+    view_x: i32,
+    view_y: i32,
     color: u8,
     tool: Tool,
     page: u32,
+    /// Edited block size in sprites per side (one of [`SIZES`]).
+    size: i32,
     fullscreen: bool,
     /// Last-known cursor position in screen pixels (for hover / status bar).
     mx: i32,
     my: i32,
     /// Transient bottom-bar message (e.g. a paste result).
     status: ui::StatusMsg,
+    /// In-progress hand-tool pan, if any.
+    pan: Option<PanDrag>,
     /// Undo/redo of the sprite sheet (last 10 edits).
     history: History<SpriteSheet>,
 }
@@ -50,14 +97,17 @@ pub struct SpriteEditor {
 impl SpriteEditor {
     pub fn new() -> Self {
         Self {
-            sprite: 1,
+            view_x: 8, // sprite 1, matching the previous default.
+            view_y: 0,
             color: 7,
             tool: Tool::Pencil,
             page: 0,
+            size: 1,
             fullscreen: false,
             mx: -16,
             my: -16,
             status: ui::StatusMsg::default(),
+            pan: None,
             history: History::new(),
         }
     }
@@ -67,20 +117,52 @@ impl SpriteEditor {
         self.fullscreen
     }
 
-    /// Canvas origin and per-pixel zoom for the active view.
+    /// Edited block size in pixels (8, 16, 32 or 64).
+    fn block_px(&self) -> i32 {
+        self.size * 8
+    }
+
+    /// The sheet cell (column, row) containing the window's top-left pixel.
+    fn origin_cell(&self) -> (i32, i32) {
+        (self.view_x / 8, self.view_y / 8)
+    }
+
+    /// The sprite number of the window's top-left cell (what the header shows).
+    fn top_left_sprite(&self) -> u32 {
+        let (col, row) = self.origin_cell();
+        (row * SPRITES_PER_ROW as i32 + col) as u32
+    }
+
+    /// Keep the window fully on the 128x128 sheet for the current block size.
+    fn clamp_view(&mut self) {
+        let bpx = self.block_px();
+        self.view_x = self.view_x.clamp(0, SHEET_W as i32 - bpx);
+        self.view_y = self.view_y.clamp(0, SHEET_H as i32 - bpx);
+    }
+
+    /// Snap the window to the cell holding its top-left, then step by whole
+    /// cells (arrow-key navigation), and follow it with the sheet page.
+    fn nudge_cell(&mut self, dcol: i32, drow: i32) {
+        self.view_x = (self.view_x / 8 + dcol) * 8;
+        self.view_y = (self.view_y / 8 + drow) * 8;
+        self.clamp_view();
+        self.page = (self.view_y / 32).clamp(0, 3) as u32;
+    }
+
+    /// Canvas origin and per-pixel zoom for the active view. The block is
+    /// magnified into a fixed 64px canvas (normal) or the ~112px fullscreen area,
+    /// so larger blocks simply zoom out.
     fn canvas(&self) -> (i32, i32, i32) {
+        let bpx = self.block_px();
         if self.fullscreen {
-            (FS_CANVAS.0, FS_CANVAS.1, FS_ZOOM)
+            (FS_CANVAS.0, FS_CANVAS.1, (FS_MAX / bpx).max(1))
         } else {
-            (CANVAS.0, CANVAS.1, 8)
+            (CANVAS.0, CANVAS.1, 64 / bpx)
         }
     }
 
     fn sheet_origin(&self) -> (i32, i32) {
-        (
-            (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8,
-            (self.sprite as i32 / SPRITES_PER_ROW as i32) * 8,
-        )
+        (self.view_x, self.view_y)
     }
 
     pub fn key(&mut self, key: Key, mods: Mods, assets: &mut Assets) {
@@ -103,36 +185,20 @@ impl SpriteEditor {
                 }
             }
         }
-        let mut moved = false;
         match key {
-            Key::Left => {
-                self.sprite = (self.sprite + 255) % 256;
-                moved = true;
-            }
-            Key::Right => {
-                self.sprite = (self.sprite + 1) % 256;
-                moved = true;
-            }
-            Key::Up => {
-                self.sprite = (self.sprite + 240) % 256;
-                moved = true;
-            }
-            Key::Down => {
-                self.sprite = (self.sprite + 16) % 256;
-                moved = true;
-            }
+            Key::Left => self.nudge_cell(-1, 0),
+            Key::Right => self.nudge_cell(1, 0),
+            Key::Up => self.nudge_cell(0, -1),
+            Key::Down => self.nudge_cell(0, 1),
             Key::PageUp => self.page = (self.page + 3) % 4,
             Key::PageDown => self.page = (self.page + 1) % 4,
             Key::Char('p') => self.tool = Tool::Pencil,
             Key::Char('e') => self.tool = Tool::Eraser,
             Key::Char('f') => self.tool = Tool::Fill,
             Key::Char('i') => self.tool = Tool::Picker,
+            Key::Char('h') => self.tool = Tool::Pan,
             Key::Tab => self.fullscreen = !self.fullscreen,
             _ => {}
-        }
-        // Keep the strip showing the selected sprite when moved by keys.
-        if moved {
-            self.page = self.sprite / 64;
         }
     }
 
@@ -156,10 +222,11 @@ impl SpriteEditor {
                 if target == self.color {
                     return;
                 }
-                // Flood fill within the 8x8 sprite.
+                // Flood fill within the edited block (which may span several cells).
+                let bpx = self.block_px();
                 let mut stack = vec![(px, py)];
                 while let Some((x, y)) = stack.pop() {
-                    if !(0..8).contains(&x) || !(0..8).contains(&y) {
+                    if !(0..bpx).contains(&x) || !(0..bpx).contains(&y) {
                         continue;
                     }
                     if assets.sprites.get(ox + x, oy + y) != target {
@@ -169,7 +236,36 @@ impl SpriteEditor {
                     stack.extend([(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]);
                 }
             }
+            // Pan is a drag gesture handled in `handle_pan`, not a per-pixel op.
+            Tool::Pan => {}
         }
+    }
+
+    /// Hand-tool drag: slide the canvas window across the sheet, grabbing a
+    /// point and dragging it so neighbouring pixels scroll into view (PICO-8's
+    /// pan, like the map editor's camera). It scrolls the window origin by whole
+    /// sheet pixels and never touches pixels, so it records no undo step.
+    fn handle_pan(&mut self, m: &Mouse, z: i32, over: bool) {
+        if m.left_pressed && over {
+            self.pan = Some(PanDrag {
+                amx: m.x,
+                amy: m.y,
+                avx: self.view_x,
+                avy: self.view_y,
+            });
+        }
+        let Some(p) = self.pan else { return };
+        if !m.left {
+            self.pan = None;
+            return;
+        }
+        // One sheet pixel spans `z` screen pixels, so `/z` converts the drag into
+        // a sheet-pixel scroll. Same sign as the map editor's camera pan: the
+        // grabbed point follows the cursor.
+        self.view_x = p.avx + (p.amx - m.x) / z;
+        self.view_y = p.avy + (p.amy - m.y) / z;
+        self.clamp_view();
+        self.page = (self.view_y / 32).clamp(0, 3) as u32;
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets) {
@@ -199,8 +295,11 @@ impl SpriteEditor {
         }
         // Canvas painting (drag-friendly), through the active view's origin/zoom.
         let (cx, cy, z) = self.canvas();
-        let size = z * 8;
-        if (m.left || m.right) && m.over(cx, cy, cx + size - 1, cy + size - 1) {
+        let size = z * self.block_px();
+        let over_canvas = m.over(cx, cy, cx + size - 1, cy + size - 1);
+        if matches!(self.tool, Tool::Pan) {
+            self.handle_pan(&m, z, over_canvas);
+        } else if (m.left || m.right) && over_canvas {
             let px = (m.x - cx) / z;
             let py = (m.y - cy) / z;
             // Fill and picker should fire once per click, not per frame.
@@ -215,28 +314,34 @@ impl SpriteEditor {
             return;
         }
         // Palette.
-        if m.over(PAL.0, PAL.1, PAL.0 + 47, PAL.1 + 47) {
-            let c = ((m.y - PAL.1) / 12) * 4 + (m.x - PAL.0) / 12;
+        if m.over(PAL.0, PAL.1, PAL.0 + 4 * PAL_SW - 1, PAL.1 + 4 * PAL_SW - 1) {
+            let c = ((m.y - PAL.1) / PAL_SW) * 4 + (m.x - PAL.0) / PAL_SW;
             self.color = c as u8;
         }
         // Tool icons.
-        for (i, tool) in [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Picker]
-            .iter()
-            .enumerate()
-        {
-            let x = 3 + i as i32 * 10;
+        for (i, (tool, _)) in TOOLS.iter().enumerate() {
+            let x = tool_x(i);
             if m.over(x, 9, x + 7, 17) {
                 self.tool = *tool;
             }
         }
-        // Flags.
+        // Block-size buttons.
+        for (i, &n) in SIZES.iter().enumerate() {
+            let x = SIZE_BTNS.0 + i as i32 * 8;
+            if m.over(x, SIZE_BTNS.1, x + 6, SIZE_BTNS.1 + 7) {
+                self.size = n;
+                self.clamp_view(); // a bigger block may not fit at the old origin.
+            }
+        }
+        // Flags (of the block's top-left sprite).
+        let flag_sprite = self.top_left_sprite();
         for f in 0..8 {
             let x = FLAGS.0 + f * 6;
             if m.over(x, FLAGS.1, x + 4, FLAGS.1 + 4) {
-                let cur = assets.sprites.flags(self.sprite);
+                let cur = assets.sprites.flags(flag_sprite);
                 assets
                     .sprites
-                    .set_flag(self.sprite, f as u8, cur & (1 << f) == 0);
+                    .set_flag(flag_sprite, f as u8, cur & (1 << f) == 0);
             }
         }
         // Page dots.
@@ -246,11 +351,13 @@ impl SpriteEditor {
                 self.page = p as u32;
             }
         }
-        // Sheet strip: select sprite.
+        // Sheet strip: snap the window to the clicked cell.
         if m.over(0, SHEET_Y, 127, SHEET_Y + 31) {
-            let cx = m.x / 8;
-            let cy = (m.y - SHEET_Y) / 8;
-            self.sprite = (self.page * 64 + cy as u32 * 16 + cx as u32) % 256;
+            let col = m.x / 8;
+            let row = self.page as i32 * 4 + (m.y - SHEET_Y) / 8;
+            self.view_x = col * 8;
+            self.view_y = row * 8;
+            self.clamp_view();
         }
     }
 
@@ -260,25 +367,36 @@ impl SpriteEditor {
             return;
         }
         // Tool icons.
-        let tools = [
-            (Tool::Pencil, ICON_PENCIL),
-            (Tool::Eraser, ICON_ERASER),
-            (Tool::Fill, ICON_FILL),
-            (Tool::Picker, ICON_PICKER),
-        ];
-        for (i, (tool, icon)) in tools.iter().enumerate() {
-            let x = 3 + i as i32 * 10;
+        for (i, (tool, icon)) in TOOLS.iter().enumerate() {
+            let x = tool_x(i);
             let color = if *tool == self.tool {
+                fb.rectfill(x - 1, 9, x + 8, 17, col::BLACK);
                 col::WHITE
             } else {
                 col::LAVENDER
             };
-            if *tool == self.tool {
-                fb.rectfill(x - 1, 9, x + 8, 17, col::BLACK);
-            }
             draw_icon8(fb, icon, x, 9, color);
         }
-        fb.print(&format!("#{:03}", self.sprite), 106, 11, col::WHITE);
+        fb.print(
+            &format!("#{:03}", self.top_left_sprite()),
+            106,
+            11,
+            col::WHITE,
+        );
+
+        // Block-size buttons ("1/2/4/8", one per entry in SIZES). The 3x5 digit
+        // is centered in the 9x9 highlight box (centre at x+3, SIZE_BTNS.1+4).
+        for (i, &n) in SIZES.iter().enumerate() {
+            let x = SIZE_BTNS.0 + i as i32 * 8;
+            let sel = n == self.size;
+            let color = if sel {
+                fb.rectfill(x - 1, SIZE_BTNS.1, x + 7, SIZE_BTNS.1 + 8, col::BLACK);
+                col::WHITE
+            } else {
+                col::LAVENDER
+            };
+            fb.print(&n.to_string(), x + 2, SIZE_BTNS.1 + 2, color);
+        }
 
         // Canvas.
         fb.rect(
@@ -289,7 +407,8 @@ impl SpriteEditor {
             col::BLACK,
         );
         let (ox, oy) = self.sheet_origin();
-        // Magnify the 8x8 sprite onto the 64x64 canvas. The artist edits every
+        let bpx = self.block_px();
+        // Magnify the edited block onto the 64x64 canvas. The artist edits every
         // pixel, so color 0 must show as black here rather than being treated as
         // transparent for this blit.
         fb.set_transparent_color(0, false);
@@ -297,8 +416,8 @@ impl SpriteEditor {
             &assets.sprites,
             ox,
             oy,
-            8,
-            8,
+            bpx,
+            bpx,
             CANVAS.0,
             CANVAS.1,
             64,
@@ -311,17 +430,16 @@ impl SpriteEditor {
 
         // Palette grid.
         for c in 0u8..16 {
-            let x = PAL.0 + (c as i32 % 4) * 12;
-            let y = PAL.1 + (c as i32 / 4) * 12;
-            fb.rectfill(x, y, x + 11, y + 11, c);
+            let x = PAL.0 + (c as i32 % 4) * PAL_SW;
+            let y = PAL.1 + (c as i32 / 4) * PAL_SW;
+            fb.rectfill(x, y, x + PAL_SW - 1, y + PAL_SW - 1, c);
         }
-        let sx = PAL.0 + (self.color as i32 % 4) * 12;
-        let sy = PAL.1 + (self.color as i32 / 4) * 12;
-        fb.rect(sx, sy, sx + 11, sy + 11, col::WHITE);
-        fb.rect(sx - 1, sy - 1, sx + 12, sy + 12, col::BLACK);
+        let sx = PAL.0 + (self.color as i32 % 4) * PAL_SW;
+        let sy = PAL.1 + (self.color as i32 / 4) * PAL_SW;
+        fb.rect(sx, sy, sx + PAL_SW - 1, sy + PAL_SW - 1, col::WHITE);
 
         // Flags.
-        let flags = assets.sprites.flags(self.sprite);
+        let flags = assets.sprites.flags(self.top_left_sprite());
         for f in 0..8 {
             let x = FLAGS.0 + f * 6;
             let on = flags & (1 << f) != 0;
@@ -363,12 +481,22 @@ impl SpriteEditor {
                 }
             }
         }
-        // Selection box on the strip.
-        if self.sprite / 64 == self.page {
-            let i = self.sprite % 64;
-            let x = (i as i32 % 16) * 8;
-            let y = SHEET_Y + (i as i32 / 16) * 8;
-            fb.rect(x, y, x + 7, y + 7, col::WHITE);
+        // Selection box on the strip: the N-sprite block, clipped to the four
+        // rows this page shows (an 8-tall block spans two pages).
+        let (col, row) = self.origin_cell();
+        let page_row0 = self.page as i32 * 4;
+        let y0 = (row - page_row0).max(0);
+        let y1 = (row + self.size - page_row0).min(4);
+        if y1 > y0 {
+            let x = col * 8;
+            let y = SHEET_Y + y0 * 8;
+            fb.rect(
+                x,
+                y,
+                x + self.size * 8 - 1,
+                y + (y1 - y0) * 8 - 1,
+                col::WHITE,
+            );
         }
 
         self.draw_status(fb, assets);
@@ -380,17 +508,18 @@ impl SpriteEditor {
     fn draw_fullscreen(&self, fb: &mut Framebuffer, assets: &Assets) {
         let (ox, oy) = self.sheet_origin();
         let (cx, cy, z) = self.canvas();
+        let bpx = self.block_px();
         fb.set_transparent_color(0, false);
         fb.sspr(
             &assets.sprites,
             ox,
             oy,
-            8,
-            8,
+            bpx,
+            bpx,
             cx,
             cy,
-            z * 8,
-            z * 8,
+            z * bpx,
+            z * bpx,
             false,
             false,
         );
@@ -417,19 +546,16 @@ impl SpriteEditor {
         if self.fullscreen {
             return None;
         }
-        [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Picker]
-            .iter()
-            .enumerate()
-            .find_map(|(i, &tool)| {
-                let x = 3 + i as i32 * 10;
-                (self.mx >= x && self.mx <= x + 7 && self.my >= 9 && self.my <= 17).then_some(tool)
-            })
+        TOOLS.iter().enumerate().find_map(|(i, &(tool, _))| {
+            let x = tool_x(i);
+            (self.mx >= x && self.mx <= x + 7 && self.my >= 9 && self.my <= 17).then_some(tool)
+        })
     }
 
-    /// The sprite-local pixel (0..8, 0..8) under the cursor, if any.
+    /// The block-local pixel (0..block, 0..block) under the cursor, if any.
     fn canvas_pixel_under_cursor(&self) -> Option<(i32, i32)> {
         let (cx, cy, z) = self.canvas();
-        let size = z * 8;
+        let size = z * self.block_px();
         if self.mx >= cx && self.mx < cx + size && self.my >= cy && self.my < cy + size {
             Some(((self.mx - cx) / z, (self.my - cy) / z))
         } else {
@@ -445,10 +571,10 @@ impl SpriteEditor {
         } else if let Some((px, py)) = self.canvas_pixel_under_cursor() {
             let (ox, oy) = self.sheet_origin();
             let c = assets.sprites.get(ox + px, oy + py);
-            format!("#{:03} x{} y{} c{:02}", self.sprite, px, py, c)
+            format!("#{:03} x{} y{} c{:02}", self.top_left_sprite(), px, py, c)
         } else {
-            let flags = assets.sprites.flags(self.sprite);
-            format!("Spr {:03} flags {:08b}", self.sprite, flags)
+            let flags = assets.sprites.flags(self.top_left_sprite());
+            format!("Spr {:03} flags {:08b}", self.top_left_sprite(), flags)
         };
         self.status.show(fb, &text);
     }
@@ -464,8 +590,7 @@ impl SpriteEditor {
         self.history.begin(&assets.sprites);
         match pasted {
             Pasted::Sprites { rect, flags } => {
-                let x0 = (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8;
-                let y0 = (self.sprite as i32 / SPRITES_PER_ROW as i32) * 8;
+                let (x0, y0) = self.sheet_origin();
                 let report =
                     clipboard::paste_sprites(&mut assets.sprites, rect, x0, y0, flags.as_deref());
                 self.status.set(report.summary);
@@ -476,22 +601,36 @@ impl SpriteEditor {
         self.history.commit(&assets.sprites);
     }
 
-    /// Copy the selected sprite's 8x8 block (pixels + flags) as a native blob.
+    /// Copy the edited block (pixels + one flag byte per covered sprite,
+    /// row-major) as a native blob.
     pub fn copy(&mut self, assets: &Assets) -> String {
-        let x0 = (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8;
-        let y0 = (self.sprite as i32 / SPRITES_PER_ROW as i32) * 8;
-        let mut pixels = Vec::with_capacity(64);
-        for dy in 0..8 {
-            for dx in 0..8 {
+        let (x0, y0) = self.sheet_origin();
+        let (col, row) = self.origin_cell();
+        let bpx = self.block_px();
+        let mut pixels = Vec::with_capacity((bpx * bpx) as usize);
+        for dy in 0..bpx {
+            for dx in 0..bpx {
                 pixels.push(assets.sprites.get(x0 + dx, y0 + dy));
             }
         }
-        self.status.set(format!("copied sprite {}", self.sprite));
+        let mut flags = Vec::with_capacity((self.size * self.size) as usize);
+        for ry in 0..self.size {
+            for rx in 0..self.size {
+                let n = (row + ry) * SPRITES_PER_ROW as i32 + (col + rx);
+                flags.push(assets.sprites.flags(n as u32));
+            }
+        }
+        let top = self.top_left_sprite();
+        self.status.set(if self.size == 1 {
+            format!("copied sprite {top}")
+        } else {
+            format!("copied {bpx}x{bpx} spr {top}")
+        });
         clipboard::encode(&ClipboardPayload::Sprite {
-            w: 8,
-            h: 8,
+            w: bpx as u8,
+            h: bpx as u8,
             pixels,
-            flags: vec![assets.sprites.flags(self.sprite)],
+            flags,
         })
     }
 }
@@ -503,6 +642,7 @@ fn tool_label(tool: Tool) -> &'static str {
         Tool::Eraser => "Eraser (e)",
         Tool::Fill => "Fill (f)",
         Tool::Picker => "Picker (i)",
+        Tool::Pan => "Pan (h)",
     }
 }
 
@@ -515,6 +655,8 @@ const ICON_FILL: Icon8 = [
 const ICON_PICKER: Icon8 = [
     0b00000111, 0b00000111, 0b00001110, 0b00011100, 0b00111000, 0b01110000, 0b01100000, 0b00000000,
 ];
+// A grabbing hand, matching the map editor's pan tool.
+const ICON_HAND: Icon8 = [0x28, 0x2A, 0x2A, 0x3E, 0xBE, 0x7E, 0x1C, 0x00];
 
 #[cfg(test)]
 mod paste_tests {
@@ -824,12 +966,165 @@ mod tests {
     }
 
     #[test]
+    fn clicking_a_size_button_sets_the_block_size() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        assert_eq!(ed.size, 1);
+        // Button index 1 -> size 2, at x = SIZE_BTNS.0 + 1*8.
+        ed.tick(&press(SIZE_BTNS.0 + 8 + 1, SIZE_BTNS.1 + 1), &mut a);
+        assert_eq!(ed.size, 2);
+        // Button index 3 -> size 8.
+        ed.tick(&press(SIZE_BTNS.0 + 3 * 8 + 1, SIZE_BTNS.1 + 1), &mut a);
+        assert_eq!(ed.size, 8);
+    }
+
+    #[test]
+    fn painting_a_2x2_block_reaches_the_adjacent_sprite() {
+        // With a 2x2 block the canvas spans sprites 1,2,17,18. Painting the
+        // right half must land in the neighbour (sprite 2 at sheet (16, 0))
+        // rather than being clipped away.
+        let mut ed = SpriteEditor::new(); // sprite 1 -> block origin (8, 0).
+        let mut a = Assets::default();
+        ed.size = 2; // zoom becomes 64 / 16 = 4.
+                     // Block pixel (8, 0) -> screen (CANVAS.0 + 8*4, CANVAS.1) = (35, 20).
+        ed.tick(&press(CANVAS.0 + 8 * 4, CANVAS.1), &mut a);
+        assert_eq!(a.sprites.get(16, 0), 7, "painted into the adjacent sprite");
+    }
+
+    #[test]
+    fn a_block_near_the_edge_clamps_onto_the_sheet() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.size = 2;
+        ed.view_x = 15 * 8; // aim the window at the last column...
+        ed.view_y = 0;
+        ed.clamp_view(); // ...which a 2-wide block can't reach, so it clamps.
+        assert_eq!(
+            ed.origin_cell(),
+            (14, 0),
+            "clamped so the 2-wide block fits"
+        );
+        assert_eq!(ed.top_left_sprite(), 14);
+        // Painting the top-left of the canvas writes to sprite 14 at sheet (112, 0).
+        ed.tick(&press(CANVAS.0, CANVAS.1), &mut a);
+        assert_eq!(a.sprites.get(112, 0), 7);
+    }
+
+    #[test]
+    fn copy_covers_the_whole_block() {
+        use rico8_runtime::clipboard::{parse, Pasted};
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.size = 2; // 16x16 block of sprites 1,2,17,18.
+        a.sprites.set(8, 0, 5); // top-left pixel of the block.
+        a.sprites.set(23, 15, 9); // bottom-right pixel (sheet (8+15, 15)).
+        let blob = ed.copy(&a);
+        assert_eq!(ed.status.current(), Some("copied 16x16 spr 1"));
+        let Pasted::Sprites { rect, flags } = parse(&blob).unwrap() else {
+            panic!("not sprites")
+        };
+        assert_eq!((rect.w, rect.h), (16, 16));
+        assert_eq!(rect.pixels[0], 5);
+        assert_eq!(rect.pixels[16 * 16 - 1], 9);
+        // One flag byte per covered sprite (2x2 = 4).
+        assert_eq!(flags.map(|f| f.len()), Some(4));
+    }
+
+    // A held drag frame: button down, no fresh press edge.
+    fn held(x: i32, y: i32) -> Mouse {
+        Mouse {
+            x,
+            y,
+            left: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn arrow_keys_step_the_window_by_one_cell() {
+        let mut ed = SpriteEditor::new(); // window at sprite 1.
+        let mut a = Assets::default();
+        ed.key(Key::Right, Mods::default(), &mut a);
+        assert_eq!(ed.top_left_sprite(), 2);
+        ed.key(Key::Down, Mods::default(), &mut a);
+        assert_eq!(ed.top_left_sprite(), 18);
+        ed.key(Key::Left, Mods::default(), &mut a);
+        assert_eq!(ed.top_left_sprite(), 17);
+    }
+
+    #[test]
+    fn clicking_the_sheet_snaps_the_window_to_that_cell() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.page = 1; // page 1 starts at sprite 64 (sheet row 4).
+                     // Second row, third column of the strip -> sheet cell (2, 5) = sprite 82.
+        ed.tick(&press(2 * 8 + 1, SHEET_Y + 8 + 1), &mut a);
+        assert_eq!((ed.view_x, ed.view_y), (16, 40));
+        assert_eq!(ed.top_left_sprite(), 82);
+    }
+
+    #[test]
+    fn hand_tool_is_selectable_by_key_and_icon() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.key(Key::Char('h'), Mods::default(), &mut a);
+        assert_eq!(ed.tool, Tool::Pan);
+        ed.tool = Tool::Pencil;
+        // The hand is toolbar slot 4.
+        ed.tick(&press(tool_x(4) + 1, 12), &mut a);
+        assert_eq!(ed.tool, Tool::Pan);
+    }
+
+    #[test]
+    fn pan_slides_the_window_by_pixels_following_the_cursor() {
+        // Size 2 -> zoom 4, so one sheet pixel spans z = 4 screen px. The window
+        // scrolls as soon as the cursor crosses a single sheet-pixel of distance,
+        // not only at cell boundaries.
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.size = 2;
+        ed.view_x = 16; // cell (2, 2).
+        ed.view_y = 16;
+        ed.tool = Tool::Pan;
+        ed.tick(&press(CANVAS.0, CANVAS.1), &mut a); // grab the window.
+                                                     // Drag the grabbed point right 4 px: the window follows the hand, so its
+                                                     // origin scrolls left by one sheet pixel (same sign as the map editor).
+        ed.tick(&held(CANVAS.0 + 4, CANVAS.1), &mut a);
+        assert_eq!((ed.view_x, ed.view_y), (15, 16));
+        // Re-derived from the press anchor each frame: 8 px right -> 2 px left.
+        ed.tick(&held(CANVAS.0 + 8, CANVAS.1 + 8), &mut a);
+        assert_eq!((ed.view_x, ed.view_y), (14, 14));
+        // Dragging back the other way scrolls the origin the opposite direction.
+        ed.tick(&held(CANVAS.0 - 4, CANVAS.1), &mut a);
+        assert_eq!(ed.view_x, 17);
+    }
+
+    #[test]
+    fn pan_clamps_at_the_sheet_edge_and_touches_no_pixels() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.size = 2;
+        ed.view_x = 0; // window already at the top-left corner.
+        ed.view_y = 0;
+        a.sprites.set(8, 8, 9); // a pixel that must survive the pan.
+        ed.tool = Tool::Pan;
+        ed.tick(&press(CANVAS.0, CANVAS.1), &mut a);
+        // Drag right/down (which scrolls the origin toward negative): clamps to 0.
+        ed.tick(&held(CANVAS.0 + 96, CANVAS.1 + 96), &mut a);
+        assert_eq!((ed.view_x, ed.view_y), (0, 0), "clamped at the corner");
+        ed.tick(&release(), &mut a);
+        assert_eq!(a.sprites.get(8, 8), 9, "pan left pixels untouched");
+        // A pan records no undo step (nothing to revert).
+        ed.key(Key::Char('z'), ctrl(false), &mut a);
+        assert_eq!(a.sprites.get(8, 8), 9);
+    }
+
+    #[test]
     fn copy_emits_native_blob_with_flags() {
         use rico8_runtime::clipboard::{parse, Pasted};
         let mut a = Assets::default();
         a.sprites.set_flag(1, 3, true); // flag bit 3 on sprite 1.
-        let mut ed = SpriteEditor::new();
-        ed.sprite = 1;
+        let mut ed = SpriteEditor::new(); // window defaults to sprite 1.
         let blob = ed.copy(&a);
         assert!(blob.starts_with("[rico8]"));
         let Pasted::Sprites { flags, .. } = parse(&blob).unwrap() else {
