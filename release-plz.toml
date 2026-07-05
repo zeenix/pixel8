@@ -1,0 +1,136 @@
+# release-plz configuration
+# https://release-plz.dev/docs/config
+
+[workspace]
+# Tag/release each crate as "<package>-<version>" (no 'v' prefix).
+git_tag_name = "{{ package }}-{{ version }}"
+git_release_name = "{{ package }}-{{ version }}"
+
+# Enable all release features.
+git_release_enable = true
+git_tag_enable = true
+publish = true
+semver_check = true
+
+# Bump minor version for non-bugfix commits.
+custom_minor_increment_regex = """\
+^(🎨|⚡️|🔥|✨|💄|🎉|🔒️|⬇️|⬆️|📌|➕|➖|🔧|👽️|💥|♿️|💬|🔊|🔇|🚸|🏗️|🗑️)\
+"""
+
+# PR configuration.
+pr_name = "🔖 Releases"
+
+# Changelog configuration for gitmoji-based commits.
+# See: https://gitmoji.dev/
+[changelog]
+
+# Explicit header so freshly-generated changelogs match the existing style
+# and don't get release-plz's default "## [Unreleased]" scaffold section.
+header = """# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+
+# Changelog body template.
+# Issue refs are separated by "||" delimiter so we can insert period before them.
+body = """
+
+## {{ version | trim_start_matches(pat="v") }} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}\
+{% set first_line = commit.message | split(pat="\n") | first %}\
+{% set parts = first_line | split(pat="||") %}\
+- {{ parts | first | upper_first | trim | trim_end_matches(pat=".") }}\
+{% if commit.breaking %} (**BREAKING**){% endif %}.\
+{% if parts | length > 1 %} {{ parts | last }}{% endif %}
+{% endfor %}\
+{% endfor %}\
+"""
+
+# Protect breaking change commits from being filtered out.
+protect_breaking_commits = true
+
+# Commit message preprocessors (applied in order).
+commit_preprocessors = [
+    # Remove scope prefix (e.g., "platformer: ") but keep gitmoji emojis.
+    # Pattern handles emojis with variation selectors (U+FE0F) and ZWJ sequences (U+200D).
+    { pattern = "^((?:[\\p{Emoji_Presentation}\\p{Extended_Pictographic}](?:\\u{FE0F}|\\u{200D})?)+) [\\w, -]+: ", replace = "$1 " },
+    # Extract issue refs from commit body using $COMMIT_SHA.
+    # Matches: "Fixes #123", "Closes issue #123", "Resolves bug #123", etc.
+    # Appends issue ref with "||" delimiter so template can insert period before it.
+    { pattern = ".*", replace_command = "sh -c 'title=$(cat); ref=$(git log -1 --format=%b $COMMIT_SHA 2>/dev/null | grep -oE \"(Fixes|Closes|Resolves).*#[0-9]+\" | grep -oE \"#[0-9]+\" | head -1); if [ -n \"$ref\" ]; then printf \"%s||%s\\n\" \"$title\" \"$ref\"; else printf \"%s\\n\" \"$title\"; fi'" },
+]
+
+# Categorize commits based on gitmoji emojis.
+# See: https://gitmoji.dev/
+commit_parsers = [
+    # Skip merge commits, release commits, and empty commits (just emojis).
+    { message = "^[Mm]erge", skip = true },
+    { message = "^🔖", skip = true },
+    { message = "^[\\p{Emoji}\\p{Emoji_Presentation}\\p{Extended_Pictographic}]+$", skip = true },
+
+    # Features.
+    { message = "^✨", group = "Added" },
+    { message = "^🎉", group = "Added" },
+    { message = "^🚸", group = "Added" },
+
+    # Bug fixes.
+    { message = "^🐛", group = "Fixed" },
+    { message = "^🚑", group = "Fixed" },
+    { message = "^🩹", group = "Fixed" },
+    { message = "^🥅", group = "Fixed" },
+
+    # Performance.
+    { message = "^⚡", group = "Performance" },
+
+    # Documentation.
+    { message = "^📝", group = "Documentation" },
+    { message = "^💡", group = "Documentation" },
+
+    # Refactoring/changes.
+    { message = "^♻️", group = "Changed" },
+    { message = "^🎨", group = "Changed" },
+    { message = "^🚚", group = "Changed" },
+    { message = "^🔧", group = "Changed" },
+    { message = "^🏗️", group = "Changed" },
+    { message = "^💄", group = "Changed" },
+    { message = "^🍱", group = "Changed" },
+    { message = "^🏷️", group = "Changed" },
+
+    # Breaking changes/removals.
+    { message = "^💥", group = "Breaking" },
+    { message = "^🔥", group = "Removed" },
+    { message = "^🗑️", group = "Deprecated" },
+
+    # Dependencies.
+    { message = "^⬆️", group = "Dependencies" },
+    { message = "^⬇️", group = "Dependencies" },
+    { message = "^📌", group = "Dependencies" },
+    { message = "^➕", group = "Dependencies" },
+    { message = "^➖", group = "Dependencies" },
+
+    # Security.
+    { message = "^🔒", group = "Security" },
+
+    # Testing.
+    { message = "^✅", group = "Testing" },
+    { message = "^🧪", group = "Testing" },
+
+    # CI/Build.
+    { message = "^👷", group = "CI" },
+    { message = "^💚", group = "CI" },
+
+    # Everything else.
+    { message = ".*", group = "Other" },
+]
+
+# rico8-web is a cdylib wasm artifact (built with wasm tooling), not a
+# crates.io library — it carries `publish = false`. Skip it entirely so it
+# gets no tag, GitHub release, or changelog.
+[[package]]
+name = "rico8-web"
+release = false
