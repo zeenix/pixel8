@@ -12,11 +12,11 @@
 //! pxRt                  # Pixel8 payload chunk:
 //!   "PIXEL8"             #   magic
 //!   u16 LE version      #   cartridge format version (currently 1)
-//!   deflate( postcard( CartPayload ) )
+//!   deflate( json( Cart ) )
 //! IEND
 //! ```
 //!
-//! `CartPayload` always carries the compiled `game.wasm` and the full
+//! `Cart` always carries the compiled `game.wasm` and the full
 //! asset bundle; carts exported as *editable* also carry the Rust source.
 
 use crate::{assets::Assets, font, palette};
@@ -57,6 +57,7 @@ pub fn initial_memory_bytes(wasm: &[u8]) -> Option<usize> {
 #[derive(Serialize, Deserialize)]
 pub struct Cart {
     /// Compiled `wasm32-unknown-unknown` game module.
+    #[serde(with = "crate::wire::base64_bytes")]
     pub wasm: Vec<u8>,
     pub assets: Assets,
     /// Rust source (`src/lib.rs`), present in editable carts.
@@ -101,7 +102,7 @@ pub fn encode(cart: &Cart) -> Result<Vec<u8>> {
     // pxRt: the actual cartridge.
     let mut payload = CART_MAGIC.to_vec();
     payload.extend(CART_VERSION.to_le_bytes());
-    let body = postcard::to_allocvec(cart)?;
+    let body = serde_json::to_vec(cart)?;
     payload.extend(miniz_oxide::deflate::compress_to_vec(&body, 8));
     write_chunk(&mut png, CHUNK_TYPE, &payload);
 
@@ -174,7 +175,7 @@ pub fn decode(bytes: &[u8]) -> Result<Cart> {
     }
     let raw = miniz_oxide::inflate::decompress_to_vec_with_limit(&body[2..], MAX_PAYLOAD)
         .map_err(|e| anyhow!("Cart data is corrupted: {e}"))?;
-    let cart: Cart = postcard::from_bytes(&raw)?;
+    let cart: Cart = serde_json::from_slice(&raw)?;
     validate(&cart)?;
     Ok(cart)
 }
