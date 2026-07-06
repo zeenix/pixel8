@@ -1,24 +1,24 @@
 [workspace]
 resolver = "2"
 members = [
-    "rico8",
-    "rico8-console",
-    "rico8-web",
-    "rico8-player",
-    "rico8-runtime",
+    "pixel8",
+    "pixel8-console",
+    "pixel8-web",
+    "pixel8-player",
+    "pixel8-runtime",
 ]
 # Example carts are standalone crates built for wasm32-unknown-unknown,
-# either from inside RICO-8 or with `cargo build --target wasm32-unknown-unknown`.
+# either from inside Pixel8 or with `cargo build --target wasm32-unknown-unknown`.
 exclude = ["examples"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/zeenix/rico8"
+repository = "https://github.com/zeenix/pixel8"
 
 [workspace.dependencies]
-rico8-runtime = { path = "rico8-runtime", default-features = false }
+pixel8-runtime = { path = "pixel8-runtime", default-features = false }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 # Only the std serializer; the default heapless integration goes unused.

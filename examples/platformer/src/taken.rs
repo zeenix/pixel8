@@ -1,4 +1,4 @@
-use rico8::{Context, SpriteId};
+use pixel8::{Context, SpriteId};
 
 use crate::constants::{COIN_POINTS, COIN_SPRITE, TROPHY_POINTS, TROPHY_SPRITE};
 

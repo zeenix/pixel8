@@ -1,12 +1,12 @@
-# RICO-8 clipboard format
+# Pixel8 clipboard format
 
-RICO-8's editors copy assets to the system clipboard as a plain-text blob:
+Pixel8's editors copy assets to the system clipboard as a plain-text blob:
 
-    [rico8]<hex>[/rico8]
+    [pixel8]<hex>[/pixel8]
 
 `<hex>` is the lowercase hex encoding of:
 
-- `RICO8C` — six-byte magic (distinct from the on-disk assets magic `RICO8A`)
+- `PIXEL8C` — seven-byte magic (distinct from the on-disk assets magic `PIXEL8A`)
 - one version byte (`0x01`)
 - a [postcard](https://docs.rs/postcard)-encoded payload
 
@@ -29,11 +29,11 @@ sprite flags, custom waveforms, and 8-bit map tiles all survive the round-trip.
 
 Paste accepts two formats:
 
-**Native `[rico8]`** — decoded by checking the `RICO8C` magic and version byte, then
+**Native `[pixel8]`** — decoded by checking the `PIXEL8C` magic and version byte, then
 deserialising the postcard body. The full payload is restored, including sprite flags,
 custom waveforms, and map regions.
 
-**PICO-8 editor formats** — for interoperability, RICO-8 also parses PICO-8's
+**PICO-8 editor formats** — for interoperability, Pixel8 also parses PICO-8's
 clipboard blobs:
 - `[gfx]` — sprite pixels only; no sprite flags are carried.
 - `[sfx]` — SFX records and song patterns, without custom waveforms.
@@ -43,7 +43,7 @@ native format. Any unrecognised or malformed blob is ignored.
 
 ## Validation
 
-On decode, RICO-8 checks the `RICO8C` magic, the exact version byte, and
+On decode, Pixel8 checks the `PIXEL8C` magic, the exact version byte, and
 that the postcard body deserialises cleanly. Any mismatch is an error; the paste
 is a no-op. Readers must reject versions they do not know.
 

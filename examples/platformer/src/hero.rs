@@ -1,4 +1,4 @@
-use rico8::{Body, Button, Context, Graphics, SpriteId, SCREEN_WIDTH};
+use pixel8::{Body, Button, Context, Graphics, SpriteId, SCREEN_WIDTH};
 
 use crate::{
     constants::{

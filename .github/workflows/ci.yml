@@ -52,7 +52,7 @@ jobs:
           sudo apt-get install -y libasound2-dev
 
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy -p rico8-player --no-default-features --features kms --all-targets -- -D warnings
+      - run: cargo clippy -p pixel8-player --no-default-features --features kms --all-targets -- -D warnings
       - name: Clippy the example carts
         run: |
           fail=0
@@ -82,7 +82,7 @@ jobs:
           sudo apt-get install -y libasound2-dev
 
       - run: cargo test --workspace
-      - run: cargo test -p rico8-player --no-default-features --features kms
+      - run: cargo test -p pixel8-player --no-default-features --features kms
 
   doc:
     runs-on: ubuntu-latest
@@ -95,7 +95,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      # rico8-runtime's default `audio` feature links ALSA via cpal, so its docs
+      # pixel8-runtime's default `audio` feature links ALSA via cpal, so its docs
       # need the headers just like the clippy and test jobs.
       - name: Install ALSA headers
         run: |
@@ -104,5 +104,5 @@ jobs:
 
       # --no-deps keeps the gate on our own docs: a noisy dependency must not
       # trip -D warnings.
-      - run: cargo doc --no-deps --all-features -p rico8
-      - run: cargo doc --no-deps --all-features -p rico8-runtime
+      - run: cargo doc --no-deps --all-features -p pixel8
+      - run: cargo doc --no-deps --all-features -p pixel8-runtime

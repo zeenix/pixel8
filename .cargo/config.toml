@@ -1,6 +1,6 @@
-# `cargo console` boots RICO-8.
+# `cargo console` boots Pixel8.
 [alias]
-console = "run --release -p rico8-console"
+console = "run --release -p pixel8-console"
 
 # Handheld player builds as fully-static musl binaries (see docs/HANDHELD.md). rust-lld +
 # self-contained linking needs no cross-gcc, no zig, no Docker.

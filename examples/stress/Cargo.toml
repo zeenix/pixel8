@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-rico8 = { path = "../../rico8" }
+pixel8 = { path = "../../pixel8" }
 
 [workspace]
 

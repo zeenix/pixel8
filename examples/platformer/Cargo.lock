@@ -28,16 +28,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pixel8"
+version = "0.1.0"
+
+[[package]]
 name = "platformer"
 version = "0.1.0"
 dependencies = [
  "heapless",
- "rico8",
+ "pixel8",
 ]
-
-[[package]]
-name = "rico8"
-version = "0.1.0"
 
 [[package]]
 name = "stable_deref_trait"

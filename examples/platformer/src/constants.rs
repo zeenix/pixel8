@@ -1,4 +1,4 @@
-use rico8::{MusicId, SfxId, SpriteFlag, SpriteId, SCREEN_HEIGHT, SCREEN_WIDTH};
+use pixel8::{MusicId, SfxId, SpriteFlag, SpriteId, SCREEN_HEIGHT, SCREEN_WIDTH};
 
 pub const MAX_TAKEN: usize = 8;
 

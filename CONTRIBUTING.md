@@ -1,16 +1,16 @@
-# Contributing to RICO-8
+# Contributing to Pixel8
 
 We welcome contribution from everyone in the form of suggestions, bug reports, pull requests, and
 feedback. This document gives some guidance if you are thinking of helping us.
 
 ## Submitting bug reports and feature requests
 
-You can create issues [here](https://github.com/zeenix/rico8/issues/new). When reporting a bug or
+You can create issues [here](https://github.com/zeenix/pixel8/issues/new). When reporting a bug or
 asking for help, please include enough details so that the people helping you can reproduce the
 behavior you are seeing.
 
 When making a feature request, please make it clear what problem you intend to solve with the
-feature, any ideas for how RICO-8 could support solving that problem, any possible alternatives, and
+feature, any ideas for how Pixel8 could support solving that problem, any possible alternatives, and
 any disadvantages.
 
 ## Submitting Pull Requests

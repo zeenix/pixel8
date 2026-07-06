@@ -1,0 +1,26 @@
+[package]
+name = "pixel8-player"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pixel8 cart player over the console runtime: a windowed desktop backend or a static-musl KMS/evdev/ALSA backend for handhelds"
+
+# Pure-Rust KMS/evdev/ALSA backend; no SDL required. Targets musl-linked
+# static binaries for handhelds (ArkOS/ROCKNIX) as well as desktop couch play.
+[features]
+default = ["window"]
+# Static-musl handheld backend: DRM/KMS video, evdev input, raw-ioctl ALSA. No GL, no SDL.
+kms = ["dep:drm", "dep:evdev", "dep:nix", "dep:bytemuck"]
+# Windowed desktop backend: winit + softbuffer CPU present, keyboard input.
+window = ["dep:winit", "dep:softbuffer", "pixel8-runtime/audio"]
+
+[dependencies]
+pixel8-runtime.workspace = true
+anyhow.workspace = true
+evdev = { version = "0.13.2", optional = true }
+nix = { version = "0.31.3", features = ["ioctl", "poll"], optional = true }
+drm = { version = "0.15.0", optional = true }
+bytemuck = { version = "1.25.0", optional = true }
+winit = { workspace = true, optional = true }
+softbuffer = { version = "0.4.8", optional = true }

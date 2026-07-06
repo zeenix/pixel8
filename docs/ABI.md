@@ -1,10 +1,10 @@
-# The RICO-8 WASM ABI
+# The Pixel8 WASM ABI
 
 This is the complete surface between a cart and the console. Carts are
 `wasm32-unknown-unknown` modules; everything below lives in the import
-module **`"rico8"`**. There is intentionally nothing else: no WASI, no
+module **`"pixel8"`**. There is intentionally nothing else: no WASI, no
 filesystem, no network, no host memory access. Game code should use the
-`rico8` SDK crate, which wraps all of this safely — this document is for
+`pixel8` SDK crate, which wraps all of this safely — this document is for
 people working on the console itself, alternate SDKs, or curiosity.
 
 **At this raw ABI, screen-space positions and sizes cross as `i32` pixels; everything discrete
@@ -31,7 +31,7 @@ a clean staircase. Holding two buttons for a 45° heading triggers it whenever
 [`Body`] mover, which owns the trajectory and steps both axes together; the
 exact sub-pixel position stays available for collision.
 
-[`Body`]: ../rico8/src/motion.rs
+[`Body`]: ../pixel8/src/motion.rs
 
 (The ABI boundary itself can't be narrower: WebAssembly function signatures only have
 `i32`/`i64`/`f32`/`f64` — there is no `i8`/`u8`/`i16`. The SDK still narrows its own API to
@@ -42,9 +42,9 @@ can still be drawn off-screen and scrolled in by the camera.)
 
 | export         | signature | called                                  |
 | -------------- | --------- | --------------------------------------- |
-| `rico8_init`   | `() -> ()`| once, after the module is instantiated  |
-| `rico8_update` | `() -> ()`| `rico8_fps` times per second            |
-| `rico8_draw`   | `() -> ()`| after each update                       |
+| `pixel8_init`   | `() -> ()`| once, after the module is instantiated  |
+| `pixel8_update` | `() -> ()`| `pixel8_fps` times per second            |
+| `pixel8_draw`   | `() -> ()`| after each update                       |
 | `memory`       | memory    | read by `print`/`log`/`panic`           |
 
 Each call runs under a fuel budget (~128K instructions; see LIMITS.md).
@@ -55,15 +55,15 @@ cannot hang the console.
 
 | export             | signature   | called                                       |
 | ------------------ | ----------- | -------------------------------------------- |
-| `rico8_fps`        | `() -> u32` | once, after `rico8_init`                     |
-| `rico8_mem_used`   | `() -> u32` | each frame, for the stats overlay            |
+| `pixel8_fps`        | `() -> u32` | once, after `pixel8_init`                     |
+| `pixel8_mem_used`   | `() -> u32` | each frame, for the stats overlay            |
 
-`rico8_fps` reports the cart's logical frame rate. The SDK emits it from
+`pixel8_fps` reports the cart's logical frame rate. The SDK emits it from
 every cart; `30` and `60` are honored, and `60` is the default. A missing
 export, or any other value, also means 60, so a hand-written cart that
 omits it still runs.
 
-`rico8_mem_used` reports the cart's committed-memory high-water in bytes — the
+`pixel8_mem_used` reports the cart's committed-memory high-water in bytes — the
 highest its footprint (shadow-stack reserve + statics + heap) has ever reached.
 The host reads it for the F2 stats overlay. It never decreases (wasm never
 returns pages) and counts freed-but-stranded memory, so it tracks real pressure
@@ -97,7 +97,7 @@ or allocation-free) report 0.
 ### Palette, transparency, and fill patterns
 
 These set persistent draw state that lives for the cart's lifetime (like the
-camera), so set them in `rico8_init` or each frame as needed.
+camera), so set them in `pixel8_init` or each frame as needed.
 
 | function                | signature                                          | notes                                                                                                                          |
 | ----------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
@@ -141,17 +141,17 @@ camera), so set them in `rico8_init` or each frame as needed.
 
 | function   | signature              | notes                                                                                                                    |
 | ---------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `time`     | `() -> f32`            | seconds since init, in `1/fps` steps (see `rico8_fps`)                                                                   |
+| `time`     | `() -> f32`            | seconds since init, in `1/fps` steps (see `pixel8_fps`)                                                                   |
 | `rnd`      | `() -> f32`            | uniform in `[0, 1)` (host RNG)                                                                                           |
 | `seed_rng` | `(seed: u32)`          | reseed the `rnd` sequence for deterministic runs                                                                         |
-| `log`      | `(ptr: u32, len: u32)` | line to the RICO-8 console                                                                                               |
+| `log`      | `(ptr: u32, len: u32)` | line to the Pixel8 console                                                                                               |
 | `panic`    | `(ptr: u32, len: u32)` | record a panic message; the SDK's panic hook calls this right before the trap so the error screen shows the real message |
 
 ### Resources
 
 Read-only meters a cart can watch. CPU is reported for the *last completed frame* (the
 current call isn't finished yet); fps is live. The CPU budget is 128K instructions per
-call (see LIMITS.md). Memory usage is cart-reported via the `rico8_mem_used` guest
+call (see LIMITS.md). Memory usage is cart-reported via the `pixel8_mem_used` guest
 export rather than a host import; see the Guest exports (optional) section above.
 
 | function     | signature   | notes                                                              |

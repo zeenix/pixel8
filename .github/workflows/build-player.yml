@@ -32,19 +32,19 @@ jobs:
 
       - name: Host smoke test
         run: |
-          cargo test -p rico8-player
-          cargo build --release -p rico8-player
-          cargo build --release -p rico8-console --no-default-features
-          ./target/release/rico8 export examples/platformer /tmp/platformer.png
-          ./target/release/rico8-player --smoke 60 /tmp/platformer.png
+          cargo test -p pixel8-player
+          cargo build --release -p pixel8-player
+          cargo build --release -p pixel8-console --no-default-features
+          ./target/release/pixel8 export examples/platformer /tmp/platformer.png
+          ./target/release/pixel8-player --smoke 60 /tmp/platformer.png
 
       - name: Cross-build the static musl ports bundle
         run: ./.github/build-handheld.sh dist/handheld
 
       - name: Add the example carts to the bundle
-        run: ./.github/build-example-carts.sh dist/handheld/rico8/carts
+        run: ./.github/build-example-carts.sh dist/handheld/pixel8/carts
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rico8-handheld
+          name: pixel8-handheld
           path: dist/handheld

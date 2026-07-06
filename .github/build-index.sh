@@ -35,7 +35,7 @@ cat > "$site/index.html" <<EOF
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>rico-8 example carts</title>
+<title>pixel8 example carts</title>
 <style>
   html, body { margin: 0; min-height: 100%; background: #000; }
   body { display: flex; flex-direction: column; align-items: center;
@@ -60,7 +60,7 @@ cat > "$site/index.html" <<EOF
 </style>
 </head>
 <body>
-<h1>rico-8</h1>
+<h1>pixel8</h1>
 <div class="stripe">
   <i style="background:#ff004d"></i><i style="background:#ffa300"></i>
   <i style="background:#ffec27"></i><i style="background:#00e436"></i>
@@ -72,7 +72,7 @@ $cards</div>
 <footer>
   arrows + z/x to play &middot; the cartridge images <em>are</em> the games:<br>
   save a .png and <code>load</code> it in the
-  <a href="https://github.com/zeenix/rico8">rico-8 console</a>
+  <a href="https://github.com/zeenix/pixel8">pixel8 console</a>
 </footer>
 </body>
 </html>

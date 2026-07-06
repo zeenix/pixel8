@@ -3,12 +3,12 @@
 version = 4
 
 [[package]]
-name = "rico8"
+name = "pixel8"
 version = "0.1.0"
 
 [[package]]
 name = "sprite_move"
 version = "0.1.0"
 dependencies = [
- "rico8",
+ "pixel8",
 ]

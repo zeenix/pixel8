@@ -1,7 +1,7 @@
 # Web export
 
 ```text
-rico8 export-web <project-dir|cart.png> <out.html>   # headless
+pixel8 export-web <project-dir|cart.png> <out.html>   # headless
 > export mygame.html                                 # from the console
 ```
 
@@ -17,10 +17,10 @@ The page embeds two base64 payloads:
 
 - **the cart PNG** — the exact same cartridge `export` produces (also
   used as the boot screen image), and
-- **the browser player** — the `rico8-web` crate: `rico8-runtime`
+- **the browser player** — the `pixel8-web` crate: `pixel8-runtime`
   (rasterizer, font, palette, wasmi sandbox, synthesizer, cart codec)
   compiled to `wasm32-unknown-unknown` behind a tiny C-like export
-  surface (`rico8_web_load`, `rico8_web_tick`, `rico8_web_fb_ptr`, …).
+  surface (`pixel8_web_load`, `pixel8_web_tick`, `pixel8_web_fb_ptr`, …).
 
 The page's JavaScript is deliberately as thin as the desktop's wgpu
 layer: decode base64, instantiate the player (it imports nothing),
@@ -38,7 +38,7 @@ same rasterizer, same font, same synth, same error screens.
 
 Black page, cartridge art, "click to play", pixel-perfect integer-ish
 scaling, title underneath. Runtime errors show the same friendly
-RICO-8 error screen as the desktop console, drawn by the player
+Pixel8 error screen as the desktop console, drawn by the player
 itself. Keys match the desktop: arrows + `Z`/`X` (also `C`/`V`,
 `N`/`M`).
 
@@ -59,7 +59,7 @@ button.
   jingles and blips, noticeable for rhythm games.
 - **Source is not included.** Web exports embed a playable cart only;
   ship the `.png` cart alongside if you want people to `import` it.
-- **Exporting needs the RICO-8 source tree** (the player is compiled
+- **Exporting needs the Pixel8 source tree** (the player is compiled
   on first export; afterwards it's cached). Installed binaries can
-  point elsewhere with `RICO8_WEB=/path/to/rico8-web`.
+  point elsewhere with `PIXEL8_WEB=/path/to/pixel8-web`.
 - **No state saving.**

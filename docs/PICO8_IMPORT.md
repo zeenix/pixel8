@@ -1,13 +1,13 @@
 # Importing PICO-8 cartridges
 
-RICO-8 is a homage to [PICO-8](https://www.lexaloffle.com/pico-8.php), and
+Pixel8 is a homage to [PICO-8](https://www.lexaloffle.com/pico-8.php), and
 it shows in the formats: the two consoles share the exact same 16-color
 palette, the same eight chip-tune waveforms and per-step effects, and the
 same 128x128 sprite sheet laid out 16 sprites to a row. That overlap makes a
-PICO-8 cart's **assets** import into a RICO-8 project almost one-to-one.
+PICO-8 cart's **assets** import into a Pixel8 project almost one-to-one.
 
 ```text
-rico8 import-pico8 <cart.p8|cart.p8.png> <dir>
+pixel8 import-pico8 <cart.p8|cart.p8.png> <dir>
 ```
 
 or, from the console prompt:
@@ -16,13 +16,13 @@ or, from the console prompt:
 > import-pico8 celeste.p8 mycart
 ```
 
-This creates `./<dir>` as a normal RICO-8 project (a real Cargo crate),
-fills `assets.rico8` with the imported graphics, and drops you into it ready
+This creates `./<dir>` as a normal Pixel8 project (a real Cargo crate),
+fills `assets.pixel8` with the imported graphics, and drops you into it ready
 to edit.
 
 ## What transfers
 
-| PICO-8 section           | RICO-8 asset      | Notes                                 |
+| PICO-8 section           | Pixel8 asset      | Notes                                 |
 | ------------------------ | ----------------- | ------------------------------------- |
 | `__gfx__` (sprite sheet) | sprite sheet      | 128x128, one palette index per pixel  |
 | `__gff__` (sprite flags) | sprite flags      | all 256 sprites, 8 flags each         |
@@ -46,7 +46,7 @@ on/off pair and cycle the three levelled ones.
 
 ## What does not: the code
 
-Only the assets are imported. PICO-8 games are written in Lua and RICO-8
+Only the assets are imported. PICO-8 games are written in Lua and Pixel8
 games in Rust, so the cart's code is **ignored** entirely — for both formats.
 The new project gets a small stub `src/lib.rs` that builds immediately and
 draws a placeholder; write your game logic in Rust there, against the
@@ -58,7 +58,7 @@ The whole-cart `import-pico8` above makes a *new* project. To pull only some
 assets into an **existing** project, use `--into`:
 
 ```text
-rico8 import-pico8 <cart.p8|.p8.png> --into <project-dir> [--sprites R] [--sfx R] [--music R]
+pixel8 import-pico8 <cart.p8|.p8.png> --into <project-dir> [--sprites R] [--sfx R] [--music R]
 ```
 
 or, from the console prompt with a project loaded:
@@ -92,7 +92,7 @@ Map tiles and the cart label are not part of selective import.
   section is skipped).
 - **`.p8.png`** — the PNG cartridge: the game's 32 KiB ROM is hidden two
   bits at a time in the low bits of each pixel's alpha/red/green/blue
-  channels. RICO-8 decodes the 160x205 image, reassembles the ROM, and reads
+  channels. Pixel8 decodes the 160x205 image, reassembles the ROM, and reads
   it using the fixed PICO-8 memory map (`0x0000` gfx, `0x2000` map, `0x3000`
   flags, `0x3100` music, `0x3200` sfx).
 
@@ -100,7 +100,7 @@ Map tiles and the cart label are not part of selective import.
 
 A PICO-8 map is 128x32 tiles by default; its lower half *optionally* aliases
 the bottom half of the sprite sheet (`0x1000–0x1fff`). A cart uses that memory
-for one or the other, and nothing in the file says which. RICO-8 de-aliases
+for one or the other, and nothing in the file says which. Pixel8 de-aliases
 the two — it has a full 256-sprite sheet **and** a full 128x64 map — so the
 import simply brings the shared region across **both** ways: it fills sprites
 128–255 *and* map rows 32–63 from the same bytes. Keep whichever your cart
@@ -118,15 +118,15 @@ actually used and clear the other in the editor.
 ## Pasting from PICO-8
 
 Besides importing a whole cart, you can copy individual assets out of PICO-8 and paste them
-straight into a RICO-8 editor. In PICO-8, select sprites, a range of SFX, or a music pattern and
-press **Ctrl+C**; switch to the matching RICO-8 editor and press **Ctrl+V**.
+straight into a Pixel8 editor. In PICO-8, select sprites, a range of SFX, or a music pattern and
+press **Ctrl+C**; switch to the matching Pixel8 editor and press **Ctrl+V**.
 
 - **Sprites** (sprite editor) paste as a rectangle with its top-left at the selected sprite.
   Anything past the edge is clipped.
 - **SFX** (SFX editor) overwrite consecutive slots starting at the selected one; a note that
   plays another copied SFX as a custom instrument is repointed to where that SFX lands.
 - **Music patterns** are a special case: PICO-8 copies a pattern as its SFX. Pasted in the
-  music editor, RICO-8 rebuilds the pattern at the selected slot and appends its SFX after the
+  music editor, Pixel8 rebuilds the pattern at the selected slot and appends its SFX after the
   last used SFX slot, repointing the pattern's channels to them — your existing SFX are left
   alone.
 

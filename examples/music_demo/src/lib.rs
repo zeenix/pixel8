@@ -2,7 +2,7 @@
 
 #![no_std]
 
-use rico8::*;
+use pixel8::*;
 
 game!(MusicDemo { music: None, t: 0 });
 

@@ -36,15 +36,15 @@ jobs:
       # Headless export tools only: --no-default-features skips the
       # audio backend, so no ALSA system packages are needed.
       - name: Build the console
-        run: cargo build --release -p rico8-console --no-default-features
+        run: cargo build --release -p pixel8-console --no-default-features
 
       - name: Export and verify the example carts
         run: |
           mkdir -p site
           for ex in sprite_move platformer sfx_demo music_demo; do
-            ./target/release/rico8 export examples/$ex site/$ex.png
-            ./target/release/rico8 verify site/$ex.png
-            ./target/release/rico8 export-web site/$ex.png site/$ex.html
+            ./target/release/pixel8 export examples/$ex site/$ex.png
+            ./target/release/pixel8 verify site/$ex.png
+            ./target/release/pixel8 export-web site/$ex.png site/$ex.html
           done
 
       - name: Build the index page
