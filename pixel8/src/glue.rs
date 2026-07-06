@@ -4,6 +4,7 @@ use crate::{Context, Game, Graphics};
 
 /// Implementation details of the [`game!`](crate::game) macro. Not part
 /// of the public API; do not call directly.
+#[doc(hidden)]
 pub mod __internal {
     use super::*;
     use core::cell::UnsafeCell;
