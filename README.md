@@ -34,8 +34,11 @@ pixel8::game!(MyGame { x: 64, y: 64 });
 
 ## The console
 
+The console is the `pixel8-console` crate; installing it gives you a `pixel8` command:
+
 ```text
-cargo console        # alias for: cargo run --release -p pixel8-console
+cargo install pixel8-console
+pixel8
 ```
 
 You land at the boot console. Type `help`. The workflow is PICO-8's:
@@ -73,23 +76,25 @@ full list.
 Carts also have runtime limits: 128 KiB cart size, 128 KiB RAM, and a 128 K per-frame work budget.
 By default carts are `#![no_std]` with `heapless` for fixed-size collections — that's what
 `pixel8 new` scaffolds and what every game example uses, keeping carts tiny. Full details in
-[docs/LIMITS.md](docs/LIMITS.md).
+[docs/LIMITS.md](https://github.com/zeenix/pixel8/blob/main/docs/LIMITS.md).
 
 ## PNG cartridges
 
 `export` produces a real PNG image — cartridge art, label, title — with the compiled wasm, all
 assets and (by default) the compressed Rust source embedded in a private chunk. Anyone can *see* the
 cart; Pixel8 can *play* it; and if the source is included, `import` turns it back into an editable
-project. See [docs/CART_FORMAT.md](docs/CART_FORMAT.md).
+project. See [docs/CART_FORMAT.md](https://github.com/zeenix/pixel8/blob/main/docs/CART_FORMAT.md).
 
 `export mygame.html` instead produces a single self-contained web page: the cart and the whole
 console runtime (compiled to wasm) embedded in one file you can double-click or host anywhere,
-PICO-8-web style. See [docs/WEB_EXPORT.md](docs/WEB_EXPORT.md).
+PICO-8-web style. See
+[docs/WEB_EXPORT.md](https://github.com/zeenix/pixel8/blob/main/docs/WEB_EXPORT.md).
 
 Carts also run via `pixel8-player`, a pure-Rust player with a console-style cart picker. On the
 desktop it opens a window with keyboard input; on retro handhelds (PowKiddy RGB10S, Anbernic
 RG351/353 and friends on ArkOS/ROCKNIX) it runs as a static-musl KMS/evdev/ALSA binary — copy it
-into the ports folder, drop `.png` carts next to it, play. See [docs/HANDHELD.md](docs/HANDHELD.md).
+into the ports folder, drop `.png` carts next to it, play. See
+[docs/HANDHELD.md](https://github.com/zeenix/pixel8/blob/main/docs/HANDHELD.md).
 
 ## Inspired by PICO-8
 
@@ -108,7 +113,8 @@ pixel8 import-pico8 mygame.p8 mygame      # or mygame.p8.png
 
 The graphics, sprite flags, map, sound effects and music transfer into a new project. Only the
 assets come across — the cart's Lua code is ignored — and the project gets a stub `src/lib.rs` to
-write your game in Rust. See [docs/PICO8_IMPORT.md](docs/PICO8_IMPORT.md).
+write your game in Rust. See
+[docs/PICO8_IMPORT.md](https://github.com/zeenix/pixel8/blob/main/docs/PICO8_IMPORT.md).
 
 ## Projects are real crates
 
@@ -131,33 +137,39 @@ pixel8 verify <cart.png>          run 60 frames headless
 
 Carts execute inside [wasmi](https://github.com/wasmi-labs/wasmi) with no WASI, no filesystem, no
 network and no host memory access. The only imports a cart gets are the ~26 small, C-like functions
-of the Pixel8 ABI (`docs/ABI.md`) — draw, input, audio, map, log. Fuel metering turns infinite loops
-into a friendly error screen instead of a hung console.
+of the Pixel8 ABI ([docs/ABI.md](https://github.com/zeenix/pixel8/blob/main/docs/ABI.md)) — draw,
+input, audio, map, log. Fuel metering turns infinite loops into a friendly error screen instead of a
+hung console.
 
-## Workspace
+## Crates
 
-```text
-pixel8/            the SDK carts depend on (zero dependencies)
-pixel8-console/    the console: winit + wgpu shell, editors, prompt
-                  (the binary it builds is called `pixel8`)
-pixel8-runtime/    framebuffer, font, palette, VM, synth, assets, carts
-pixel8-web/        the browser player: the runtime compiled to wasm
-pixel8-player/     pure-Rust cart player: a desktop window, or static-musl KMS/evdev/ALSA on handhelds
-examples/
-  hello/          the canonical first cart
-  sprite_move/    sprite drawing, flipping, animation
-  platformer/     map collision via sprite flags, coins, sfx
-  map_demo/       map scrolling and layer masks
-  sfx_demo/       a soundboard
-  music_demo/     starting/stopping a song
-docs/
-  ABI.md          the wasm import surface, function by function
-  ARCHITECTURE.md how the pieces fit
-  CART_FORMAT.md  the PNG cartridge format
-  PICO8_IMPORT.md importing PICO-8 .p8 / .p8.png carts
-```
+Pixel8 is a handful of crates. Most people only ever touch the first two — the SDK a cart is written
+against, and the console that builds and runs it.
 
-## Building
+- **[`pixel8`](https://crates.io/crates/pixel8)** — the SDK your cart depends on, and the only crate
+  a game links against. Deliberately zero-dependency and `#![no_std]`-friendly: the `Game` trait,
+  the `Context` (update-time) and `Graphics` (draw-time) handles, the 16-color palette and the
+  `game!` macro that wires it all up. `cargo add pixel8` in a `cdylib` crate and you have a cart.
+- **[`pixel8-console`](https://crates.io/crates/pixel8-console)** — the desktop console and
+  toolchain. `cargo install pixel8-console` gives you the `pixel8` command: the boot prompt, the
+  five editors (code, sprite, map, sfx, music), the build-and-hot-reload loop and every headless
+  subcommand (`new`, `build`, `export`, `extract`, `import-pico8`, `export-web`, `verify`). The
+  crate is `pixel8-console`; the binary it installs is `pixel8`.
+- **[`pixel8-runtime`](https://crates.io/crates/pixel8-runtime)** — the console's engine, as a
+  reusable library: the 128x128 indexed framebuffer and software rasterizer, font and palette, the
+  wasmi VM with ABI linking and fuel metering, the input model, the 4-channel synth, the shared
+  asset model and the PNG cart codec. Depend on it to embed Pixel8 in your own frontend or build
+  tools around carts — the console and both players are thin shells over it.
+- **[`pixel8-player`](https://crates.io/crates/pixel8-player)** — a standalone cart player, no
+  editors. Its default `window` backend opens a desktop window with keyboard input; its `kms`
+  backend is a static-musl KMS/evdev/ALSA binary for retro handhelds. Point it at a folder of `.png`
+  carts and play.
+
+The browser player — `pixel8-runtime` compiled to wasm and wrapped in a small C-like export surface
+— lives in the repo as `pixel8-web` and powers `export mygame.html`. It ships inside exported web
+pages rather than to crates.io.
+
+## Building from source
 
 Requires Rust (with the `wasm32-unknown-unknown` target for building carts) and, on Linux, ALSA
 headers for audio:
@@ -167,7 +179,7 @@ rustup target add wasm32-unknown-unknown
 sudo apt install libasound2-dev        # debian/ubuntu
 sudo dnf install alsa-lib-devel        # fedora
 # (or build silent with `--no-default-features`)
-cargo console
+cargo console                          # alias for: cargo run --release -p pixel8-console
 ```
 
 Try a bundled cart:
