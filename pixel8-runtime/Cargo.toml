@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Pixel8 fantasy console runtime: VM, framebuffer, input, audio, assets, carts"
+readme = "README.md"
 
 [features]
 default = ["audio"]
