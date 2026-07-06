@@ -1,6 +1,6 @@
 # Pixel8
 
-**A PICO-8-like fantasy console where the games are written in Rust.**
+**A tiny fantasy console where the games are written in Rust.**
 
 Pixel8 (pronounced "pixelate") is a tiny, self-contained game console that never existed: a
 128x128 screen, 16 fixed colors, a 4x6 pixel font, four audio channels,
@@ -9,12 +9,6 @@ interpreter would be. You write a little Rust, it compiles to
 WebAssembly, and it runs inside the console's sandbox at a steady
 60 fps (or 30, the cart's choice). Carts are shareable PNG images with
 the game embedded inside.
-
-The programming language is the point: everything else tries to stay as
-close to the feel of [PICO-8](https://www.lexaloffle.com/pico-8.php) as
-is legal and practical. The palette, the constraints, the editor modes,
-the `>` prompt, the charm — those are loving homage. The font, code and
-formats are original.
 
 ```rust
 use pixel8::*;
@@ -105,10 +99,17 @@ handhelds (PowKiddy RGB10S, Anbernic RG351/353 and friends on ArkOS/ROCKNIX)
 it runs as a static-musl KMS/evdev/ALSA binary — copy it into the ports folder,
 drop `.png` carts next to it, play. See [docs/HANDHELD.md](docs/HANDHELD.md).
 
-## Coming from PICO-8
+## Inspired by PICO-8
 
-Pixel8 shares PICO-8's palette, waveforms and sprite layout, so a PICO-8
-cart's assets import almost one-to-one:
+Pixel8 is heavily inspired by [PICO-8](https://www.lexaloffle.com/pico-8.php).
+The palette, the fixed constraints, the editor modes, the `>` prompt and the
+overall charm all come from it. What differs is the whole point of the
+project: a cart is Rust compiled to WebAssembly rather than Lua, the font,
+code and cartridge formats are entirely original, and Pixel8 is free and
+open source (GPL-3.0) rather than a paid product.
+
+That shared heritage — the same palette, waveforms and sprite layout — means a
+PICO-8 cart's assets import almost one-to-one:
 
 ```text
 pixel8 import-pico8 mygame.p8 mygame      # or mygame.p8.png
