@@ -12,24 +12,24 @@ Carts are shareable PNG images with the game embedded inside.
 use pixel8::*;
 
 struct MyGame {
-    x: f32,
-    y: f32,
+    x: i16,
+    y: i16,
 }
 
 impl Game for MyGame {
     fn update(&mut self, ctx: &mut Context) {
         if ctx.is_button_down(Button::Right) {
-            self.x += 1.0;
+            self.x += 1;
         }
     }
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::BLACK);
-        gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::WHITE);
+        gfx.rect_fill(self.x, self.y, 8, 8, Color::WHITE).unwrap();
     }
 }
 
-pixel8::game!(MyGame { x: 64.0, y: 64.0 });
+pixel8::game!(MyGame { x: 64, y: 64 });
 ```
 
 ## The console
