@@ -17,7 +17,7 @@ or, from the console prompt:
 ```
 
 This creates `./<dir>` as a normal Pixel8 project (a real Cargo crate),
-fills `assets.pixel8` with the imported graphics, and drops you into it ready
+fills `assets.pixel8.json` with the imported graphics, and drops you into it ready
 to edit.
 
 ## What transfers

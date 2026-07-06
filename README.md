@@ -120,8 +120,9 @@ write your game in Rust. See
 ## Projects are real crates
 
 A Pixel8 project is an ordinary Cargo crate that builds a `cdylib` for `wasm32-unknown-unknown`,
-plus an `assets.pixel8` bundle. The integrated editor is the charming way to work, but `$EDITOR` +
-`cargo build` works exactly the same — the console hot-reloads the wasm when it changes on disk.
+plus an `assets.pixel8.json` bundle. The integrated editor is the charming way to work, but
+`$EDITOR` + `cargo build` works exactly the same — the console hot-reloads the wasm when it
+changes on disk.
 Headless commands support scripts and CI:
 
 ```text

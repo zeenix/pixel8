@@ -430,7 +430,7 @@ pub fn parse_bytes(bytes: &[u8]) -> Result<Assets> {
 ///
 /// The project's crate name comes from the target directory (like `new`);
 /// the cart title comes from the source file. Imported assets are written to
-/// `assets.pixel8` and a stub `src/lib.rs` is scaffolded.
+/// `assets.pixel8.json` and a stub `src/lib.rs` is scaffolded.
 pub fn import_project(src: &Path, dir: &Path) -> Result<Project> {
     let assets = parse_file(src)?;
 
