@@ -191,8 +191,3 @@ cargo console -- examples/platformer
 
 then type `run`.
 
-## Status
-
-All stages of the original plan are in place: console, VM + ABI, all five editors, audio runtime,
-PNG carts, web export, examples, docs and tests. Expect rough edges and enjoy them — it's a fantasy
-console, not an IDE.
