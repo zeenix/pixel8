@@ -1,0 +1,25 @@
+[package]
+name = "pixel8-console"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pixel8: a PICO-8-like fantasy console for Rust games"
+
+# The package is pixel8-console; the command you type is `pixel8`.
+[[bin]]
+name = "pixel8"
+path = "src/main.rs"
+
+[features]
+default = ["audio"]
+# Disable for machines without audio (e.g. no ALSA headers on Linux).
+audio = ["pixel8-runtime/audio"]
+
+[dependencies]
+pixel8-runtime.workspace = true
+anyhow.workspace = true
+winit.workspace = true
+wgpu.workspace = true
+pollster.workspace = true
+arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }

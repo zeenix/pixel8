@@ -1,6 +1,6 @@
 # Reproducing the cart limits
 
-This is a hands-on guide for deliberately tripping each of RICO-8's three cart
+This is a hands-on guide for deliberately tripping each of Pixel8's three cart
 limits and seeing exactly what shows up, in every UI that can observe it. It is
 meant for developers and testers verifying that the limits actually fire. For
 the author-facing explanation of *why* the limits exist, see
@@ -15,7 +15,7 @@ All three limits are built around one number: **128 K**.
 | per-frame work | 128 K   | "ran too long (infinite loop?)" error screen  | no    | yes |
 
 "build" limits are observed where carts are *compiled and packed* — the desktop
-console and the headless CLI (both are the `rico8` binary). "run" limits are
+console and the headless CLI (both are the `pixel8` binary). "run" limits are
 observed where carts are *played* — the desktop console, the web player, and
 the handheld player.
 
@@ -94,7 +94,7 @@ The header is red and the message lines are orange. Press `Esc` / type as usual
 to carry on.
 
 **Web player.** The canvas switches to the shared error screen: a red top bar
-reading `rico-8`, the heading `** runtime error **`, and the message:
+reading `pixel8`, the heading `** runtime error **`, and the message:
 
 ```text
 runtime error in update:
@@ -108,7 +108,7 @@ page and reboots the cart.
 **Handheld player.** Same shared error screen (red bar, `** runtime error **`, the
 `runtime error in update:` text), with a `hold o+x to exit` hint at the bottom;
 hold both action buttons to return to the picker. The same line is also written
-to stderr as `rico8-player: runtime error: …`.
+to stderr as `pixel8-player: runtime error: …`.
 
 ---
 
@@ -156,7 +156,7 @@ update() ran out of memory
 with the `press f5 to restart` hint.
 
 **Handheld player.** The same shared error screen with the `hold o+x to exit`
-hint, and `rico8-player: runtime error: …` on stderr.
+hint, and `pixel8-player: runtime error: …` on stderr.
 
 ---
 
@@ -176,27 +176,27 @@ here uses `regex`, which compiles to a large wasm module.
 
 This was run end to end and produced the messages quoted below.
 
-The `rico8` command below is the console binary. In a checkout there is no
-installed `rico8` yet, so either build/install it once or run it via `cargo run
---release -p rico8-console -- <args>` (e.g. `cargo run --release -p rico8-console
--- new bloat`); the bare `rico8 …` commands are shorthand for that.
+The `pixel8` command below is the console binary. In a checkout there is no
+installed `pixel8` yet, so either build/install it once or run it via `cargo run
+--release -p pixel8-console -- <args>` (e.g. `cargo run --release -p pixel8-console
+-- new bloat`); the bare `pixel8 …` commands are shorthand for that.
 
 1. Create a scratch project:
 
    ```text
-   rico8 new bloat
+   pixel8 new bloat
    ```
 
-2. Edit `bloat/Cargo.toml` to depend on `rico8` with its default features (so
+2. Edit `bloat/Cargo.toml` to depend on `pixel8` with its default features (so
    the cart has a heap) and add a heavy dependency:
 
    ```toml
    [dependencies]
-   rico8 = { path = "…/rico8" }
+   pixel8 = { path = "…/pixel8" }
    regex = "1"
    ```
 
-   (Drop the `default-features = false` from the scaffolded `rico8` line; the
+   (Drop the `default-features = false` from the scaffolded `pixel8` line; the
    default-features build brings in a heap, which `regex` needs.)
 
 3. Edit `bloat/src/lib.rs` to actually *use* the dependency, so it is not
@@ -206,7 +206,7 @@ installed `rico8` yet, so either build/install it once or run it via `cargo run
 4. Build it:
 
    ```text
-   rico8 build bloat
+   pixel8 build bloat
    ```
 
    The build succeeds but warns (this is the exact format from the builder;
@@ -217,13 +217,13 @@ installed `rico8` yet, so either build/install it once or run it via `cargo run
    ```
 
    In the desktop console the same warning appears in orange in the scrollback
-   after `build ok`. From the headless CLI (`rico8 build …`) it is printed to
+   after `build ok`. From the headless CLI (`pixel8 build …`) it is printed to
    stderr.
 
 5. Try to export it:
 
    ```text
-   rico8 export bloat bloat.png
+   pixel8 export bloat bloat.png
    ```
 
    The export is rejected. The CLI exits non-zero and prints to stderr:
@@ -237,7 +237,7 @@ installed `rico8` yet, so either build/install it once or run it via `cargo run
    `cart wasm is … bytes; the limit is 131072 (128K)` text is shown in the
    scrollback and no cart file is produced.
 
-In the run above, the baseline `rico8 new` project compiled to about 1 KiB of
+In the run above, the baseline `pixel8 new` project compiled to about 1 KiB of
 wasm, and adding `regex` took it to roughly 992 KiB — comfortably over the
 128 KiB limit — so the warning and the export rejection both fired.
 
@@ -254,7 +254,7 @@ From the repo root, boot the console with the project loaded, then build and run
 it from the console prompt:
 
 ```text
-cargo run --release -p rico8-console -- examples/stress
+cargo run --release -p pixel8-console -- examples/stress
 ```
 
 At the `>` prompt type `run` (compiles to wasm and runs; `Esc` returns to the
@@ -268,7 +268,7 @@ The web player runs a packed cart, so first export `examples/stress` to a
 self-contained HTML page, then open it in a browser:
 
 ```text
-cargo run --release -p rico8-console -- export-web examples/stress stress.html
+cargo run --release -p pixel8-console -- export-web examples/stress stress.html
 ```
 
 Open `stress.html` and click to boot. Keyboard mapping matches the console
@@ -281,8 +281,8 @@ The handheld player also runs a packed cart. Export `examples/stress` to a PNG
 cart first, then point the player at it:
 
 ```text
-cargo run --release -p rico8-console -- export examples/stress stress.png
-cargo run --release -p rico8-player -- stress.png
+cargo run --release -p pixel8-console -- export examples/stress stress.png
+cargo run --release -p pixel8-player -- stress.png
 ```
 
 On the device the d-pad moves and the two action buttons are O / X; with a

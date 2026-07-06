@@ -1,4 +1,4 @@
-use rico8::{Body, Context, Graphics};
+use pixel8::{Body, Context, Graphics};
 
 use crate::{
     constants::{BADIE_ALT_SPRITE, BADIE_END_X, BADIE_SPEED, BADIE_SPRITE, BADIE_START_X, BADIE_Y},

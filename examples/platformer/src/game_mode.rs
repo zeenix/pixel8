@@ -1,4 +1,4 @@
-use rico8::{Context, PlayingMusic};
+use pixel8::{Context, PlayingMusic};
 
 use crate::constants::GAME_TIMEOUT;
 

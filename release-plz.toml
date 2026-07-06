@@ -128,9 +128,9 @@ commit_parsers = [
     { message = ".*", group = "Other" },
 ]
 
-# rico8-web is a cdylib wasm artifact (built with wasm tooling), not a
+# pixel8-web is a cdylib wasm artifact (built with wasm tooling), not a
 # crates.io library — it carries `publish = false`. Skip it entirely so it
 # gets no tag, GitHub release, or changelog.
 [[package]]
-name = "rico8-web"
+name = "pixel8-web"
 release = false

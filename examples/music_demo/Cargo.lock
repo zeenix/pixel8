@@ -6,9 +6,9 @@ version = 4
 name = "music_demo"
 version = "0.1.0"
 dependencies = [
- "rico8",
+ "pixel8",
 ]
 
 [[package]]
-name = "rico8"
+name = "pixel8"
 version = "0.1.0"

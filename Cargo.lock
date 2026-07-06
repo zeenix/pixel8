@@ -1657,6 +1657,58 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
+name = "pixel8"
+version = "0.1.0"
+
+[[package]]
+name = "pixel8-console"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "pixel8-runtime",
+ "pollster",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "pixel8-player"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "drm 0.15.0",
+ "evdev",
+ "nix 0.31.3",
+ "pixel8-runtime",
+ "softbuffer",
+ "winit",
+]
+
+[[package]]
+name = "pixel8-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cpal",
+ "crc32fast",
+ "miniz_oxide",
+ "postcard",
+ "serde",
+ "wasmi",
+ "wat",
+]
+
+[[package]]
+name = "pixel8-web"
+version = "0.1.0"
+dependencies = [
+ "pixel8-runtime",
+ "wat",
+]
+
+[[package]]
 name = "pkg-config"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1831,58 +1883,6 @@ name = "renderdoc-sys"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
-
-[[package]]
-name = "rico8"
-version = "0.1.0"
-
-[[package]]
-name = "rico8-console"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arboard",
- "pollster",
- "rico8-runtime",
- "wgpu",
- "winit",
-]
-
-[[package]]
-name = "rico8-player"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "drm 0.15.0",
- "evdev",
- "nix 0.31.3",
- "rico8-runtime",
- "softbuffer",
- "winit",
-]
-
-[[package]]
-name = "rico8-runtime"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "cpal",
- "crc32fast",
- "miniz_oxide",
- "postcard",
- "serde",
- "wasmi",
- "wat",
-]
-
-[[package]]
-name = "rico8-web"
-version = "0.1.0"
-dependencies = [
- "rico8-runtime",
- "wat",
-]
 
 [[package]]
 name = "rustc-hash"

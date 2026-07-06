@@ -14,7 +14,7 @@
 //! Every step is deterministic: heap blocks are exact 4 KiB boxes (no amortized
 //! over-allocation), each stack frame is a fixed 1 KiB, and CPU work is a fixed
 //! count — so the cap trips at a predictable level.
-use rico8::*;
+use pixel8::*;
 
 game!(Stress {
     heap: Vec::new(),

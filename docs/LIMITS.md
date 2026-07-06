@@ -1,8 +1,8 @@
 # Cart limits
 
-RICO-8 is a fantasy console with deliberate constraints — that's the point.
-Like PICO-8 before it, every limit is part of what makes a RICO-8 cart a
-*RICO-8 cart*. All three runtime limits are built around one easy number:
+Pixel8 is a fantasy console with deliberate constraints — that's the point.
+Like PICO-8 before it, every limit is part of what makes a Pixel8 cart a
+*Pixel8 cart*. All three runtime limits are built around one easy number:
 **128 K**. If you keep that number in mind, you will never be surprised.
 
 | what            | limit   | what happens when you exceed it              |
@@ -56,7 +56,7 @@ not carefully written games.
 
 ## Staying small — `#![no_std]` + `heapless`
 
-This is the normal way RICO-8 carts are written. `rico8 new` scaffolds a
+This is the normal way Pixel8 carts are written. `pixel8 new` scaffolds a
 `#![no_std]` cart, and every game example ships this way. There is no heap and no
 allocator overhead — memory is fully static — which keeps carts tiny: the
 examples weigh in at roughly 1–5 KiB.
@@ -66,7 +66,7 @@ A `no_std` cart looks like this:
 ```toml
 # Cargo.toml
 [dependencies]
-rico8 = { path = "../../rico8", default-features = false }
+pixel8 = { path = "../../pixel8", default-features = false }
 
 [profile.release]
 opt-level = "s"
@@ -77,7 +77,7 @@ panic = "abort"
 ```rust
 // src/lib.rs
 #![no_std]
-use rico8::*;
+use pixel8::*;
 
 struct MyGame {
     x: i16,
@@ -93,7 +93,7 @@ impl Game for MyGame {
     }
 }
 
-rico8::game!(MyGame { x: 64, y: 64 });
+pixel8::game!(MyGame { x: 64, y: 64 });
 ```
 
 ### Fixed-size collections with `heapless`
@@ -101,7 +101,7 @@ rico8::game!(MyGame { x: 64, y: 64 });
 When you need a vector, string, or map, reach for [`heapless`]. Its
 collections are bounded at compile time (`Vec<T, N>`, `String<N>`,
 `FnvIndexMap<K, V, N>`, …), so there is nothing to allocate and nothing to
-fail at runtime due to memory pressure. Add it alongside `rico8`:
+fail at runtime due to memory pressure. Add it alongside `pixel8`:
 
 ```toml
 heapless = "0.9"
@@ -141,11 +141,11 @@ it.
 ### When you really need a heap
 
 A cart that genuinely needs a growable heap can opt into `std` by depending on
-`rico8` with its default features — just drop `default-features = false`:
+`pixel8` with its default features — just drop `default-features = false`:
 
 ```toml
 [dependencies]
-rico8 = { path = "../../rico8" }
+pixel8 = { path = "../../pixel8" }
 ```
 
 This brings in a heap allocator and lets you use ordinary `Vec`, `String`, and

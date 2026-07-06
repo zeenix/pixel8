@@ -1,0 +1,20 @@
+[package]
+name = "pixel8-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pixel8 browser player: the console runtime compiled to wasm, wrapped in a tiny C-like export surface"
+# A cdylib wasm artifact built with wasm tooling, not a crates.io library.
+publish = false
+
+# cdylib for the browser, rlib so the player logic is unit-testable on
+# the host like everything else.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pixel8-runtime.workspace = true
+
+[dev-dependencies]
+wat = "1"

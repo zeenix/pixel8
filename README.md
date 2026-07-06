@@ -1,8 +1,8 @@
-# RICO-8
+# Pixel8
 
-**A PICO-8-like fantasy console where the games are written in Rust.**
+**A tiny fantasy console where the games are written in Rust.**
 
-RICO-8 is a tiny, self-contained game console that never existed: a
+Pixel8 (pronounced "pixelate") is a tiny, self-contained game console that never existed: a
 128x128 screen, 16 fixed colors, a 4x6 pixel font, four audio channels,
 256 sprites, a 128x64 tile map — and a Rust compiler where the Lua
 interpreter would be. You write a little Rust, it compiles to
@@ -10,14 +10,8 @@ WebAssembly, and it runs inside the console's sandbox at a steady
 60 fps (or 30, the cart's choice). Carts are shareable PNG images with
 the game embedded inside.
 
-The programming language is the point: everything else tries to stay as
-close to the feel of [PICO-8](https://www.lexaloffle.com/pico-8.php) as
-is legal and practical. The palette, the constraints, the editor modes,
-the `>` prompt, the charm — those are loving homage. The font, code and
-formats are original.
-
 ```rust
-use rico8::*;
+use pixel8::*;
 
 struct MyGame {
     x: f32,
@@ -37,13 +31,13 @@ impl Game for MyGame {
     }
 }
 
-rico8::game!(MyGame { x: 64.0, y: 64.0 });
+pixel8::game!(MyGame { x: 64.0, y: 64.0 });
 ```
 
 ## The console
 
 ```text
-cargo console        # alias for: cargo run --release -p rico8-console
+cargo console        # alias for: cargo run --release -p pixel8-console
 ```
 
 You land at the boot console. Type `help`. The workflow is PICO-8's:
@@ -82,7 +76,7 @@ label. Type `keys` in the console for the full list.
 
 Carts also have runtime limits: 128 KiB cart size, 128 KiB RAM, and a 128 K
 per-frame work budget. By default carts are `#![no_std]` with `heapless` for
-fixed-size collections — that's what `rico8 new` scaffolds and what every
+fixed-size collections — that's what `pixel8 new` scaffolds and what every
 game example uses, keeping carts tiny. Full details in
 [docs/LIMITS.md](docs/LIMITS.md).
 
@@ -90,7 +84,7 @@ game example uses, keeping carts tiny. Full details in
 
 `export` produces a real PNG image — cartridge art, label, title — with
 the compiled wasm, all assets and (by default) the compressed Rust
-source embedded in a private chunk. Anyone can *see* the cart; RICO-8
+source embedded in a private chunk. Anyone can *see* the cart; Pixel8
 can *play* it; and if the source is included, `import` turns it back
 into an editable project. See [docs/CART_FORMAT.md](docs/CART_FORMAT.md).
 
@@ -99,19 +93,26 @@ the cart and the whole console runtime (compiled to wasm) embedded in
 one file you can double-click or host anywhere, PICO-8-web style. See
 [docs/WEB_EXPORT.md](docs/WEB_EXPORT.md).
 
-Carts also run via `rico8-player`, a pure-Rust player with a console-style
+Carts also run via `pixel8-player`, a pure-Rust player with a console-style
 cart picker. On the desktop it opens a window with keyboard input; on retro
 handhelds (PowKiddy RGB10S, Anbernic RG351/353 and friends on ArkOS/ROCKNIX)
 it runs as a static-musl KMS/evdev/ALSA binary — copy it into the ports folder,
 drop `.png` carts next to it, play. See [docs/HANDHELD.md](docs/HANDHELD.md).
 
-## Coming from PICO-8
+## Inspired by PICO-8
 
-RICO-8 shares PICO-8's palette, waveforms and sprite layout, so a PICO-8
-cart's assets import almost one-to-one:
+Pixel8 is heavily inspired by [PICO-8](https://www.lexaloffle.com/pico-8.php).
+The palette, the fixed constraints, the editor modes, the `>` prompt and the
+overall charm all come from it. What differs is the whole point of the
+project: a cart is Rust compiled to WebAssembly rather than Lua, the font,
+code and cartridge formats are entirely original, and Pixel8 is free and
+open source (GPL-3.0) rather than a paid product.
+
+That shared heritage — the same palette, waveforms and sprite layout — means a
+PICO-8 cart's assets import almost one-to-one:
 
 ```text
-rico8 import-pico8 mygame.p8 mygame      # or mygame.p8.png
+pixel8 import-pico8 mygame.p8 mygame      # or mygame.p8.png
 ```
 
 The graphics, sprite flags, map, sound effects and music transfer into a new
@@ -121,39 +122,39 @@ the project gets a stub `src/lib.rs` to write your game in Rust. See
 
 ## Projects are real crates
 
-A RICO-8 project is an ordinary Cargo crate that builds a `cdylib` for
-`wasm32-unknown-unknown`, plus an `assets.rico8` bundle. The integrated
+A Pixel8 project is an ordinary Cargo crate that builds a `cdylib` for
+`wasm32-unknown-unknown`, plus an `assets.pixel8` bundle. The integrated
 editor is the charming way to work, but `$EDITOR` + `cargo build` works
 exactly the same — the console hot-reloads the wasm when it changes on
 disk. Headless commands support scripts and CI:
 
 ```text
-rico8 new <dir>                  create a project
-rico8 build <dir>                compile it to wasm
-rico8 export <dir> <out.png>     build + write a png cart
-rico8 extract <cart.png> <dir>   editable cart -> project
-rico8 import-pico8 <c> <dir>     pico-8 cart (.p8/.p8.png) -> project
-rico8 export-web <dir> <o.html>  one playable web page
-rico8 verify <cart.png>          run 60 frames headless
+pixel8 new <dir>                  create a project
+pixel8 build <dir>                compile it to wasm
+pixel8 export <dir> <out.png>     build + write a png cart
+pixel8 extract <cart.png> <dir>   editable cart -> project
+pixel8 import-pico8 <c> <dir>     pico-8 cart (.p8/.p8.png) -> project
+pixel8 export-web <dir> <o.html>  one playable web page
+pixel8 verify <cart.png>          run 60 frames headless
 ```
 
 ## The sandbox
 
 Carts execute inside [wasmi](https://github.com/wasmi-labs/wasmi) with
 no WASI, no filesystem, no network and no host memory access. The only
-imports a cart gets are the ~26 small, C-like functions of the RICO-8
+imports a cart gets are the ~26 small, C-like functions of the Pixel8
 ABI (`docs/ABI.md`) — draw, input, audio, map, log. Fuel metering turns
 infinite loops into a friendly error screen instead of a hung console.
 
 ## Workspace
 
 ```text
-rico8/            the SDK carts depend on (zero dependencies)
-rico8-console/    the console: winit + wgpu shell, editors, prompt
-                  (the binary it builds is called `rico8`)
-rico8-runtime/    framebuffer, font, palette, VM, synth, assets, carts
-rico8-web/        the browser player: the runtime compiled to wasm
-rico8-player/     pure-Rust cart player: a desktop window, or static-musl KMS/evdev/ALSA on handhelds
+pixel8/            the SDK carts depend on (zero dependencies)
+pixel8-console/    the console: winit + wgpu shell, editors, prompt
+                  (the binary it builds is called `pixel8`)
+pixel8-runtime/    framebuffer, font, palette, VM, synth, assets, carts
+pixel8-web/        the browser player: the runtime compiled to wasm
+pixel8-player/     pure-Rust cart player: a desktop window, or static-musl KMS/evdev/ALSA on handhelds
 examples/
   hello/          the canonical first cart
   sprite_move/    sprite drawing, flipping, animation

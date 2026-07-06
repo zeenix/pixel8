@@ -23,7 +23,7 @@ mod hero;
 mod taken;
 
 use heapless::Vec;
-use rico8::*;
+use pixel8::*;
 
 use crate::{
     badie::Badie,
