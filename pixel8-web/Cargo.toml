@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Pixel8 browser player: the console runtime compiled to wasm, wrapped in a tiny C-like export surface"
+readme = "README.md"
 # A cdylib wasm artifact built with wasm tooling, not a crates.io library.
 publish = false
 

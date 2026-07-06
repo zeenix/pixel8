@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Pixel8 cart player over the console runtime: a windowed desktop backend or a static-musl KMS/evdev/ALSA backend for handhelds"
+readme = "README.md"
 
 # Pure-Rust KMS/evdev/ALSA backend; no SDL required. Targets musl-linked
 # static binaries for handhelds (ArkOS/ROCKNIX) as well as desktop couch play.

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Pixel8 fantasy console SDK: write carts in Rust, compile to wasm32-unknown-unknown"
+readme = "README.md"
 
 [features]
 default = ["std"]

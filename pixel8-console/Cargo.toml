@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Pixel8: a PICO-8-like fantasy console for Rust games"
+readme = "README.md"
 
 # The package is pixel8-console; the command you type is `pixel8`.
 [[bin]]
