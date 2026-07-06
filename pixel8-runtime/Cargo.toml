@@ -14,7 +14,6 @@ audio = ["dep:cpal"]
 [dependencies]
 anyhow.workspace = true
 serde.workspace = true
-postcard.workspace = true
 wasmi.workspace = true
 crc32fast.workspace = true
 miniz_oxide.workspace = true
