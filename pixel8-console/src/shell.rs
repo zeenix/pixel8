@@ -121,7 +121,7 @@ impl ProjectWatch {
         let assets_baseline = encode_assets(&p.assets).unwrap_or_default();
         Self {
             code: FileWatch::new(p.dir.join("src/lib.rs"), p.code.clone().into_bytes()),
-            assets: FileWatch::new(p.dir.join("assets.pixel8"), assets_baseline),
+            assets: FileWatch::new(p.dir.join("assets.pixel8.json"), assets_baseline),
             source_tree: SourceTreeWatch::new(&p.dir),
         }
     }
@@ -1276,7 +1276,7 @@ impl Shell {
     }
 
     /// Re-baseline the assets watcher to the current in-memory encoding. Used
-    /// when an external `assets.pixel8` is unreadable, so we neither flush over
+    /// when an external `assets.pixel8.json` is unreadable, so we neither flush over
     /// it nor keep re-detecting it.
     fn resync_assets_watcher(&mut self) {
         if let (Loaded::Project(p), Some(w)) = (&self.loaded, &mut self.project_watch) {
@@ -1768,11 +1768,11 @@ impl Shell {
                 // Malformed disk file: re-sync so we do not loop on it.
                 Err(_) => {
                     self.resync_assets_watcher();
-                    self.say("assets.pixel8 on disk is unreadable", col::ORANGE);
+                    self.say("assets.pixel8.json on disk is unreadable", col::ORANGE);
                 }
             },
             FileChange::Conflict => {
-                self.say("assets.pixel8 changed on disk;", col::ORANGE);
+                self.say("assets.pixel8.json changed on disk;", col::ORANGE);
                 self.say("You have unsaved edits", col::ORANGE);
             }
             FileChange::None => {}

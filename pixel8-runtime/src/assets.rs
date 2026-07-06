@@ -44,8 +44,10 @@ pub struct MusicId(pub u8);
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpriteSheet {
     /// One palette index per pixel, row-major, `SHEET_W * SHEET_H` long.
+    #[serde(with = "crate::wire::pixel_rows")]
     pub pixels: Vec<u8>,
     /// Eight user flags per sprite, used for map layers and game logic.
+    #[serde(with = "crate::wire::hex_string")]
     pub flags: Vec<u8>,
 }
 
@@ -103,6 +105,7 @@ impl SpriteSheet {
 /// 128x64 tile map; each cell holds a sprite number (0 = empty).
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MapData {
+    #[serde(with = "crate::wire::tile_rows")]
     pub tiles: Vec<u8>,
 }
 
@@ -191,6 +194,7 @@ impl SfxEffect {
 /// One step of an SFX: pitch (0..64, where 33 = A-4 = 440 Hz), waveform,
 /// volume (0..8, 0 = silent) and effect.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(into = "[u8; 4]", from = "[u8; 4]")]
 pub struct Note {
     pub pitch: u8,
     /// Timbre, packed like PICO-8's SFX waveform nibble: bits 0-2 are the
@@ -219,6 +223,23 @@ impl Note {
     /// instrument; `None` when it uses a built-in waveform.
     pub fn instrument(&self) -> Option<u8> {
         (self.wave & NOTE_CUSTOM_FLAG != 0).then_some(self.wave & 7)
+    }
+}
+
+impl From<Note> for [u8; 4] {
+    fn from(n: Note) -> Self {
+        [n.pitch, n.wave, n.volume, n.effect]
+    }
+}
+
+impl From<[u8; 4]> for Note {
+    fn from([pitch, wave, volume, effect]: [u8; 4]) -> Self {
+        Self {
+            pitch,
+            wave,
+            volume,
+            effect,
+        }
     }
 }
 
@@ -372,6 +393,7 @@ pub struct Assets {
     pub sfx: Vec<Sfx>,
     pub music: Vec<MusicPattern>,
     /// Optional 128x128 indexed-color label image (cart screenshot).
+    #[serde(with = "crate::wire::pixel_rows_opt", default)]
     pub label: Option<Vec<u8>>,
 }
 
@@ -390,7 +412,7 @@ impl Default for Assets {
 
 /// Check that a bundle carries exactly the fixed-size collections Pixel8
 /// requires. The editors only ever build correctly-sized bundles, but a
-/// corrupted or hand-edited `assets.pixel8` (or cart) can deserialize with
+/// corrupted or hand-edited `assets.pixel8.json` (or cart) can deserialize with
 /// mismatched lengths; running such a bundle would panic the renderer on
 /// an out-of-bounds sprite, map or label read. Every loader validates here
 /// so a bad bundle fails with a clear message instead of crashing.
@@ -441,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn assets_postcard_roundtrip() {
+    fn assets_json_roundtrip() {
         let mut a = Assets::default();
         a.meta.name = "test cart".into();
         a.sprites.set(3, 4, 9);
@@ -455,8 +477,8 @@ mod tests {
         };
         a.music[0].channels[0] = Some(0);
 
-        let bytes = postcard::to_allocvec(&a).unwrap();
-        let b: Assets = postcard::from_bytes(&bytes).unwrap();
+        let bytes = serde_json::to_vec(&a).unwrap();
+        let b: Assets = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(b.meta.name, "test cart");
         assert_eq!(b.sprites.get(3, 4), 9);
         assert_eq!(b.sprites.flags(1), 0b100);
@@ -516,8 +538,8 @@ mod tests {
             samples: [3; SFX_LEN],
             bass: true,
         });
-        let bytes = postcard::to_allocvec(&a).unwrap();
-        let b: Assets = postcard::from_bytes(&bytes).unwrap();
+        let bytes = serde_json::to_vec(&a).unwrap();
+        let b: Assets = serde_json::from_slice(&bytes).unwrap();
         let w = b.sfx[0].custom_wave.as_ref().expect("wave kept");
         assert_eq!(w.samples[0], 3);
         assert!(w.bass);
