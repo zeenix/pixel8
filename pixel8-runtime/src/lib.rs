@@ -22,3 +22,4 @@ pub mod pico8;
 pub mod project;
 pub mod ui;
 pub mod vm;
+mod wire;
