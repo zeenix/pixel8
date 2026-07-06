@@ -74,8 +74,9 @@ full list.
 | cart       | one PNG file                          |
 
 Carts also have runtime limits: 128 KiB cart size, 128 KiB RAM, and a 128 K per-frame work budget.
-By default carts are `#![no_std]` with `heapless` for fixed-size collections — that's what
-`pixel8 new` scaffolds and what every game example uses, keeping carts tiny. Full details in
+By default a cart is `#![no_std]` and depends only on the `pixel8` SDK — that is what `pixel8 new`
+scaffolds, and it keeps carts tiny. When one needs a growable vector, string or map, it can pull in
+[`heapless`](https://docs.rs/heapless) for fixed-size collections. Full details in
 [docs/LIMITS.md](https://github.com/zeenix/pixel8/blob/main/docs/LIMITS.md).
 
 ## PNG cartridges
