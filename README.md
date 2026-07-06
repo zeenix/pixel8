@@ -2,13 +2,11 @@
 
 **A tiny fantasy console where the games are written in Rust.**
 
-Pixel8 (pronounced "pixelate") is a tiny, self-contained game console that never existed: a
-128x128 screen, 16 fixed colors, a 4x6 pixel font, four audio channels,
-256 sprites, a 128x64 tile map — and a Rust compiler where the Lua
-interpreter would be. You write a little Rust, it compiles to
-WebAssembly, and it runs inside the console's sandbox at a steady
-60 fps (or 30, the cart's choice). Carts are shareable PNG images with
-the game embedded inside.
+Pixel8 (pronounced "pixelate") is a tiny, self-contained game console that never existed: a 128x128
+screen, 16 fixed colors, a 4x6 pixel font, four audio channels, 256 sprites, a 128x64 tile map — and
+a Rust compiler where the Lua interpreter would be. You write a little Rust, it compiles to
+WebAssembly, and it runs inside the console's sandbox at a steady 60 fps (or 30, the cart's choice).
+Carts are shareable PNG images with the game embedded inside.
 
 ```rust
 use pixel8::*;
@@ -50,17 +48,15 @@ You land at the boot console. Type `help`. The workflow is PICO-8's:
 > load mygame.png     load a cart back
 ```
 
-`Esc` flips between the console and the editors; the tab icons (or
-`Alt+←/→`) switch between **code**, **sprite**, **map**, **sfx** and
-**music** editors. All UI is drawn by the console itself on the same
-128x128 screen the games use — there are no native widgets anywhere.
+`Esc` flips between the console and the editors; the tab icons (or `Alt+←/→`) switch between
+**code**, **sprite**, **map**, **sfx** and **music** editors. All UI is drawn by the console itself
+on the same 128x128 screen the games use — there are no native widgets anywhere.
 
-Games are played with the arrow keys plus `Z`/`X` (also `C`/`V`,
-`N`/`M`). `Ctrl+R` rebuilds and runs from anywhere; `Ctrl+S` saves and
-kicks off a background build, flashing `saved` / `building...` /
-`build ok` in the editor's bottom bar (compile errors land in the
-console). `F6` while a game runs captures the screen as the cartridge
-label. Type `keys` in the console for the full list.
+Games are played with the arrow keys plus `Z`/`X` (also `C`/`V`, `N`/`M`). `Ctrl+R` rebuilds and
+runs from anywhere; `Ctrl+S` saves and kicks off a background build, flashing `saved` /
+`building...` / `build ok` in the editor's bottom bar (compile errors land in the console). `F6`
+while a game runs captures the screen as the cartridge label. Type `keys` in the console for the
+full list.
 
 ### Constraints (they are the point)
 
@@ -74,59 +70,52 @@ label. Type `keys` in the console for the full list.
 | framerate  | 60 fps (or 30, the cart's choice)     |
 | cart       | one PNG file                          |
 
-Carts also have runtime limits: 128 KiB cart size, 128 KiB RAM, and a 128 K
-per-frame work budget. By default carts are `#![no_std]` with `heapless` for
-fixed-size collections — that's what `pixel8 new` scaffolds and what every
-game example uses, keeping carts tiny. Full details in
+Carts also have runtime limits: 128 KiB cart size, 128 KiB RAM, and a 128 K per-frame work budget.
+By default carts are `#![no_std]` with `heapless` for fixed-size collections — that's what
+`pixel8 new` scaffolds and what every game example uses, keeping carts tiny. Full details in
 [docs/LIMITS.md](docs/LIMITS.md).
 
 ## PNG cartridges
 
-`export` produces a real PNG image — cartridge art, label, title — with
-the compiled wasm, all assets and (by default) the compressed Rust
-source embedded in a private chunk. Anyone can *see* the cart; Pixel8
-can *play* it; and if the source is included, `import` turns it back
-into an editable project. See [docs/CART_FORMAT.md](docs/CART_FORMAT.md).
+`export` produces a real PNG image — cartridge art, label, title — with the compiled wasm, all
+assets and (by default) the compressed Rust source embedded in a private chunk. Anyone can *see* the
+cart; Pixel8 can *play* it; and if the source is included, `import` turns it back into an editable
+project. See [docs/CART_FORMAT.md](docs/CART_FORMAT.md).
 
-`export mygame.html` instead produces a single self-contained web page:
-the cart and the whole console runtime (compiled to wasm) embedded in
-one file you can double-click or host anywhere, PICO-8-web style. See
-[docs/WEB_EXPORT.md](docs/WEB_EXPORT.md).
+`export mygame.html` instead produces a single self-contained web page: the cart and the whole
+console runtime (compiled to wasm) embedded in one file you can double-click or host anywhere,
+PICO-8-web style. See [docs/WEB_EXPORT.md](docs/WEB_EXPORT.md).
 
-Carts also run via `pixel8-player`, a pure-Rust player with a console-style
-cart picker. On the desktop it opens a window with keyboard input; on retro
-handhelds (PowKiddy RGB10S, Anbernic RG351/353 and friends on ArkOS/ROCKNIX)
-it runs as a static-musl KMS/evdev/ALSA binary — copy it into the ports folder,
-drop `.png` carts next to it, play. See [docs/HANDHELD.md](docs/HANDHELD.md).
+Carts also run via `pixel8-player`, a pure-Rust player with a console-style cart picker. On the
+desktop it opens a window with keyboard input; on retro handhelds (PowKiddy RGB10S, Anbernic
+RG351/353 and friends on ArkOS/ROCKNIX) it runs as a static-musl KMS/evdev/ALSA binary — copy it
+into the ports folder, drop `.png` carts next to it, play. See [docs/HANDHELD.md](docs/HANDHELD.md).
 
 ## Inspired by PICO-8
 
-Pixel8 is heavily inspired by [PICO-8](https://www.lexaloffle.com/pico-8.php).
-The palette, the fixed constraints, the editor modes, the `>` prompt and the
-overall charm all come from it. What differs is the whole point of the
-project: a cart is Rust compiled to WebAssembly rather than Lua, the font,
-code and cartridge formats are entirely original, and Pixel8 is free and
-open source (GPL-3.0) rather than a paid product.
+Pixel8 is heavily inspired by [PICO-8](https://www.lexaloffle.com/pico-8.php). The palette, the
+fixed constraints, the editor modes, the `>` prompt and the overall charm all come from it. What
+differs is the whole point of the project: a cart is Rust compiled to WebAssembly rather than Lua,
+the font, code and cartridge formats are entirely original, and Pixel8 is free and open source
+(GPL-3.0) rather than a paid product.
 
-That shared heritage — the same palette, waveforms and sprite layout — means a
-PICO-8 cart's assets import almost one-to-one:
+That shared heritage — the same palette, waveforms and sprite layout — means a PICO-8 cart's assets
+import almost one-to-one:
 
 ```text
 pixel8 import-pico8 mygame.p8 mygame      # or mygame.p8.png
 ```
 
-The graphics, sprite flags, map, sound effects and music transfer into a new
-project. Only the assets come across — the cart's Lua code is ignored — and
-the project gets a stub `src/lib.rs` to write your game in Rust. See
-[docs/PICO8_IMPORT.md](docs/PICO8_IMPORT.md).
+The graphics, sprite flags, map, sound effects and music transfer into a new project. Only the
+assets come across — the cart's Lua code is ignored — and the project gets a stub `src/lib.rs` to
+write your game in Rust. See [docs/PICO8_IMPORT.md](docs/PICO8_IMPORT.md).
 
 ## Projects are real crates
 
-A Pixel8 project is an ordinary Cargo crate that builds a `cdylib` for
-`wasm32-unknown-unknown`, plus an `assets.pixel8` bundle. The integrated
-editor is the charming way to work, but `$EDITOR` + `cargo build` works
-exactly the same — the console hot-reloads the wasm when it changes on
-disk. Headless commands support scripts and CI:
+A Pixel8 project is an ordinary Cargo crate that builds a `cdylib` for `wasm32-unknown-unknown`,
+plus an `assets.pixel8` bundle. The integrated editor is the charming way to work, but `$EDITOR` +
+`cargo build` works exactly the same — the console hot-reloads the wasm when it changes on disk.
+Headless commands support scripts and CI:
 
 ```text
 pixel8 new <dir>                  create a project
@@ -140,11 +129,10 @@ pixel8 verify <cart.png>          run 60 frames headless
 
 ## The sandbox
 
-Carts execute inside [wasmi](https://github.com/wasmi-labs/wasmi) with
-no WASI, no filesystem, no network and no host memory access. The only
-imports a cart gets are the ~26 small, C-like functions of the Pixel8
-ABI (`docs/ABI.md`) — draw, input, audio, map, log. Fuel metering turns
-infinite loops into a friendly error screen instead of a hung console.
+Carts execute inside [wasmi](https://github.com/wasmi-labs/wasmi) with no WASI, no filesystem, no
+network and no host memory access. The only imports a cart gets are the ~26 small, C-like functions
+of the Pixel8 ABI (`docs/ABI.md`) — draw, input, audio, map, log. Fuel metering turns infinite loops
+into a friendly error screen instead of a hung console.
 
 ## Workspace
 
@@ -171,8 +159,8 @@ docs/
 
 ## Building
 
-Requires Rust (with the `wasm32-unknown-unknown` target for building
-carts) and, on Linux, ALSA headers for audio:
+Requires Rust (with the `wasm32-unknown-unknown` target for building carts) and, on Linux, ALSA
+headers for audio:
 
 ```text
 rustup target add wasm32-unknown-unknown
@@ -192,7 +180,6 @@ then type `run`.
 
 ## Status
 
-All stages of the original plan are in place: console, VM + ABI, all
-five editors, audio runtime, PNG carts, web export, examples, docs and
-tests. Expect rough edges and enjoy them — it's a fantasy console, not
-an IDE.
+All stages of the original plan are in place: console, VM + ABI, all five editors, audio runtime,
+PNG carts, web export, examples, docs and tests. Expect rough edges and enjoy them — it's a fantasy
+console, not an IDE.
