@@ -41,6 +41,8 @@ cpal = "0.18"
 crc32fast = "1"
 miniz_oxide = "0.9"
 pollster = "0.4"
+serde_json = { version = "1.0.150", features = ["preserve_order"] }
+base64 = "0.22.1"
 
 [profile.release]
 opt-level = 3

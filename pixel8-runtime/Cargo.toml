@@ -19,6 +19,8 @@ wasmi.workspace = true
 crc32fast.workspace = true
 miniz_oxide.workspace = true
 cpal = { workspace = true, optional = true }
+serde_json.workspace = true
+base64.workspace = true
 
 [dev-dependencies]
 wat = "1"
