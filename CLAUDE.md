@@ -115,7 +115,7 @@ Every pipeline stage also exists as a subcommand of the `pixel8` binary (dispatc
 ## Docs index
 
 `docs/ABI.md` (wasm import surface), `docs/ARCHITECTURE.md`, `docs/CART_FORMAT.md`,
-`docs/CLIPBOARD_FORMAT.md` (native `[pixel8]` clipboard wire format + PICO-8 interop),
+`docs/CLIPBOARD_FORMAT.md` (native JSON clipboard wire format + PICO-8 interop),
 `docs/LIMITS.md` + `docs/LIMITS_TESTING.md`, `docs/PICO8_IMPORT.md`,
 `docs/WEB_EXPORT.md`, `docs/HANDHELD.md`. Design plans/specs live under
 `docs/superpowers/`.
