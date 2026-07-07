@@ -9,9 +9,7 @@ use crate::{
         Assets, MusicPattern, Sfx, SpriteSheet, MAP_H, MAP_W, MUSIC_COUNT, SFX_COUNT, SHEET_H,
         SHEET_W, SPRITES_PER_ROW, SPRITE_SIZE,
     },
-    pico8::{
-        bytes_to_hex, hex_bytes, next_free_sfx, remap_custom_instruments, remap_music_channels,
-    },
+    pico8::{next_free_sfx, remap_custom_instruments, remap_music_channels},
 };
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -256,20 +254,21 @@ pub(crate) fn tagged<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
     Some(&text[start..end])
 }
 
-/// `PIXEL8C` — the native clipboard magic, distinct from `PIXEL8A` (on-disk assets).
-const MAGIC: &[u8; 7] = b"PIXEL8C";
 /// Native clipboard format version; bump if `ClipboardPayload` changes shape.
-const VERSION: u8 = 1;
+const VERSION: u32 = 1;
 
-/// One copied item, serialized losslessly via serde/postcard. Reuses the asset
-/// structs, so `Sfx::custom_wave`, sprite flags, and 8-bit map tiles all survive.
+/// One copied item, tagged by kind. Reuses the asset structs, so
+/// `Sfx::custom_wave`, sprite flags, and 8-bit map tiles all survive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ClipboardPayload {
     /// A `w * h` pixel block plus one flag byte per covered 8x8 sprite.
     Sprite {
         w: u8,
         h: u8,
+        #[serde(with = "crate::wire::hex_string")]
         pixels: Vec<u8>,
+        #[serde(with = "crate::wire::hex_string")]
         flags: Vec<u8>,
     },
     /// One SFX, full fidelity (includes `custom_wave`). `slot` is the source slot.
@@ -280,17 +279,24 @@ pub enum ClipboardPayload {
         sfx: Vec<(u8, crate::assets::Sfx)>,
     },
     /// A `w * h` block of 8-bit map tiles, row-major.
-    Map { w: u8, h: u8, tiles: Vec<u8> },
+    Map {
+        w: u8,
+        h: u8,
+        #[serde(with = "crate::wire::hex_string")]
+        tiles: Vec<u8>,
+    },
 }
 
-/// Encode a payload as a `[pixel8]<hex>[/pixel8]` clipboard blob.
+/// Encode a payload as a `[pixel8]<json>[/pixel8]` clipboard blob.
 pub fn encode(payload: &ClipboardPayload) -> String {
-    let mut body = MAGIC.to_vec();
-    body.push(VERSION);
-    // postcard only errors on a serializer fault, which these owned, finite
+    let versioned = crate::wire::Versioned {
+        version: VERSION,
+        inner: payload,
+    };
+    // serde_json only errors on a serializer fault, which these owned, finite
     // values cannot trigger.
-    body.extend(postcard::to_allocvec(payload).expect("clipboard payload serializes"));
-    format!("[pixel8]{}[/pixel8]", bytes_to_hex(&body))
+    let json = serde_json::to_string(&versioned).expect("clipboard payload serializes");
+    format!("[pixel8]{json}[/pixel8]")
 }
 
 /// Decode a clipboard string into a `Pasted`: a native `[pixel8]` blob, else a
@@ -302,18 +308,14 @@ pub fn parse(text: &str) -> Result<Pasted> {
     crate::pico8::parse_clipboard(text)
 }
 
-/// Decode the hex body of a `[pixel8]` blob into a payload. Total / panic-free.
+/// Decode the JSON body of a `[pixel8]` blob into a payload. Total / panic-free.
 fn decode_native(inner: &str) -> Result<ClipboardPayload> {
-    let bytes = hex_bytes(inner.trim());
-    let body = bytes
-        .strip_prefix(MAGIC.as_slice())
-        .context("bad clipboard magic")?;
-    let (&version, body) = body.split_first().context("missing clipboard version")?;
-    if version != VERSION {
-        anyhow::bail!("unsupported clipboard version {version}");
+    let versioned: crate::wire::Versioned<ClipboardPayload> =
+        serde_json::from_str(inner.trim()).context("malformed clipboard payload")?;
+    if versioned.version != VERSION {
+        anyhow::bail!("unsupported clipboard version {}", versioned.version);
     }
-    let payload: ClipboardPayload =
-        postcard::from_bytes(body).context("malformed clipboard payload")?;
+    let payload = versioned.inner;
     match &payload {
         ClipboardPayload::Sprite { w, h, pixels, .. } => {
             let (w, h) = (*w as usize, *h as usize);
@@ -452,10 +454,13 @@ mod tests {
 
     #[test]
     fn native_decode_rejects_bad_blobs_without_panicking() {
-        assert!(parse("[pixel8]zzzz[/pixel8]").is_err()); // odd/non-hex body.
-        assert!(parse("[pixel8]00[/pixel8]").is_err()); // too short for magic.
-                                                        // Wrong magic (`PIXEL8X` + v1 + empty payload), hex-encoded.
-        assert!(parse("[pixel8]5249434f3858017d[/pixel8]").is_err());
+        assert!(parse("[pixel8]not json[/pixel8]").is_err()); // not JSON.
+        assert!(parse("[pixel8]{}[/pixel8]").is_err()); // missing version/kind.
+                                                        // Known kind but unknown version.
+        assert!(
+            parse(r#"[pixel8]{"version":9,"kind":"map","w":1,"h":1,"tiles":"00"}[/pixel8]"#)
+                .is_err()
+        );
     }
 
     #[test]
@@ -483,10 +488,8 @@ mod tests {
 
     #[test]
     fn native_decode_rejects_wrong_version() {
-        // Correct magic, version 0x02 (unknown), then a dummy byte.
-        let blob = bytes_to_hex(b"PIXEL8C\x02\x00");
-        let text = format!("[pixel8]{blob}[/pixel8]");
-        assert!(parse(&text).is_err());
+        let text = r#"[pixel8]{"version":2,"kind":"map","w":1,"h":1,"tiles":"00"}[/pixel8]"#;
+        assert!(parse(text).is_err());
     }
 
     #[test]

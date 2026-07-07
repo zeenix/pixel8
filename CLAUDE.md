@@ -82,15 +82,15 @@ touching code:
   *copy* of sprite/map assets so runtime `mset` writes are RAM-only, like a real cart.
 - **Assets are one shared data model.** `pixel8-runtime/src/assets.rs` defines the serde
   models used by editors (mutate), the VM (draw/play), and the cart codec (embed). Sizes
-  are fixed by design. On disk inside a project: one postcard-encoded, version-headered
-  `assets.pixel8`; inside a cart: the `pxRt` PNG chunk (`docs/CART_FORMAT.md`).
+  are fixed by design. On disk inside a project: one JSON, version-headered
+  `assets.pixel8.json`; inside a cart: the `pxRt` PNG chunk (`docs/CART_FORMAT.md`).
 - **The shell is a mode machine** (`Console`, `Run`, five editors). Loaded state is
   either a *project* (a real Cargo crate: full build/run/export) or a *cart* (PNG run
   as-is). `run` spawns `cargo build --release --target wasm32-unknown-unknown` on a
   thread, streams trimmed errors to the console, and hot-reloads when the wasm mtime
   changes (polled once a second).
 - **Projects are real crates.** `pixel8 new` scaffolds an ordinary cargo crate building a
-  `cdylib` for wasm + an `assets.pixel8`. `$EDITOR` + `cargo build` works identically to
+  `cdylib` for wasm + an `assets.pixel8.json`. `$EDITOR` + `cargo build` works identically to
   the integrated editor.
 
 ## Headless / CLI surface

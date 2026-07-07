@@ -76,8 +76,8 @@ One set of serde data models shared by the editors (which mutate
 them), the VM (which draws/plays from them) and the cart codec (which
 embeds them). Fixed sizes everywhere — 256 sprites, 128x64 map, 64
 SFX, 64 patterns — because the constraints are the product. On disk
-inside a project they are one postcard-encoded, version-headered
-`assets.pixel8` file; inside a cart they ride in the `pxRt` chunk
+inside a project they are one JSON, version-headered
+`assets.pixel8.json` file; inside a cart they ride in the `pxRt` chunk
 (see CART_FORMAT.md).
 
 ## Audio (`pixel8-runtime/src/audio.rs`)
@@ -92,11 +92,11 @@ through a shared `AudioHandle`.
 ## The pipeline, end to end
 
 ```text
-new      ->  Cargo crate (cdylib) + template + empty assets.pixel8
-edit     ->  code editor writes src/lib.rs; asset editors write assets.pixel8
+new      ->  Cargo crate (cdylib) + template + empty assets.pixel8.json
+edit     ->  code editor writes src/lib.rs; asset editors write assets.pixel8.json
 run      ->  cargo build --target wasm32-unknown-unknown
          ->  GameVm::load(wasm, assets)  ->  update/draw (60 fps, or the cart's rate)
-export   ->  Cart { wasm, assets, source? }  ->  postcard -> deflate
+export   ->  Cart { wasm, assets, source? }  ->  json -> deflate
          ->  pxRt chunk inside the label PNG
 load     ->  validate + decode  ->  run, or extract back to a project
 ```

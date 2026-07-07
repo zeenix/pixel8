@@ -1,7 +1,7 @@
 //! Watching a project/cart's on-disk files so external edits are picked up
 //! without clobbering in-console edits.
 //!
-//! The shell mirrors `src/lib.rs` and `assets.pixel8` (or a PNG cart's assets)
+//! The shell mirrors `src/lib.rs` and `assets.pixel8.json` (or a PNG cart's assets)
 //! in memory. Both the mirror and the file on disk can change, so before
 //! adopting a disk change we compare three things — the baseline we last
 //! synced, what is on disk now, and what we hold in memory — and decide.
@@ -47,7 +47,7 @@ pub enum FileChange {
     Conflict,
 }
 
-/// Watches one file the shell mirrors in memory (`src/lib.rs`, `assets.pixel8`).
+/// Watches one file the shell mirrors in memory (`src/lib.rs`, `assets.pixel8.json`).
 ///
 /// Polling is mtime-gated: the file's contents are only read when its mtime has
 /// advanced past the last synced point, so steady-state cost is one `stat`.

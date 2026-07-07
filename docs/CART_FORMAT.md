@@ -29,18 +29,21 @@ offset  size  field
 8       ...   DEFLATE-compressed body
 ```
 
-The body is a [postcard](https://docs.rs/postcard)-encoded `Cart`:
+The body is a DEFLATE-compressed JSON `Cart`:
 
 ```rust
 struct Cart {
-    wasm: Vec<u8>,          // compiled wasm32-unknown-unknown module
+    wasm: Vec<u8>,          // compiled wasm32-unknown-unknown, base64 in JSON
     assets: Assets,         // sprites, map, sfx, music, metadata, label
     source: Option<String>, // src/lib.rs, present in editable carts
 }
 ```
 
-The whole body is compressed as one stream (wasm + assets + source
-together), which is why including the source usually costs little.
+Assets serialise readably — hex-nibble rows for the sprite sheet and label,
+hex-byte rows for the map, `[pitch, wave, volume, effect]` quads for SFX steps —
+and only the compiled `wasm` is opaque (base64). The whole JSON body is
+compressed as one DEFLATE stream (wasm + assets + source together), which is why
+including the source usually costs little.
 
 ### Playable vs editable
 
