@@ -1,8 +1,8 @@
-//! Pixel8's clipboard data model and paste appliers, plus the native
-//! `[pixel8]` clipboard codec.
+//! Pixel8's clipboard data model and paste appliers, plus the native JSON
+//! clipboard codec.
 //!
 //! The value types here are format-neutral: PICO-8 `[gfx]`/`[sfx]` blobs decode
-//! into them (see [`crate::pico8`]) and so does the native `[pixel8]` format.
+//! into them (see [`crate::pico8`]) and so does Pixel8's native JSON format.
 
 use crate::{
     assets::{
@@ -257,10 +257,24 @@ pub(crate) fn tagged<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
 /// Native clipboard format version; bump if `ClipboardPayload` changes shape.
 const VERSION: u32 = 1;
 
+/// The producer marker stamped into every native blob, so a decoder can tell a
+/// Pixel8 clipboard object from unrelated JSON sitting on the system clipboard.
+const APP: &str = "pixel8";
+
+/// The native clipboard envelope: an `"app"`/`"version"` marker pair ahead of the
+/// flattened payload. Serialises borrowed (encode) and owned (decode).
+#[derive(Serialize, Deserialize)]
+struct Blob<T> {
+    app: String,
+    version: u32,
+    #[serde(flatten)]
+    payload: T,
+}
+
 /// One copied item, tagged by kind. Reuses the asset structs, so
 /// `Sfx::custom_wave`, sprite flags, and 8-bit map tiles all survive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum ClipboardPayload {
     /// A `w * h` pixel block plus one flag byte per covered 8x8 sprite.
     Sprite {
@@ -287,35 +301,41 @@ pub enum ClipboardPayload {
     },
 }
 
-/// Encode a payload as a `[pixel8]<json>[/pixel8]` clipboard blob.
+/// Encode a payload as a native `{ "app": "pixel8", … }` JSON clipboard blob.
 pub fn encode(payload: &ClipboardPayload) -> String {
-    let versioned = crate::wire::Versioned {
+    let blob = Blob {
+        app: APP.to_string(),
         version: VERSION,
-        inner: payload,
+        payload,
     };
     // serde_json only errors on a serializer fault, which these owned, finite
     // values cannot trigger.
-    let json = serde_json::to_string(&versioned).expect("clipboard payload serializes");
-    format!("[pixel8]{json}[/pixel8]")
+    serde_json::to_string(&blob).expect("clipboard payload serializes")
 }
 
-/// Decode a clipboard string into a `Pasted`: a native `[pixel8]` blob, else a
-/// PICO-8 `[gfx]`/`[sfx]` blob. Any unrecognised or malformed text is an `Err`.
+/// Decode a clipboard string into a `Pasted`: a native Pixel8 JSON blob (a single
+/// `{ … }` object), else a PICO-8 `[gfx]`/`[sfx]` blob. Any unrecognised or
+/// malformed text is an `Err`.
 pub fn parse(text: &str) -> Result<Pasted> {
-    if let Some(inner) = tagged(text, "pixel8") {
-        return Ok(decode_native(inner)?.into_pasted());
+    let text = text.trim();
+    if text.starts_with('{') {
+        return Ok(decode_native(text)?.into_pasted());
     }
     crate::pico8::parse_clipboard(text)
 }
 
-/// Decode the JSON body of a `[pixel8]` blob into a payload. Total / panic-free.
-fn decode_native(inner: &str) -> Result<ClipboardPayload> {
-    let versioned: crate::wire::Versioned<ClipboardPayload> =
-        serde_json::from_str(inner.trim()).context("malformed clipboard payload")?;
-    if versioned.version != VERSION {
-        anyhow::bail!("unsupported clipboard version {}", versioned.version);
+/// Decode a native clipboard blob (a whole JSON object) into a payload. Total /
+/// panic-free.
+fn decode_native(json: &str) -> Result<ClipboardPayload> {
+    let blob: Blob<ClipboardPayload> =
+        serde_json::from_str(json).context("malformed clipboard payload")?;
+    if blob.app != APP {
+        anyhow::bail!("not a Pixel8 clipboard blob");
     }
-    let payload = versioned.inner;
+    if blob.version != VERSION {
+        anyhow::bail!("unsupported clipboard version {}", blob.version);
+    }
+    let payload = blob.payload;
     match &payload {
         ClipboardPayload::Sprite { w, h, pixels, .. } => {
             let (w, h) = (*w as usize, *h as usize);
@@ -453,14 +473,40 @@ mod tests {
     }
 
     #[test]
-    fn native_decode_rejects_bad_blobs_without_panicking() {
-        assert!(parse("[pixel8]not json[/pixel8]").is_err()); // not JSON.
-        assert!(parse("[pixel8]{}[/pixel8]").is_err()); // missing version/kind.
-                                                        // Known kind but unknown version.
-        assert!(
-            parse(r#"[pixel8]{"version":9,"kind":"map","w":1,"h":1,"tiles":"00"}[/pixel8]"#)
-                .is_err()
+    fn native_blob_is_bare_json_marked_with_app() {
+        let blob = encode(&ClipboardPayload::Map {
+            w: 3,
+            h: 2,
+            tiles: vec![1, 2, 3, 4, 5, 6],
+        });
+        assert!(blob.starts_with(r#"{"app":"pixel8""#), "got {blob}");
+        assert!(!blob.contains("[pixel8]"), "the wrapper tag should be gone");
+        let Pasted::Map { w, h, tiles } = parse(&blob).unwrap() else {
+            panic!("not map")
+        };
+        assert_eq!((w, h, tiles), (3, 2, vec![1, 2, 3, 4, 5, 6]));
+    }
+
+    #[test]
+    fn native_map_encodes_with_kind_as_key() {
+        let blob = encode(&ClipboardPayload::Map {
+            w: 3,
+            h: 2,
+            tiles: vec![1, 2, 3, 4, 5, 6],
+        });
+        assert_eq!(
+            blob,
+            r#"{"app":"pixel8","version":1,"map":{"w":3,"h":2,"tiles":"010203040506"}}"#
         );
+    }
+
+    #[test]
+    fn native_decode_rejects_bad_blobs_without_panicking() {
+        assert!(parse("{ not json }").is_err()); // starts with `{` but is not JSON.
+        assert!(parse("{}").is_err()); // missing app/version/kind.
+        assert!(parse(r#"{"hello":"world"}"#).is_err()); // valid JSON object, but not ours.
+                                                         // Right shape but unknown version.
+        assert!(parse(r#"{"app":"pixel8","version":9,"map":{"w":1,"h":1,"tiles":"00"}}"#).is_err());
     }
 
     #[test]
@@ -488,7 +534,7 @@ mod tests {
 
     #[test]
     fn native_decode_rejects_wrong_version() {
-        let text = r#"[pixel8]{"version":2,"kind":"map","w":1,"h":1,"tiles":"00"}[/pixel8]"#;
+        let text = r#"{"app":"pixel8","version":2,"map":{"w":1,"h":1,"tiles":"00"}}"#;
         assert!(parse(text).is_err());
     }
 

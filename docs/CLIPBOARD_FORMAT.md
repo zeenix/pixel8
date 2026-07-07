@@ -1,17 +1,18 @@
 # Pixel8 clipboard format
 
-Pixel8's editors copy assets to the system clipboard as a plain-text blob:
+Pixel8's editors copy assets to the system clipboard as a single JSON object:
 
-    [pixel8]<json>[/pixel8]
+    { "app": "pixel8", "version": 1, "<kind>": { ... } }
 
-`<json>` is a versioned, kind-tagged object:
+`<kind>` is one of `sprite`, `sfx`, `pattern`, or `map`, and its value holds that
+kind's fields.
 
-    { "version": 1, "kind": "sprite" | "sfx" | "pattern" | "map", ... }
-
+- The `"app": "pixel8"` field marks the object as a Pixel8 clipboard blob; the
+  `"version"` field is the version contract. The old `PIXEL8C` magic and the
+  `[pixel8]` tag wrapper are gone — a leading `{` is what tells a native blob apart
+  from a PICO-8 one.
 - Byte fields (sprite pixels, sprite flags, map tiles) are lowercase hex strings;
   SFX steps are `[pitch, wave, volume, effect]` quads.
-- The `PIXEL8C` magic and hex wrapping are gone; the `[pixel8]` tag is the
-  identifier, and the `"version"` field is the version contract.
 
 The payload is a tagged union with four kinds:
 
@@ -32,9 +33,9 @@ sprite flags, custom waveforms, and 8-bit map tiles all survive the round-trip.
 
 Paste accepts two formats:
 
-**Native `[pixel8]`** — decoded by checking the `[pixel8]` tag, parsing the JSON
-body, and checking the exact `"version"`. The full payload is restored, including
-sprite flags, custom waveforms, and map regions.
+**Native Pixel8** — a JSON object (`{ … }`) whose `"app"` is `"pixel8"`. Decoded by
+parsing the JSON and checking the exact `"version"`. The full payload is restored,
+including sprite flags, custom waveforms, and map regions.
 
 **PICO-8 editor formats** — for interoperability, Pixel8 also parses PICO-8's
 clipboard blobs:
@@ -46,8 +47,8 @@ native format. Any unrecognised or malformed blob is ignored.
 
 ## Validation
 
-On decode, Pixel8 checks the `[pixel8]` tag, that the body is valid JSON, and the
-exact `"version"`. Any mismatch is an error; the paste is a no-op. Readers must
+On decode, Pixel8 checks that the text is a JSON object with `"app": "pixel8"` and
+the exact `"version"`. Any mismatch is an error; the paste is a no-op. Readers must
 reject versions they do not know.
 
 ## Versioning policy

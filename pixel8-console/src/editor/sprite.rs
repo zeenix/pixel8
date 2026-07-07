@@ -1126,7 +1126,7 @@ mod tests {
         a.sprites.set_flag(1, 3, true); // flag bit 3 on sprite 1.
         let mut ed = SpriteEditor::new(); // window defaults to sprite 1.
         let blob = ed.copy(&a);
-        assert!(blob.starts_with("[pixel8]"));
+        assert!(blob.starts_with(r#"{"app":"pixel8""#));
         let Pasted::Sprites { flags, .. } = parse(&blob).unwrap() else {
             panic!("not sprites")
         };
