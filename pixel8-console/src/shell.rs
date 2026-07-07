@@ -25,6 +25,7 @@ use pixel8_runtime::{
     font,
     palette::col,
     project::{decode_assets, encode_assets, Project},
+    storage::Storage,
     vm::{GameVm, RuntimeError, UI_FPS},
 };
 use std::{
@@ -312,6 +313,9 @@ pub struct Shell {
     /// Where `new` creates projects and `ls` looks: the host working dir.
     cwd: PathBuf,
     sdk_path: PathBuf,
+    /// Cart save files land under this directory instead of the user's
+    /// cache directory when set. Tests use it to stay hermetic.
+    storage_root: Option<PathBuf>,
 
     /// F1 toggles the CPU/memory/fps resource overlay.
     show_stats: bool,
@@ -360,6 +364,7 @@ impl Shell {
             want_exit: false,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             sdk_path,
+            storage_root: None,
             show_stats: false,
             fps_frames: 0,
             fps_t0: Instant::now(),
@@ -1286,6 +1291,9 @@ impl Shell {
     }
 
     fn start_vm_from_loaded(&mut self) -> Result<()> {
+        // Drop any previous VM first: dropping saves its storage, and the
+        // new VM must load the freshest save from disk.
+        self.vm = None;
         let (wasm, assets) = match &self.loaded {
             Loaded::None => bail!("No cart loaded"),
             Loaded::Cart { cart, .. } => (cart.wasm.clone(), cart.assets.clone()),
@@ -1297,7 +1305,11 @@ impl Shell {
                 (wasm, p.assets.clone())
             }
         };
-        let vm = GameVm::load(&wasm, &assets, self.audio.clone())?;
+        let storage = match &self.storage_root {
+            Some(root) => Storage::for_cart_in(root, &assets.meta.name),
+            None => Storage::for_cart(&assets.meta.name),
+        };
+        let vm = GameVm::load(&wasm, &assets, self.audio.clone(), storage)?;
         self.vm = Some(vm);
         self.mode = Mode::Run;
         Ok(())
@@ -2103,7 +2115,59 @@ mod tests {
 
     fn test_shell() -> Shell {
         let sdk = Path::new(env!("CARGO_MANIFEST_DIR")).join("../pixel8");
-        Shell::new(AudioHandle::dummy(), sdk)
+        let mut shell = Shell::new(AudioHandle::dummy(), sdk);
+        // Keep cart saves out of the real user cache directory: tests that
+        // run carts must be hermetic.
+        shell.storage_root =
+            Some(std::env::temp_dir().join(format!("pixel8_test_storage_{}", std::process::id())));
+        shell
+    }
+
+    /// Restarting a cart must save the old VM's storage *before* the new VM
+    /// loads its copy from disk — the `self.vm = None` at the top of
+    /// `start_vm_from_loaded` is load-bearing. The cart increments a stored
+    /// counter in `pixel8_init`; two starts must produce 2, not 1.
+    #[test]
+    fn restart_saves_storage_before_the_new_vm_loads() {
+        use pixel8_runtime::{assets::Assets, cart::Cart, storage::Storage};
+        const COUNTER_CART: &str = r#"
+            (module
+              (import "pixel8" "storage_get" (func $sget (param i32 i32 i32 i32) (result i32)))
+              (import "pixel8" "storage_set" (func $sset (param i32 i32 i32 i32) (result i32)))
+              (memory (export "memory") 1)
+              (data (i32.const 0) "n")
+              (func (export "pixel8_init")
+                (local $n i32)
+                (if (i32.eq (call $sget (i32.const 0) (i32.const 1) (i32.const 8) (i32.const 1))
+                            (i32.const 1))
+                  (then (local.set $n (i32.sub (i32.load8_u (i32.const 8)) (i32.const 48)))))
+                (i32.store8 (i32.const 8) (i32.add (i32.const 49) (local.get $n)))
+                (drop (call $sset (i32.const 0) (i32.const 1) (i32.const 8) (i32.const 1))))
+              (func (export "pixel8_update"))
+              (func (export "pixel8_draw")))
+        "#;
+        let root = std::env::temp_dir().join(format!("pixel8_restart_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut shell = test_shell();
+        shell.storage_root = Some(root.clone());
+        shell.loaded = Loaded::Cart {
+            cart: Cart {
+                wasm: wat::parse_str(COUNTER_CART).unwrap(),
+                assets: Assets::default(),
+                source: None,
+            },
+            path: PathBuf::from("counter.png"),
+        };
+        shell.start_vm_from_loaded().expect("first start"); // n = 1
+        shell.start_vm_from_loaded().expect("restart"); // saves 1, reads it, n = 2
+        shell.vm = None; // Final save.
+        let s = Storage::for_cart_in(&root, &Assets::default().meta.name);
+        assert_eq!(
+            s.get_json("n").as_deref(),
+            Some("2"),
+            "the restart must persist the first run's write before the second reads"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     /// Rewrite a freshly-scaffolded project's `pixel8` git dep to a path dep on the

@@ -290,10 +290,16 @@ fn headless_export_web(input: &Path, out: &Path) -> Result<()> {
 /// Load a cart and run a second of frames without a window — a smoke
 /// test for carts and for the console itself (used by CI).
 fn headless_verify(png: &Path) -> Result<()> {
-    use pixel8_runtime::{audio::AudioHandle, vm::GameVm};
+    use pixel8_runtime::{audio::AudioHandle, storage::Storage, vm::GameVm};
     let cart = cart::load_png(png)?;
-    let mut vm = GameVm::load(&cart.wasm, &cart.assets, AudioHandle::dummy())
-        .context("Loading cart into the VM")?;
+    // In-memory storage: verify runs must be hermetic (CI, scripted checks).
+    let mut vm = GameVm::load(
+        &cart.wasm,
+        &cart.assets,
+        AudioHandle::dummy(),
+        Storage::default(),
+    )
+    .context("Loading cart into the VM")?;
     for frame in 0..60 {
         vm.call_update()
             .and_then(|()| vm.call_draw())

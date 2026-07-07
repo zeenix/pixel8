@@ -76,7 +76,7 @@ touching code:
   native widgets anywhere. A consequence: the whole console is **testable headless** —
   tests and the `verify`/`snap` subcommands drive the same framebuffer with no window.
 - **The sandbox is allowlist-only.** `GameVm::load` links exactly the `"pixel8"` import
-  set (~26 C-like functions, documented in `docs/ABI.md`); unknown imports fail
+  set (~50 C-like functions, documented in `docs/ABI.md`); unknown imports fail
   instantiation. No WASI, no filesystem, no network. Fuel metering caps each
   `update`/`draw` so infinite loops become an error screen, not a freeze. The VM holds a
   *copy* of sprite/map assets so runtime `mset` writes are RAM-only, like a real cart.

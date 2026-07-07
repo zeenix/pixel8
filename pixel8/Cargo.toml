@@ -17,3 +17,8 @@ std = []
 # Deliberately dependency-free: game carts build for
 # wasm32-unknown-unknown against this crate and nothing else.
 [dependencies]
+
+# Tests only (carts never see dev-dependencies): pins the SDK's stack-buffer
+# JSON codec against the host's serde_json canonicalization.
+[dev-dependencies]
+serde_json.workspace = true

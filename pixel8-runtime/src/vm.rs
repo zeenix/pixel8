@@ -11,6 +11,7 @@ use crate::{
     audio::AudioHandle,
     fb::Framebuffer,
     input::InputState,
+    storage::Storage,
 };
 use anyhow::{anyhow, Context as _, Result};
 use wasmi::{
@@ -46,6 +47,10 @@ pub struct HostState {
     pub sprites: SpriteSheet,
     pub map: MapData,
     pub audio: AudioHandle,
+    /// The cart's persistent key-value store (the save file). The frontend
+    /// decides the backing: a cache-dir JSON file on the desktop console and
+    /// player, in-memory in the browser and headless `verify`.
+    pub storage: Storage,
     /// Messages from the cart's `log` calls, drained by the console.
     pub logs: Vec<String>,
     /// Message from the cart's panic hook, captured just before the trap.
@@ -67,13 +72,14 @@ pub struct HostState {
 }
 
 impl HostState {
-    fn new(assets: &Assets, audio: AudioHandle) -> Self {
+    fn new(assets: &Assets, audio: AudioHandle, storage: Storage) -> Self {
         Self {
             fb: Framebuffer::new(),
             input: InputState::default(),
             sprites: assets.sprites.clone(),
             map: assets.map.clone(),
             audio,
+            storage,
             logs: Vec::new(),
             panic_message: None,
             frame: 0,
@@ -159,6 +165,25 @@ fn read_guest_str(caller: &Caller<'_, HostState>, ptr: u32, len: u32) -> String 
     String::from_utf8_lossy(&data[start..end]).into_owned()
 }
 
+/// Copy `bytes` into guest memory at `ptr`. Writes nothing when the
+/// destination range does not fit the guest's linear memory.
+fn write_guest_bytes(caller: &mut Caller<'_, HostState>, ptr: u32, bytes: &[u8]) {
+    let Some(mem) = caller
+        .get_export("memory")
+        .and_then(wasmi::Extern::into_memory)
+    else {
+        return;
+    };
+    let data = mem.data_mut(caller);
+    let start = ptr as usize;
+    let Some(end) = start.checked_add(bytes.len()) else {
+        return;
+    };
+    if end <= data.len() {
+        data[start..end].copy_from_slice(bytes);
+    }
+}
+
 macro_rules! link {
     ($linker:expr, $name:literal, $f:expr) => {
         $linker
@@ -169,7 +194,16 @@ macro_rules! link {
 
 impl GameVm {
     /// Load a cart module, wire up the ABI, and run `pixel8_init`.
-    pub fn load(wasm: &[u8], assets: &Assets, audio: AudioHandle) -> Result<Self> {
+    ///
+    /// `storage` is the cart's persistent key-value store, loaded before
+    /// `pixel8_init` runs so the cart can read its save data from the first
+    /// frame. Frontends without persistence pass `Storage::default()`.
+    pub fn load(
+        wasm: &[u8],
+        assets: &Assets,
+        audio: AudioHandle,
+        storage: Storage,
+    ) -> Result<Self> {
         // The single chokepoint every frontend runs a cart through: the
         // desktop console, the standalone player, the web player and headless
         // verify all land here. Reject mis-sized asset bundles before they
@@ -183,7 +217,7 @@ impl GameVm {
         let module = Module::new(&engine, wasm).map_err(|e| anyhow!("Invalid cart wasm: {e}"))?;
 
         audio.load(assets.sfx.clone(), assets.music.clone());
-        let mut store = Store::new(&engine, HostState::new(assets, audio));
+        let mut store = Store::new(&engine, HostState::new(assets, audio, storage));
         store.limiter(|state| &mut state.limits);
         let mut linker = <Linker<HostState>>::new(&engine);
 
@@ -501,6 +535,43 @@ impl GameVm {
             let s = read_guest_str(&c, ptr, len);
             c.data_mut().fb.print_pen(&s)
         });
+        link!(linker, "storage_set", |mut c: Caller<'_, HostState>,
+                                      key_ptr: u32,
+                                      key_len: u32,
+                                      val_ptr: u32,
+                                      val_len: u32|
+         -> i32 {
+            let key = read_guest_str(&c, key_ptr, key_len);
+            let val = read_guest_str(&c, val_ptr, val_len);
+            c.data_mut().storage.set_json(&key, &val) as i32
+        });
+        link!(linker, "storage_get", |mut c: Caller<'_, HostState>,
+                                      key_ptr: u32,
+                                      key_len: u32,
+                                      buf_ptr: u32,
+                                      buf_cap: u32|
+         -> i32 {
+            let key = read_guest_str(&c, key_ptr, key_len);
+            let Some(json) = c.data().storage.get_json(&key) else {
+                return -1;
+            };
+            // MAX_BYTES caps the whole store at 128 K, so the length
+            // always fits an i32.
+            if json.len() <= buf_cap as usize {
+                write_guest_bytes(&mut c, buf_ptr, json.as_bytes());
+            }
+            json.len() as i32
+        });
+        link!(linker, "storage_remove", |mut c: Caller<'_, HostState>,
+                                         key_ptr: u32,
+                                         key_len: u32|
+         -> i32 {
+            let key = read_guest_str(&c, key_ptr, key_len);
+            c.data_mut().storage.remove(&key) as i32
+        });
+        link!(linker, "storage_clear", |mut c: Caller<'_, HostState>| {
+            c.data_mut().storage.clear()
+        });
 
         store
             .set_fuel(FUEL_PER_CALL)
@@ -805,7 +876,12 @@ mod tests {
 
     fn load_test_vm(wat_src: &str) -> Result<GameVm> {
         let wasm = wat::parse_str(wat_src).unwrap();
-        GameVm::load(&wasm, &Assets::default(), AudioHandle::dummy())
+        GameVm::load(
+            &wasm,
+            &Assets::default(),
+            AudioHandle::dummy(),
+            Storage::default(),
+        )
     }
 
     #[test]
@@ -875,7 +951,12 @@ mod tests {
     #[test]
     fn missing_exports_is_a_load_error() {
         let wasm = wat::parse_str("(module)").unwrap();
-        let err = match GameVm::load(&wasm, &Assets::default(), AudioHandle::dummy()) {
+        let err = match GameVm::load(
+            &wasm,
+            &Assets::default(),
+            AudioHandle::dummy(),
+            Storage::default(),
+        ) {
             Err(e) => e,
             Ok(_) => panic!("empty module should not load"),
         };
@@ -891,7 +972,13 @@ mod tests {
                  (func (export "pixel8_draw")))"#,
         )
         .unwrap();
-        assert!(GameVm::load(&wasm, &Assets::default(), AudioHandle::dummy()).is_err());
+        assert!(GameVm::load(
+            &wasm,
+            &Assets::default(),
+            AudioHandle::dummy(),
+            Storage::default()
+        )
+        .is_err());
     }
 
     #[test]
@@ -933,7 +1020,12 @@ mod tests {
     #[test]
     fn oversized_initial_memory_is_rejected_at_load() {
         let wasm = wat::parse_str(HUGE_INITIAL_MEMORY_CART).unwrap();
-        let err = match GameVm::load(&wasm, &Assets::default(), AudioHandle::dummy()) {
+        let err = match GameVm::load(
+            &wasm,
+            &Assets::default(),
+            AudioHandle::dummy(),
+            Storage::default(),
+        ) {
             Err(e) => e,
             Ok(_) => panic!("oversized cart should not load"),
         };
@@ -962,6 +1054,103 @@ mod tests {
             (frac - 0.5).abs() < 0.01,
             "one page is half the cap: {frac}"
         );
+    }
+
+    /// Exercises all four storage imports from a cart. Init proves a
+    /// checked remove (pixel (2,0)), wipes the store with `storage_clear`,
+    /// and leaves `"score" = 42` behind. Draw probes every `storage_get`
+    /// branch: value length at (0,0), missing key at (1,0), cleared key at
+    /// (3,0), cap-0 size query at (4,0), too-small buffer leaving memory
+    /// untouched at (5,0), and an exact-fit write at (6,0).
+    const STORAGE_CART: &str = r#"
+        (module
+          (import "pixel8" "storage_set" (func $sset (param i32 i32 i32 i32) (result i32)))
+          (import "pixel8" "storage_get" (func $sget (param i32 i32 i32 i32) (result i32)))
+          (import "pixel8" "storage_remove" (func $srem (param i32 i32) (result i32)))
+          (import "pixel8" "storage_clear" (func $sclr))
+          (import "pixel8" "set_pixel" (func $pset (param i32 i32 i32)))
+          (memory (export "memory") 1)
+          (data (i32.const 0) "score")
+          (data (i32.const 8) "42")
+          (data (i32.const 16) "gone")
+          (data (i32.const 24) "tmp")
+          (data (i32.const 28) "1")
+          (data (i32.const 63) "\05")
+          (func (export "pixel8_init")
+            ;; Removing an existing key returns 1 -> (2,0) = 5.
+            (drop (call $sset (i32.const 24) (i32.const 3) (i32.const 28) (i32.const 1)))
+            (if (i32.eq (call $srem (i32.const 24) (i32.const 3)) (i32.const 1))
+              (then (call $pset (i32.const 2) (i32.const 0) (i32.const 5))))
+            ;; Re-add "tmp", wipe everything, then store the real value.
+            (drop (call $sset (i32.const 24) (i32.const 3) (i32.const 28) (i32.const 1)))
+            (call $sclr)
+            (drop (call $sset (i32.const 0) (i32.const 5) (i32.const 8) (i32.const 2))))
+          (func (export "pixel8_update"))
+          (func (export "pixel8_draw")
+            ;; (0,0) = the JSON length of the "score" value (2).
+            (call $pset (i32.const 0) (i32.const 0)
+              (call $sget (i32.const 0) (i32.const 5) (i32.const 64) (i32.const 16)))
+            ;; A key never stored returns -1 -> (1,0) = 7.
+            (if (i32.eq (call $sget (i32.const 16) (i32.const 4) (i32.const 64) (i32.const 16))
+                        (i32.const -1))
+              (then (call $pset (i32.const 1) (i32.const 0) (i32.const 7))))
+            ;; "tmp" was wiped by storage_clear -> (3,0) = 7.
+            (if (i32.eq (call $sget (i32.const 24) (i32.const 3) (i32.const 64) (i32.const 16))
+                        (i32.const -1))
+              (then (call $pset (i32.const 3) (i32.const 0) (i32.const 7))))
+            ;; Cap 0 still reports the length -> (4,0) = 2.
+            (call $pset (i32.const 4) (i32.const 0)
+              (call $sget (i32.const 0) (i32.const 5) (i32.const 64) (i32.const 0)))
+            ;; A too-small buffer gets nothing written: the sentinel byte at
+            ;; 63 survives a cap-1 read of the 2-byte value -> (5,0) = 5.
+            (drop (call $sget (i32.const 0) (i32.const 5) (i32.const 63) (i32.const 1)))
+            (call $pset (i32.const 5) (i32.const 0) (i32.load8_u (i32.const 63)))
+            ;; An exactly-sized buffer is filled: "42" lands at 80..82 -> (6,0) = 7.
+            (drop (call $sget (i32.const 0) (i32.const 5) (i32.const 80) (i32.const 2)))
+            (if (i32.and
+                  (i32.eq (i32.load8_u (i32.const 80)) (i32.const 52))
+                  (i32.eq (i32.load8_u (i32.const 81)) (i32.const 50)))
+              (then (call $pset (i32.const 6) (i32.const 0) (i32.const 7))))))
+    "#;
+
+    #[test]
+    fn storage_abi_set_get_remove_clear() {
+        let mut vm = load_test_vm(STORAGE_CART).unwrap();
+        vm.call_update().unwrap();
+        vm.call_draw().unwrap();
+        // The host sees what the cart stored, as canonical JSON — and only
+        // that: storage_clear wiped the earlier "tmp" key.
+        assert_eq!(vm.state().storage.get_json("score").as_deref(), Some("42"));
+        assert_eq!(vm.state().storage.get_json("tmp"), None);
+        let px = |x| vm.state().fb.pget(x, 0);
+        assert_eq!(px(0), 2, "storage_get returned the value length");
+        assert_eq!(px(1), 7, "missing key returned -1");
+        assert_eq!(px(2), 5, "removing an existing key returned 1");
+        assert_eq!(px(3), 7, "storage_clear wiped the store");
+        assert_eq!(px(4), 2, "cap-0 call sized the read");
+        assert_eq!(px(5), 5, "too-small buffer left guest memory untouched");
+        assert_eq!(px(6), 7, "exact-fit buffer was filled");
+    }
+
+    #[test]
+    fn storage_persists_across_vm_loads() {
+        let path =
+            std::env::temp_dir().join(format!("pixel8_vm_storage_{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let wasm = wat::parse_str(STORAGE_CART).unwrap();
+        {
+            let _vm = GameVm::load(
+                &wasm,
+                &Assets::default(),
+                AudioHandle::dummy(),
+                Storage::at_path(path.clone()),
+            )
+            .unwrap();
+            // Dropping the VM drops (and saves) the storage.
+        }
+        let reloaded = Storage::at_path(path.clone());
+        assert_eq!(reloaded.get_json("score").as_deref(), Some("42"));
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]

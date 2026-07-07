@@ -45,6 +45,7 @@ mod glue;
 pub mod memstat;
 mod motion;
 mod music;
+mod storage;
 
 // Install the live-tracking allocator for `std` carts. It lives here, not in
 // the `game!` macro, so the `feature = "std"` cfg is evaluated in this crate
@@ -63,6 +64,7 @@ pub use dim::{Dim, ZeroSize};
 pub use glue::__internal;
 pub use motion::Body;
 pub use music::{Music, MusicBusy, PlayingMusic};
+pub use storage::{StorageFull, StorageValue};
 
 /// The screen is 128x128 pixels.
 pub const SCREEN_WIDTH: u16 = 128;

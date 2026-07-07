@@ -14,7 +14,7 @@
             |  Assets . Project . PNG cart codec                    |
             +-----------+------------------------------------------+
                         ^
-              ABI calls |  (module "pixel8", ~26 C-like imports)
+              ABI calls |  (module "pixel8", ~50 C-like imports)
             +-----------+------------------------------------------+
             |  game cart: wasm32-unknown-unknown cdylib             |
             |  built from user Rust code against the pixel8 SDK      |
@@ -56,6 +56,12 @@ metering is on: every `update`/`draw` call gets a fixed budget, and
 exhaustion is reported as "ran too long (infinite loop?)" instead of a
 freeze. Unknown imports fail instantiation — the sandbox is allowlist-
 only.
+
+The host state also owns the cart's persistent key-value store
+(`pixel8-runtime/src/storage.rs`), handed to `GameVm::load` by the
+frontend: the desktop console and player back it with a JSON file in the
+user's cache directory keyed by cart name (saved when the VM drops), the
+web player and headless `verify` keep it in memory.
 
 ## The shell (`pixel8-console/src/shell.rs`)
 
