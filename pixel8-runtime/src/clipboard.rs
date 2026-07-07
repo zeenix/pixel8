@@ -274,7 +274,7 @@ struct Blob<T> {
 /// One copied item, tagged by kind. Reuses the asset structs, so
 /// `Sfx::custom_wave`, sprite flags, and 8-bit map tiles all survive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum ClipboardPayload {
     /// A `w * h` pixel block plus one flag byte per covered 8x8 sprite.
     Sprite {
@@ -488,14 +488,25 @@ mod tests {
     }
 
     #[test]
+    fn native_map_encodes_with_kind_as_key() {
+        let blob = encode(&ClipboardPayload::Map {
+            w: 3,
+            h: 2,
+            tiles: vec![1, 2, 3, 4, 5, 6],
+        });
+        assert_eq!(
+            blob,
+            r#"{"app":"pixel8","version":1,"map":{"w":3,"h":2,"tiles":"010203040506"}}"#
+        );
+    }
+
+    #[test]
     fn native_decode_rejects_bad_blobs_without_panicking() {
         assert!(parse("{ not json }").is_err()); // starts with `{` but is not JSON.
         assert!(parse("{}").is_err()); // missing app/version/kind.
         assert!(parse(r#"{"hello":"world"}"#).is_err()); // valid JSON object, but not ours.
                                                          // Right shape but unknown version.
-        assert!(
-            parse(r#"{"app":"pixel8","version":9,"kind":"map","w":1,"h":1,"tiles":"00"}"#).is_err()
-        );
+        assert!(parse(r#"{"app":"pixel8","version":9,"map":{"w":1,"h":1,"tiles":"00"}}"#).is_err());
     }
 
     #[test]
@@ -523,7 +534,7 @@ mod tests {
 
     #[test]
     fn native_decode_rejects_wrong_version() {
-        let text = r#"{"app":"pixel8","version":2,"kind":"map","w":1,"h":1,"tiles":"00"}"#;
+        let text = r#"{"app":"pixel8","version":2,"map":{"w":1,"h":1,"tiles":"00"}}"#;
         assert!(parse(text).is_err());
     }
 

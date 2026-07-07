@@ -2,7 +2,10 @@
 
 Pixel8's editors copy assets to the system clipboard as a single JSON object:
 
-    { "app": "pixel8", "version": 1, "kind": "sprite" | "sfx" | "pattern" | "map", ... }
+    { "app": "pixel8", "version": 1, "<kind>": { ... } }
+
+`<kind>` is one of `sprite`, `sfx`, `pattern`, or `map`, and its value holds that
+kind's fields.
 
 - The `"app": "pixel8"` field marks the object as a Pixel8 clipboard blob; the
   `"version"` field is the version contract. The old `PIXEL8C` magic and the
