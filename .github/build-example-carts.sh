@@ -12,9 +12,11 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$out"
 
 # pixel8 export needs no audio, so build the smaller no-default-features exporter.
+# A debug build suffices: the exporter only drives the carts' own --release wasm
+# builds, so its opt level doesn't change the exported PNGs — and it compiles faster.
 echo "building the pixel8 exporter..."
-cargo build --release -p pixel8-console --no-default-features
-pixel8="$root/target/release/pixel8"
+cargo build -p pixel8-console --no-default-features
+pixel8="$root/target/debug/pixel8"
 
 for manifest in "$root"/examples/*/Cargo.toml; do
   ex=$(basename "$(dirname "$manifest")")

@@ -34,17 +34,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       # Headless export tools only: --no-default-features skips the
-      # audio backend, so no ALSA system packages are needed.
+      # audio backend, so no ALSA system packages are needed. A debug build
+      # is fine and much faster to compile — the console only orchestrates
+      # the carts' own --release wasm builds and the web player's web-release
+      # build, so its own opt level doesn't affect the exported artifacts.
       - name: Build the console
-        run: cargo build --release -p pixel8-console --no-default-features
+        run: cargo build -p pixel8-console --no-default-features
 
       - name: Export and verify the example carts
         run: |
           mkdir -p site
           for ex in sprite_move platformer sfx_demo music_demo; do
-            ./target/release/pixel8 export examples/$ex site/$ex.png
-            ./target/release/pixel8 verify site/$ex.png
-            ./target/release/pixel8 export-web site/$ex.png site/$ex.html
+            ./target/debug/pixel8 export examples/$ex site/$ex.png
+            ./target/debug/pixel8 verify site/$ex.png
+            ./target/debug/pixel8 export-web site/$ex.png site/$ex.html
           done
 
       - name: Build the index page

@@ -30,13 +30,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev
 
+      # Debug builds: this host run only smoke-tests that the player and the
+      # exporter work; the shipped handheld binaries are the static musl
+      # --release cross-builds below. Reusing the debug artifacts `cargo test`
+      # just compiled keeps this step fast.
       - name: Host smoke test
         run: |
           cargo test -p pixel8-player
-          cargo build --release -p pixel8-player
-          cargo build --release -p pixel8-console --no-default-features
-          ./target/release/pixel8 export examples/platformer /tmp/platformer.png
-          ./target/release/pixel8-player --smoke 60 /tmp/platformer.png
+          cargo build -p pixel8-player
+          cargo build -p pixel8-console --no-default-features
+          ./target/debug/pixel8 export examples/platformer /tmp/platformer.png
+          ./target/debug/pixel8-player --smoke 60 /tmp/platformer.png
 
       - name: Cross-build the static musl ports bundle
         run: ./.github/build-handheld.sh dist/handheld
