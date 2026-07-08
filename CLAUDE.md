@@ -108,6 +108,10 @@ Every pipeline stage also exists as a subcommand of the `pixel8` binary (dispatc
   `CONTRIBUTING.md`.
 - **Atomic commits.** When addressing review feedback, fix existing commits and
   force-push rather than piling on follow-up commits.
+- **Top-down ordering within modules**, [rustls-style](https://github.com/rustls/rustls/blob/main/CONTRIBUTING.md#top-down-ordering-within-modules):
+  items depend on items defined *below* them — public API near the top, private
+  helpers below their callers, simple `const`s below their users, tests last.
+  See `CONTRIBUTING.md`.
 - Audio is feature-gated (`audio`, on by default). Code must still build and run
   (silently) with `--no-default-features` on the console/runtime for machines without
   ALSA.
