@@ -40,148 +40,12 @@ const FUEL_PER_CALL: u64 = 131_072;
 /// static data and heap above it; carts may tune it.
 const MAX_MEMORY: usize = crate::cart::MEMORY_CAP;
 
-/// Everything the host exposes to a running cart.
-pub struct HostState {
-    pub fb: Framebuffer,
-    pub input: InputState,
-    pub sprites: SpriteSheet,
-    pub map: MapData,
-    pub audio: AudioHandle,
-    /// The cart's persistent key-value store (the save file). The frontend
-    /// decides the backing: a cache-dir JSON file on the desktop console and
-    /// player, in-memory in the browser and headless `verify`.
-    pub storage: Storage,
-    /// Messages from the cart's `log` calls, drained by the console.
-    pub logs: Vec<String>,
-    /// Message from the cart's panic hook, captured just before the trap.
-    pub panic_message: Option<String>,
-    pub frame: u64,
-    /// The cart's logical frames per second (30 or 60), from its `pixel8_fps`
-    /// export. Drives `time()` and the host's update/draw cadence.
-    pub fps: u32,
-    /// Fraction (0.0..1.0) of `update`'s fuel budget used last completed frame.
-    last_update_cpu: f32,
-    /// Fraction (0.0..1.0) of `draw`'s fuel budget used last completed frame.
-    last_draw_cpu: f32,
-    /// Real frames per second measured by the host frontend; `0.0` until fed.
-    measured_fps: f32,
-    rng: u64,
-    /// Enforces `MAX_MEMORY` on linear-memory growth, including the initial
-    /// allocation at instantiation.
-    limits: StoreLimits,
-}
-
-impl HostState {
-    fn new(assets: &Assets, audio: AudioHandle, storage: Storage) -> Self {
-        Self {
-            fb: Framebuffer::new(),
-            input: InputState::default(),
-            sprites: assets.sprites.clone(),
-            map: assets.map.clone(),
-            audio,
-            storage,
-            logs: Vec::new(),
-            panic_message: None,
-            frame: 0,
-            fps: DEFAULT_FPS,
-            last_update_cpu: 0.0,
-            last_draw_cpu: 0.0,
-            measured_fps: 0.0,
-            rng: 0x2545_f491_4f6c_dd1d,
-            limits: StoreLimitsBuilder::new()
-                .memory_size(MAX_MEMORY)
-                .trap_on_grow_failure(true)
-                .build(),
-        }
-    }
-
-    fn next_rand(&mut self) -> f32 {
-        // xorshift64*; carts that need determinism can bring their own RNG.
-        let mut x = self.rng;
-        x ^= x >> 12;
-        x ^= x << 25;
-        x ^= x >> 27;
-        self.rng = x;
-        let bits = (x.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 40) as u32;
-        bits as f32 / (1u32 << 24) as f32
-    }
-
-    /// Feed the host frontend's measured frame rate, surfaced to carts via `fps`.
-    pub fn set_measured_fps(&mut self, fps: f32) {
-        self.measured_fps = fps;
-    }
-
-    /// The measured frame rate, or the cart's target rate until a frontend
-    /// measures one. Keeps `fps()` sane on frontends that never measure.
-    pub fn measured_fps_or_target(&self) -> f32 {
-        if self.measured_fps > 0.0 {
-            self.measured_fps
-        } else {
-            self.fps as f32
-        }
-    }
-
-    fn seed_rand(&mut self, seed: u32) {
-        // Force a nonzero xorshift state; all-zero is a fixed point.
-        self.rng = (((seed as u64) << 32) | (seed as u64)) | 1;
-    }
-}
-
-/// A cart-side runtime error, formatted for the error screen.
-#[derive(Debug, Clone)]
-pub struct RuntimeError {
-    /// Which lifecycle call failed: "init", "update" or "draw".
-    pub phase: &'static str,
-    pub message: String,
-}
-
-impl std::fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Runtime error in {}:\n{}", self.phase, self.message)
-    }
-}
-
 /// A loaded, running cart.
 pub struct GameVm {
     store: Store<HostState>,
     _instance: Instance,
     update: TypedFunc<(), ()>,
     draw: TypedFunc<(), ()>,
-}
-
-fn read_guest_str(caller: &Caller<'_, HostState>, ptr: u32, len: u32) -> String {
-    let Some(mem) = caller
-        .get_export("memory")
-        .and_then(wasmi::Extern::into_memory)
-    else {
-        return String::new();
-    };
-    let data = mem.data(caller);
-    let start = ptr as usize;
-    let end = start.saturating_add(len as usize).min(data.len());
-    if start >= end {
-        return String::new();
-    }
-    String::from_utf8_lossy(&data[start..end]).into_owned()
-}
-
-/// Copy `bytes` into guest memory at `ptr`. Writes nothing when the
-/// destination range does not fit the guest's linear memory.
-fn write_guest_bytes(caller: &mut Caller<'_, HostState>, ptr: u32, bytes: &[u8]) {
-    let Some(mem) = caller
-        .get_export("memory")
-        .and_then(wasmi::Extern::into_memory)
-    else {
-        return;
-    };
-    let data = mem.data_mut(caller);
-    let start = ptr as usize;
-    let Some(end) = start.checked_add(bytes.len()) else {
-        return;
-    };
-    if end <= data.len() {
-        data[start..end].copy_from_slice(bytes);
-    }
 }
 
 macro_rules! link {
@@ -718,6 +582,142 @@ impl GameVm {
 
     pub fn state_mut(&mut self) -> &mut HostState {
         self.store.data_mut()
+    }
+}
+
+/// Everything the host exposes to a running cart.
+pub struct HostState {
+    pub fb: Framebuffer,
+    pub input: InputState,
+    pub sprites: SpriteSheet,
+    pub map: MapData,
+    pub audio: AudioHandle,
+    /// The cart's persistent key-value store (the save file). The frontend
+    /// decides the backing: a cache-dir JSON file on the desktop console and
+    /// player, in-memory in the browser and headless `verify`.
+    pub storage: Storage,
+    /// Messages from the cart's `log` calls, drained by the console.
+    pub logs: Vec<String>,
+    /// Message from the cart's panic hook, captured just before the trap.
+    pub panic_message: Option<String>,
+    pub frame: u64,
+    /// The cart's logical frames per second (30 or 60), from its `pixel8_fps`
+    /// export. Drives `time()` and the host's update/draw cadence.
+    pub fps: u32,
+    /// Fraction (0.0..1.0) of `update`'s fuel budget used last completed frame.
+    last_update_cpu: f32,
+    /// Fraction (0.0..1.0) of `draw`'s fuel budget used last completed frame.
+    last_draw_cpu: f32,
+    /// Real frames per second measured by the host frontend; `0.0` until fed.
+    measured_fps: f32,
+    rng: u64,
+    /// Enforces `MAX_MEMORY` on linear-memory growth, including the initial
+    /// allocation at instantiation.
+    limits: StoreLimits,
+}
+
+impl HostState {
+    fn new(assets: &Assets, audio: AudioHandle, storage: Storage) -> Self {
+        Self {
+            fb: Framebuffer::new(),
+            input: InputState::default(),
+            sprites: assets.sprites.clone(),
+            map: assets.map.clone(),
+            audio,
+            storage,
+            logs: Vec::new(),
+            panic_message: None,
+            frame: 0,
+            fps: DEFAULT_FPS,
+            last_update_cpu: 0.0,
+            last_draw_cpu: 0.0,
+            measured_fps: 0.0,
+            rng: 0x2545_f491_4f6c_dd1d,
+            limits: StoreLimitsBuilder::new()
+                .memory_size(MAX_MEMORY)
+                .trap_on_grow_failure(true)
+                .build(),
+        }
+    }
+
+    fn next_rand(&mut self) -> f32 {
+        // xorshift64*; carts that need determinism can bring their own RNG.
+        let mut x = self.rng;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.rng = x;
+        let bits = (x.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 40) as u32;
+        bits as f32 / (1u32 << 24) as f32
+    }
+
+    /// Feed the host frontend's measured frame rate, surfaced to carts via `fps`.
+    pub fn set_measured_fps(&mut self, fps: f32) {
+        self.measured_fps = fps;
+    }
+
+    /// The measured frame rate, or the cart's target rate until a frontend
+    /// measures one. Keeps `fps()` sane on frontends that never measure.
+    pub fn measured_fps_or_target(&self) -> f32 {
+        if self.measured_fps > 0.0 {
+            self.measured_fps
+        } else {
+            self.fps as f32
+        }
+    }
+
+    fn seed_rand(&mut self, seed: u32) {
+        // Force a nonzero xorshift state; all-zero is a fixed point.
+        self.rng = (((seed as u64) << 32) | (seed as u64)) | 1;
+    }
+}
+
+/// A cart-side runtime error, formatted for the error screen.
+#[derive(Debug, Clone)]
+pub struct RuntimeError {
+    /// Which lifecycle call failed: "init", "update" or "draw".
+    pub phase: &'static str,
+    pub message: String,
+}
+
+impl std::fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Runtime error in {}:\n{}", self.phase, self.message)
+    }
+}
+
+fn read_guest_str(caller: &Caller<'_, HostState>, ptr: u32, len: u32) -> String {
+    let Some(mem) = caller
+        .get_export("memory")
+        .and_then(wasmi::Extern::into_memory)
+    else {
+        return String::new();
+    };
+    let data = mem.data(caller);
+    let start = ptr as usize;
+    let end = start.saturating_add(len as usize).min(data.len());
+    if start >= end {
+        return String::new();
+    }
+    String::from_utf8_lossy(&data[start..end]).into_owned()
+}
+
+/// Copy `bytes` into guest memory at `ptr`. Writes nothing when the
+/// destination range does not fit the guest's linear memory.
+fn write_guest_bytes(caller: &mut Caller<'_, HostState>, ptr: u32, bytes: &[u8]) {
+    let Some(mem) = caller
+        .get_export("memory")
+        .and_then(wasmi::Extern::into_memory)
+    else {
+        return;
+    };
+    let data = mem.data_mut(caller);
+    let start = ptr as usize;
+    let Some(end) = start.checked_add(bytes.len()) else {
+        return;
+    };
+    if end <= data.len() {
+        data[start..end].copy_from_slice(bytes);
     }
 }
 
