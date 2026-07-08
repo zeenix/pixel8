@@ -31,6 +31,7 @@ use pixel8_runtime::{
     cart,
     fb::{Framebuffer, HEIGHT, WIDTH},
     palette::col,
+    storage::Storage,
     vm::{GameVm, DEFAULT_FPS},
 };
 use std::cell::UnsafeCell;
@@ -62,7 +63,8 @@ impl Player {
             audio_buf: vec![0.0; AUDIO_CHUNK_MAX],
             errored: false,
         };
-        match GameVm::load(&cart.wasm, &cart.assets, audio) {
+        // No cache directory in the browser: storage lives for the session.
+        match GameVm::load(&cart.wasm, &cart.assets, audio, Storage::default()) {
             Ok(vm) => {
                 player.vm = Some(vm);
                 Ok(player)

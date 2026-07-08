@@ -2,7 +2,7 @@
 
 Pixel8 is a fantasy console with deliberate constraints — that's the point.
 Like PICO-8 before it, every limit is part of what makes a Pixel8 cart a
-*Pixel8 cart*. All three runtime limits are built around one easy number:
+*Pixel8 cart*. Every runtime limit is built around one easy number:
 **128 K**. If you keep that number in mind, you will never be surprised.
 
 | what            | limit   | what happens when you exceed it              |
@@ -10,6 +10,7 @@ Like PICO-8 before it, every limit is part of what makes a Pixel8 cart a
 | cart size       | 128 KiB | build warns; `export` is rejected            |
 | RAM             | 128 KiB | "ran out of memory" error screen             |
 | per-frame work  | 128 K   | "ran too long (infinite loop?)" error screen |
+| save data       | 128 KiB | `storage_set` fails; nothing is stored       |
 
 ---
 
@@ -51,6 +52,18 @@ instead of freezing the console.
 Real game logic — move sprites, read input, draw a tilemap — uses a tiny
 fraction of the budget. The limit catches runaway loops during development,
 not carefully written games.
+
+## Save data — 128 KiB
+
+The persistent key-value store (`Context::storage_set` / `storage_get`, see
+docs/ABI.md) holds the cart's save data as JSON. The whole store — every key
+and value, serialized — is capped at 128 KiB. A `storage_set` that would push
+past the cap fails (the SDK returns `Err(StorageFull)`) and stores nothing;
+the previous value under that key is kept.
+
+That is a *huge* amount of save data for a 128x128 game — PICO-8 gives carts
+256 bytes — so hitting this limit usually means storing something that isn't
+save data.
 
 ---
 

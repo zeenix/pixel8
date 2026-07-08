@@ -24,3 +24,7 @@ winit.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
+
+[dev-dependencies]
+# Hand-written WAT carts for shell tests, as in pixel8-runtime's VM tests.
+wat = "1"

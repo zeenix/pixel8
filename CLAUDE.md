@@ -76,7 +76,7 @@ touching code:
   native widgets anywhere. A consequence: the whole console is **testable headless** —
   tests and the `verify`/`snap` subcommands drive the same framebuffer with no window.
 - **The sandbox is allowlist-only.** `GameVm::load` links exactly the `"pixel8"` import
-  set (~26 C-like functions, documented in `docs/ABI.md`); unknown imports fail
+  set (~50 C-like functions, documented in `docs/ABI.md`); unknown imports fail
   instantiation. No WASI, no filesystem, no network. Fuel metering caps each
   `update`/`draw` so infinite loops become an error screen, not a freeze. The VM holds a
   *copy* of sprite/map assets so runtime `mset` writes are RAM-only, like a real cart.
@@ -108,6 +108,10 @@ Every pipeline stage also exists as a subcommand of the `pixel8` binary (dispatc
   `CONTRIBUTING.md`.
 - **Atomic commits.** When addressing review feedback, fix existing commits and
   force-push rather than piling on follow-up commits.
+- **Top-down ordering within modules**, [rustls-style](https://github.com/rustls/rustls/blob/main/CONTRIBUTING.md#top-down-ordering-within-modules):
+  items depend on items defined *below* them — public API near the top, private
+  helpers below their callers, simple `const`s below their users, tests last.
+  See `CONTRIBUTING.md`.
 - Audio is feature-gated (`audio`, on by default). Code must still build and run
   (silently) with `--no-default-features` on the console/runtime for machines without
   ALSA.

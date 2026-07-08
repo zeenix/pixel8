@@ -147,6 +147,35 @@ camera), so set them in `pixel8_init` or each frame as needed.
 | `log`      | `(ptr: u32, len: u32)` | line to the Pixel8 console                                                                                               |
 | `panic`    | `(ptr: u32, len: u32)` | record a panic message; the SDK's panic hook calls this right before the trap so the error screen shows the real message |
 
+### Storage
+
+Persistent key-value storage — the cart's save file. Keys are UTF-8 text;
+values cross the boundary as JSON text. The raw surface accepts any JSON
+value; the SDK's allocation-free API sticks to primitives (null, bool,
+integer, float — non-finite floats have no JSON spelling and are stored as
+null) so it also works in `no_std` carts. The whole store serializes to at
+most 128 KiB (see LIMITS.md); a `storage_set` that would exceed it stores
+nothing and returns 0.
+
+Values are stored parsed, not as text: `storage_set` parses the JSON (which
+is why malformed text returns 0), and `storage_get` returns the host's
+*canonical re-serialization* — shortest-round-trip numbers, possibly in
+exponent form, no insignificant whitespace — never the bytes the cart
+originally passed. A consequence carts may rely on: any JSON primitive
+(null, bool, 64-bit integer, double) comes back as at most 32 bytes of text.
+
+Hosts decide the backing: the desktop console and player keep a JSON file in
+the user's cache directory keyed by the cart's name, saved at least whenever
+the cart stops; the web player and headless `verify` keep the store in
+memory.
+
+| function         | signature                                                       | notes                                                                                                                          |
+| ---------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `storage_set`    | `(key_ptr: u32, key_len: u32, val_ptr: u32, val_len: u32) -> i32` | store JSON text under a key; 1 = stored, 0 = not valid JSON or over the 128 KiB cap (old value kept)                           |
+| `storage_get`    | `(key_ptr: u32, key_len: u32, buf_ptr: u32, buf_cap: u32) -> i32` | returns the value's JSON length, or -1 if absent; the text is written to `buf` only when it fits `buf_cap` (cap 0 sizes a read) |
+| `storage_remove` | `(key_ptr: u32, key_len: u32) -> i32`                             | 1 if the key existed                                                                                                           |
+| `storage_clear`  | `()`                                                              | remove every key                                                                                                               |
+
 ### Resources
 
 Read-only meters a cart can watch. CPU is reported for the *last completed frame* (the

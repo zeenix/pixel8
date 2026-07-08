@@ -60,7 +60,8 @@ impl<const N: usize> core::fmt::Write for FmtBuf<N> {
 
 /// Format `args` into a fresh [`FmtBuf`] of capacity `N`.
 ///
-/// Used by the `printf!`/`logf!` macros; not part of the cart-facing API.
+/// Used by the `printf!`/`logf!` macros and the storage JSON codec; not
+/// part of the cart-facing API.
 pub fn format_args_to_buf<const N: usize>(args: core::fmt::Arguments<'_>) -> FmtBuf<N> {
     use core::fmt::Write as _;
     let mut buf = FmtBuf::new();

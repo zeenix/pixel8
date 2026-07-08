@@ -72,6 +72,10 @@ extern "C" {
     pub fn cpu_update() -> f32;
     pub fn cpu_draw() -> f32;
     pub fn fps() -> f32;
+    pub fn storage_set(key_ptr: *const u8, key_len: u32, val_ptr: *const u8, val_len: u32) -> i32;
+    pub fn storage_get(key_ptr: *const u8, key_len: u32, buf_ptr: *mut u8, buf_cap: u32) -> i32;
+    pub fn storage_remove(key_ptr: *const u8, key_len: u32) -> i32;
+    pub fn storage_clear();
 }
 
 // Host-target stubs so the SDK (and carts) also type-check, document and
@@ -180,6 +184,29 @@ mod stubs {
     pub unsafe fn fps() -> f32 {
         0.0
     }
+    // Pretend a set always fits (like the wasm host with an empty store) so
+    // cart logic type-checks and unit-tests on native targets; the store
+    // itself only exists on the host side of the wasm boundary.
+    pub unsafe fn storage_set(
+        _key_ptr: *const u8,
+        _key_len: u32,
+        _val_ptr: *const u8,
+        _val_len: u32,
+    ) -> i32 {
+        1
+    }
+    pub unsafe fn storage_get(
+        _key_ptr: *const u8,
+        _key_len: u32,
+        _buf_ptr: *mut u8,
+        _buf_cap: u32,
+    ) -> i32 {
+        -1
+    }
+    pub unsafe fn storage_remove(_key_ptr: *const u8, _key_len: u32) -> i32 {
+        0
+    }
+    pub unsafe fn storage_clear() {}
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -4,6 +4,10 @@
 //! coins (tile 3) and the trophy (tile 4) are collected by rewriting the map,
 //! and put back when the game restarts.
 //!
+//! The best score is kept between runs with [`Context::storage_get`] /
+//! [`Context::storage_set`] — loaded once at startup, saved whenever a run
+//! beats it — so the high score survives closing the console.
+//!
 //! The hero owns a [`Body`], so a running jump (hold Right + jump) — a
 //! sub-pixel diagonal — climbs a clean staircase instead of shimmering. The
 //! body owns the position; the cart just hands it the movement it worked out
@@ -41,6 +45,7 @@ game!(Platformer {
     badie: Some(Badie::new()),
     taken: Vec::new(),
     badies_killed: 0,
+    best_score: 0,
     frame: 0,
     mode: GameMode::Init,
 });
@@ -50,6 +55,9 @@ struct Platformer {
     badie: Option<Badie>,
     taken: Vec<Taken, MAX_TAKEN>,
     badies_killed: u8,
+    /// The best score across runs, loaded from storage at startup and saved
+    /// back whenever a run beats it.
+    best_score: u16,
     frame: u32,
     mode: GameMode,
 }
@@ -76,6 +84,7 @@ impl Platformer {
             let took_trophy = taken.is_trophy();
             self.taken.push(taken).unwrap();
             if took_trophy {
+                self.record_best(ctx);
                 // Another music can't be playing becase `PlayingMusic` instace has had to have been
                 // dropped when the game mode switch away from `Ended`.
                 let music = ctx.music(COMPLETION_MUSIC).play().unwrap();
@@ -130,6 +139,7 @@ impl Platformer {
     }
 
     fn game_over(&mut self, ctx: &mut Context) {
+        self.record_best(ctx);
         let music = ctx.music(GAME_OVER_MUSIC).play().unwrap();
         self.mode = GameMode::Ended {
             time: ctx.time(),
@@ -138,6 +148,23 @@ impl Platformer {
             won: false,
         };
     }
+
+    /// This run's score: coins and the trophy taken, plus stomped badies.
+    fn score(&self) -> u16 {
+        self.taken.iter().map(|t| t.points() as u16).sum::<u16>()
+            + self.badies_killed as u16 * BADIE_KILL_POINTS as u16
+    }
+
+    /// Save the score if it beats the stored best, so the high score
+    /// survives a restart. Called once as each run ends.
+    fn record_best(&mut self, ctx: &mut Context) {
+        let score = self.score();
+        if score > self.best_score {
+            self.best_score = score;
+            // One u16 can't approach the 128 KiB store cap, so this never fails.
+            ctx.storage_set("best", score).unwrap();
+        }
+    }
 }
 
 impl Game for Platformer {
@@ -145,7 +172,14 @@ impl Game for Platformer {
         self.frame += 1;
 
         match &mut self.mode {
-            mode @ GameMode::Init => mode.start(ctx),
+            GameMode::Init => {
+                // First frame: pick up the best score from a previous session.
+                self.best_score = ctx
+                    .storage_get("best")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0) as u16;
+                self.mode.start(ctx);
+            }
             GameMode::InGame { .. } => self.in_game_update(ctx),
             GameMode::Ended { time, .. } if ctx.time() - *time > GAME_OVER_TIMEOUT => {
                 self.restart_game(ctx)
@@ -175,9 +209,17 @@ impl Game for Platformer {
 
         gfx.camera(0, 0);
 
-        let score = self.taken.iter().fold(0, |acc, r| acc + r.points())
-            + self.badies_killed * BADIE_KILL_POINTS;
+        let score = self.score();
         printf!(gfx, 2, 2, Color::YELLOW, "Score {}", score);
+        // Track the record live so it ticks up the moment you beat it.
+        printf!(
+            gfx,
+            2,
+            9,
+            Color::LIGHT_GREY,
+            "Best {}",
+            self.best_score.max(score)
+        );
 
         if let GameMode::InGame { time_left, .. } = self.mode {
             let color = if time_left < 5 {

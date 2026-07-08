@@ -11,6 +11,7 @@ use pixel8_runtime::{
     cart,
     fb::{Framebuffer, HEIGHT},
     palette::col,
+    storage::Storage,
     ui,
     vm::{GameVm, UI_FPS},
 };
@@ -118,8 +119,10 @@ impl App {
         };
         // Stop any audio from a previous cart before loading the new VM.
         self.audio.stop_all();
+        // The cart's save file, keyed by its name; saved when the VM drops.
+        let storage = Storage::for_cart(&cart.assets.meta.name);
         // The VM writes into the same synth the platform's audio thread reads.
-        let mut vm = match GameVm::load(&cart.wasm, &cart.assets, self.audio.clone()) {
+        let mut vm = match GameVm::load(&cart.wasm, &cart.assets, self.audio.clone(), storage) {
             Ok(vm) => Some(vm),
             Err(e) => return self.show_error(&format!("boot failed\n{e}")),
         };

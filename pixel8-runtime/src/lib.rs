@@ -20,6 +20,7 @@ pub mod input;
 pub mod palette;
 pub mod pico8;
 pub mod project;
+pub mod storage;
 pub mod ui;
 pub mod vm;
 mod wire;
