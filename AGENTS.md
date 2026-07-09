@@ -2,6 +2,9 @@
 
 This file provides guidance to AI coding agents when working with code in this repository.
 
+For contribution conventions — commit-message format, atomic commits, code layout, and
+more — follow the guidelines in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## What Pixel8 is
 
 A PICO-8-like fantasy console where games ("carts") are written in **Rust**, compiled
@@ -101,17 +104,9 @@ Every pipeline stage also exists as a subcommand of the `pixel8` binary (dispatc
 
 ## Conventions
 
-- **Commit messages** are prefixed with a single verbatim [gitmoji](https://gitmoji.dev/)
-  emoji (including any U+FE0F variation selector, e.g. `♻️`), then one space, then a
-  sentence: `🐛 Stop the synth clipping when two channels peak together`. Use the
-  `gimoji` tool (`gimoji --init`) rather than typing emoji from memory. See
-  `CONTRIBUTING.md`.
-- **Atomic commits.** When addressing review feedback, fix existing commits and
-  force-push rather than piling on follow-up commits.
-- **Top-down ordering within modules**, [rustls-style](https://github.com/rustls/rustls/blob/main/CONTRIBUTING.md#top-down-ordering-within-modules):
-  items depend on items defined *below* them — public API near the top, private
-  helpers below their callers, simple `const`s below their users, tests last.
-  See `CONTRIBUTING.md`.
+Commit messages, atomic commits, and top-down module ordering are covered in
+`CONTRIBUTING.md` (see the top of this file). Project-specific note:
+
 - Audio is feature-gated (`audio`, on by default). Code must still build and run
   (silently) with `--no-default-features` on the console/runtime for machines without
   ALSA.
