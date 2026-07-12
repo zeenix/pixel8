@@ -28,6 +28,11 @@ sudo apt install libasound2-dev   # debian/ubuntu (or alsa-lib-devel on fedora)
 cargo console
 cargo console -- examples/platformer    # boot with a project loaded, then type `run`
 
+# Boot it in the terminal (alias for `run --release -p pixel8-tui`). Keep the `-p`
+# when invoking cargo directly: `cargo run --bin pixel8-tui` at the workspace root
+# unifies features across members and builds the wgpu/winit stack for nothing.
+cargo tui
+
 # Tests
 cargo test --workspace
 cargo test -p pixel8-runtime audio::   # single module/test
@@ -44,7 +49,7 @@ CI (`.github/workflows/ci.yml`) runs three jobs that must stay green: `fmt` (nig
 
 ## Workspace layout
 
-The workspace excludes `examples/` (those are standalone wasm crates). Five members:
+The workspace excludes `examples/` (those are standalone wasm crates). Six members:
 
 - **`pixel8/`** — the SDK carts depend on, *deliberately zero-dependency*. `ffi.rs`
   declares the raw ABI imports (stubbed on non-wasm so carts type-check natively);
@@ -56,11 +61,19 @@ The workspace excludes `examples/` (those are standalone wasm crates). Five memb
   `font`, `palette`, `vm` (wasmi + ABI linking + fuel metering), `input`, `audio`
   (4-ch synth + cpal layer behind the `audio` feature), `assets`, `project`, `cart`
   (PNG codec), `pico8` (importer), `ui`.
-- **`pixel8-console/`** — the desktop frontend (winit + wgpu). **The binary it builds is
-  named `pixel8`, not `pixel8-console`.** Contains `shell.rs` (the mode machine),
-  `main.rs` (event loop + headless subcommand dispatch), `gpu.rs`, `builder.rs`,
-  `webexport.rs`, and `editor/` (the five editors: `code`, `sprite`, `map`, `sfx`,
-  `music`).
+- **`pixel8-console/`** — the console: a library (shell + editors) plus the windowed
+  desktop frontend. **The binary it builds is named `pixel8`, not `pixel8-console`.**
+  `lib.rs` exports `shell.rs` (the mode machine), `builder.rs`, `webexport.rs`, `ui.rs`
+  and `editor/` (the five editors: `code`, `sprite`, `map`, `sfx`, `music`) for reuse
+  by other frontends; `main.rs` (winit event loop + headless subcommand dispatch) and
+  `gpu.rs` (wgpu present) sit behind the default-on `window` feature, so frontends
+  depending on the library with `default-features = false` never build the GPU stack.
+- **`pixel8-tui/`** — the terminal frontend, a separate `pixel8-tui` binary: `tui.rs`
+  (viuer sixel/half-block presenter + crossterm input) and `raw_keys.rs` (evdev key
+  state for chords on terminals without key-release reporting; on Linux one of the
+  two is required at startup) over the `pixel8-console` library with the `window`
+  feature off. No winit/wgpu in its dependency tree, and no viuer/crossterm in the
+  windowed console's.
 - **`pixel8-web/`** — the browser player: `pixel8-runtime` compiled to wasm and wrapped
   in a C-like export surface. `cdylib` + `rlib` (rlib so player logic is host-testable).
 - **`pixel8-player/`** — pure-Rust cart player with two cargo-feature backends:
@@ -110,11 +123,15 @@ Commit messages, atomic commits, and top-down module ordering are covered in
 - Audio is feature-gated (`audio`, on by default). Code must still build and run
   (silently) with `--no-default-features` on the console/runtime for machines without
   ALSA.
+- The windowed frontend is feature-gated too (`window`, on by default; it gates the
+  `pixel8` binary and winit/wgpu). The console library must keep building with
+  `--no-default-features` and with each feature alone — that featureless build is
+  exactly what `pixel8-tui` depends on.
 
 ## Docs index
 
 `docs/ABI.md` (wasm import surface), `docs/ARCHITECTURE.md`, `docs/CART_FORMAT.md`,
 `docs/CLIPBOARD_FORMAT.md` (native JSON clipboard wire format + PICO-8 interop),
 `docs/LIMITS.md` + `docs/LIMITS_TESTING.md`, `docs/PICO8_IMPORT.md`,
-`docs/WEB_EXPORT.md`, `docs/HANDHELD.md`. Design plans/specs live under
-`docs/superpowers/`.
+`docs/WEB_EXPORT.md`, `docs/HANDHELD.md`, `docs/TUI.md` (the `pixel8-tui` terminal
+frontend). Design plans/specs live under `docs/superpowers/`.
