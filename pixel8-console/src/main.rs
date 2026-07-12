@@ -53,6 +53,11 @@ fn main() -> Result<()> {
             print_help();
             bail!("Usage: pixel8 run <dir|cart.png>");
         }
+        // The terminal frontend lives in its own crate, so this binary
+        // never builds it — point people there.
+        ["tui", ..] => {
+            bail!("The terminal frontend is the separate `pixel8-tui` binary (cargo install pixel8-tui)")
+        }
         [] => run_windowed(None, false),
         [path] => run_windowed(Some(path.to_string()), false),
         _ => {
