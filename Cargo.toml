@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "pixel8",
     "pixel8-console",
+    "pixel8-tui",
     "pixel8-web",
     "pixel8-player",
     "pixel8-runtime",
@@ -19,6 +20,9 @@ repository = "https://github.com/zeenix/pixel8"
 
 [workspace.dependencies]
 pixel8-runtime = { path = "pixel8-runtime", default-features = false }
+# The console shell as a library; default-features off so only the windowed
+# frontend builds the winit/wgpu stack.
+pixel8-console = { path = "pixel8-console", default-features = false }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 # No `wat`: carts are always binary wasm (text format is test-only).

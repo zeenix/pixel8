@@ -1,6 +1,10 @@
-# `cargo console` boots Pixel8.
+# `cargo console` boots Pixel8; `cargo tui` boots it in the terminal.
+# The `-p` matters: selecting the package keeps cargo's feature unification
+# from building the other frontend's stack (e.g. `cargo run --bin
+# pixel8-tui` at the workspace root would compile wgpu/winit too).
 [alias]
 console = "run --release -p pixel8-console"
+tui = "run --release -p pixel8-tui"
 
 # Handheld player builds as fully-static musl binaries (see docs/HANDHELD.md). rust-lld +
 # self-contained linking needs no cross-gcc, no zig, no Docker.

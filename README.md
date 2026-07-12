@@ -61,6 +61,25 @@ runs from anywhere; `Ctrl+S` saves and kicks off a background build, flashing `s
 while a game runs captures the screen as the cartridge label. Type `keys` in the console for the
 full list.
 
+### In the terminal
+
+The same console also runs inside a terminal — editors, carts and all — as the separate
+`pixel8-tui` binary (so neither frontend drags in the other's dependencies):
+
+```text
+cargo install pixel8-tui
+pixel8-tui                    boot the console in the terminal
+pixel8-tui run mygame.png     boot, load, and run immediately
+```
+
+Terminals with [sixel](https://en.wikipedia.org/wiki/Sixel) support (foot, WezTerm, Konsole,
+iTerm2, xterm...) get real pixels via a pure-Rust encoder; everywhere else the screen is drawn
+with unicode half-blocks. `Ctrl+Q` quits. On Linux, game input needs either a terminal with the
+kitty keyboard protocol or read access to `/dev/input` (one-time:
+`sudo usermod -aG input $USER`). See
+[docs/TUI.md](https://github.com/zeenix/pixel8/blob/main/docs/TUI.md) for input details and
+tuning knobs.
+
 ### Constraints (they are the point)
 
 | thing      | size                                  |
@@ -156,7 +175,13 @@ against, and the console that builds and runs it.
   toolchain. `cargo install pixel8-console` gives you the `pixel8` command: the boot prompt, the
   five editors (code, sprite, map, sfx, music), the build-and-hot-reload loop and every headless
   subcommand (`new`, `build`, `export`, `extract`, `import-pico8`, `export-web`, `verify`). The
-  crate is `pixel8-console`; the binary it installs is `pixel8`.
+  crate is `pixel8-console`; the binary it installs is `pixel8`. The shell and editors are also
+  exposed as a library (the windowed frontend sits behind the default-on `window` feature), which
+  is how `pixel8-tui` reuses them.
+- **[`pixel8-tui`](https://crates.io/crates/pixel8-tui)** — the console in your terminal:
+  the same shell and editors rendered over sixel (pure-Rust encoder) or unicode half-blocks,
+  with crossterm input. A thin frontend over the `pixel8-console` library that never builds
+  the winit/wgpu window stack.
 - **[`pixel8-runtime`](https://crates.io/crates/pixel8-runtime)** — the console's engine, as a
   reusable library: the 128x128 indexed framebuffer and software rasterizer, font and palette, the
   wasmi VM with ABI linking and fuel metering, the input model, the 4-channel synth, the shared
@@ -182,6 +207,7 @@ sudo apt install libasound2-dev        # debian/ubuntu
 sudo dnf install alsa-lib-devel        # fedora
 # (or build silent with `--no-default-features`)
 cargo console                          # alias for: cargo run --release -p pixel8-console
+cargo tui                              # alias for: cargo run --release -p pixel8-tui
 ```
 
 Try a bundled cart:

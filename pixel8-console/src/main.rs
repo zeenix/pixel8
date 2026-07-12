@@ -4,25 +4,20 @@
 //! loaded. A few headless subcommands (`new`, `build`, `export`,
 //! `extract`, `import-pico8`) support the external-editor workflow and CI.
 
-mod builder;
-mod clipboard;
-mod editor;
-mod gpu;
-mod shell;
-mod ui;
-mod watch;
-mod webexport;
-
 use anyhow::{anyhow, bail, Context, Result};
+use pixel8_console::{
+    builder, frame_duration, gpu, sdk_path,
+    shell::{self, Key, Mods, Shell},
+    webexport,
+};
 use pixel8_runtime::{
     cart::{self, Cart},
     project::Project,
 };
-use shell::{Key, Mods, Shell};
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use winit::{
     application::ApplicationHandler,
@@ -32,21 +27,6 @@ use winit::{
     keyboard::{KeyCode, NamedKey, PhysicalKey},
     window::{Window, WindowId},
 };
-
-/// One tick's wall-clock budget at a given rate (30 normally, 60 while a
-/// 60 fps cart runs).
-fn frame_duration(fps: u32) -> Duration {
-    Duration::from_nanos(1_000_000_000 / fps.max(1) as u64)
-}
-
-/// Where the `pixel8` SDK crate lives, for generated project manifests.
-/// Defaults to this source tree; override with PIXEL8_SDK for installs.
-fn sdk_path() -> PathBuf {
-    if let Ok(p) = std::env::var("PIXEL8_SDK") {
-        return PathBuf::from(p);
-    }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../pixel8")
-}
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -72,6 +52,11 @@ fn main() -> Result<()> {
         ["run"] => {
             print_help();
             bail!("Usage: pixel8 run <dir|cart.png>");
+        }
+        // The terminal frontend lives in its own crate, so this binary
+        // never builds it — point people there.
+        ["tui", ..] => {
+            bail!("The terminal frontend is the separate `pixel8-tui` binary (cargo install pixel8-tui)")
         }
         [] => run_windowed(None, false),
         [path] => run_windowed(Some(path.to_string()), false),

@@ -1,0 +1,38 @@
+[package]
+name = "pixel8-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The Pixel8 fantasy console in your terminal: sixel or half-block rendering, full shell and editors"
+readme = "README.md"
+
+[features]
+default = ["audio"]
+# Disable for machines without audio (e.g. no ALSA headers on Linux).
+audio = ["pixel8-console/audio", "pixel8-runtime/audio"]
+
+[dependencies]
+# The whole console (shell + editors) as a library; default-features off
+# keeps the winit/wgpu window stack out of this binary entirely.
+pixel8-console.workspace = true
+pixel8-runtime.workspace = true
+anyhow.workspace = true
+# `icy_sixel` (not `sixel`) keeps the sixel encoder pure Rust; the `sixel`
+# feature would pull in sixel-rs, a binding to the C libsixel.
+viuer = { version = "0.11", default-features = false, features = [
+    "icy_sixel",
+] }
+# The same version viuer uses, so only one copy is built.
+crossterm = { version = "0.29", default-features = false, features = [
+    "events",
+    "bracketed-paste",
+    "windows",
+] }
+# Only in-memory buffers and nearest-neighbor scaling; no codecs needed.
+image = { version = "0.25", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# True key press/release from /dev/input, for terminals that can't report
+# releases (pure-Rust ioctls; the same crate the handheld player uses).
+evdev = "0.13"
