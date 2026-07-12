@@ -92,7 +92,11 @@ degrades to a lower visual frame rate instead of lagging ever further behind.
 - **Mouse**: click, drag and hover all reach the editors, at terminal-cell
   granularity — coarser than a real pointer (roughly every other screen pixel at
   4x scale) but fully usable. When the terminal reports its pixel size, cell→pixel
-  mapping is exact; otherwise a common 8x16 cell is assumed.
+  mapping is exact; otherwise a common 8x16 cell is assumed. The console's own
+  pixel-art cursor is suppressed here: the terminal already draws a mouse pointer
+  and — unlike a window — gives no way to hide it, so drawing both would show a
+  distracting double cursor. (The windowed console does the reverse, hiding the OS
+  pointer and keeping its own.)
 - **Paste**: bracketed paste is fed through the shell as keystrokes, so pasting works
   in the console prompt and the code editor. (`Ctrl+C`/`Ctrl+V` still use the system
   clipboard, exactly like the windowed console, when a desktop clipboard is

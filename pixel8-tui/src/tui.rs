@@ -78,6 +78,11 @@ pub fn run(load: Option<String>, auto_run: bool) -> Result<()> {
     let audio = pixel8_runtime::audio::AudioHandle::dummy();
 
     let mut shell = Shell::new(audio, sdk_path());
+    // The terminal draws its own mouse pointer and, unlike a window, gives us
+    // no way to hide it, so suppress the console's software cursor to avoid a
+    // double cursor. (The windowed console does the reverse: it hides the OS
+    // cursor and keeps the software one.)
+    shell.set_hide_cursor(true);
     if let Some(path) = load {
         shell.startup_load(&path);
         if auto_run {

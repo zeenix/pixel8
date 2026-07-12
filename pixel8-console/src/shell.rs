@@ -326,6 +326,12 @@ pub struct Shell {
 
     /// Frames remaining of the camera-flash overlay shown after an F6 capture.
     capture_flash: u32,
+
+    /// Suppress the software mouse cursor. The windowed console draws its own
+    /// pixel-art cursor and hides the OS one; a terminal frontend can't hide
+    /// the terminal's mouse pointer, so it hides this one instead to avoid a
+    /// distracting double cursor.
+    hide_cursor: bool,
 }
 
 const TEXT_COLS: usize = 31;
@@ -370,9 +376,16 @@ impl Shell {
             fps_t0: Instant::now(),
             fps_val: 0.0,
             capture_flash: 0,
+            hide_cursor: false,
         };
         shell.boot();
         shell
+    }
+
+    /// Hide the console's software mouse cursor (used by frontends that show
+    /// the host's own pointer, like the terminal, to avoid a double cursor).
+    pub fn set_hide_cursor(&mut self, hide: bool) {
+        self.hide_cursor = hide;
     }
 
     fn boot(&mut self) {
@@ -1997,7 +2010,9 @@ impl Shell {
                         ui::status_bar(&mut self.fb, ui::tab_name(i));
                     }
                 }
-                ui::draw_cursor(&mut self.fb, &mouse);
+                if !self.hide_cursor {
+                    ui::draw_cursor(&mut self.fb, &mouse);
+                }
                 &self.fb
             }
         }
@@ -2851,5 +2866,31 @@ mod tests {
         assert_eq!(assets.sfx[0].notes[0].pitch, 21);
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn hide_cursor_suppresses_the_software_cursor() {
+        let mut shell = test_shell();
+        // An editor mode: the software mouse cursor is drawn there.
+        shell.mode = Mode::Sprite;
+        shell.mouse.x = 40;
+        shell.mouse.y = 40;
+        let with_cursor = shell.draw().pixels().to_vec();
+
+        shell.set_hide_cursor(true);
+        let hidden = shell.draw().pixels().to_vec();
+        assert_ne!(
+            with_cursor, hidden,
+            "hiding the cursor must change the frame"
+        );
+
+        // Hiding the cursor draws exactly what the mouse being off-screen does.
+        shell.set_hide_cursor(false);
+        shell.mouse = Mouse::default();
+        let no_pointer = shell.draw().pixels().to_vec();
+        assert_eq!(
+            hidden, no_pointer,
+            "a hidden cursor leaves no pointer behind"
+        );
     }
 }
