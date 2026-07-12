@@ -2,8 +2,9 @@
 //! run loop), the five editors, build orchestration and web export —
 //! everything except presentation and input, which each frontend supplies.
 //!
-//! Two frontends drive it: the windowed `pixel8` binary in this crate
-//! (behind the default-on `window` feature, winit + wgpu) and the
+//! Two frontends drive it: the `pixel8` binary in this crate — whose
+//! windowed frontend (winit + wgpu) sits behind the default-on `window`
+//! feature, while its headless subcommands always build — and the
 //! `pixel8-tui` crate (sixel/half-block terminal rendering). Frontends
 //! that don't want the GPU stack depend on this crate with
 //! `default-features = false`; everything a frontend needs — ticking the

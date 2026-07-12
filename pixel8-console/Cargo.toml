@@ -11,15 +11,16 @@ readme = "README.md"
 [[bin]]
 name = "pixel8"
 path = "src/main.rs"
-required-features = ["window"]
 
 [features]
 default = ["audio", "window"]
 # Disable for machines without audio (e.g. no ALSA headers on Linux).
 audio = ["pixel8-runtime/audio"]
-# The windowed `pixel8` binary (winit + wgpu). Other frontends — the
-# `pixel8-tui` crate — depend on this crate's library with the feature off,
-# so they never build the GPU stack.
+# The windowed frontend (winit + wgpu). Without it the `pixel8` binary
+# still builds with every headless subcommand — CI uses that to orchestrate
+# cart builds cheaply — and other frontends (the `pixel8-tui` crate) depend
+# on this crate's library with the feature off, never building the GPU
+# stack.
 window = ["dep:winit", "dep:wgpu", "dep:pollster"]
 
 [dependencies]

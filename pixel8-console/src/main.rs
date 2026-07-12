@@ -6,19 +6,26 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use pixel8_console::{
-    builder, frame_duration, gpu, sdk_path,
-    shell::{self, Key, Mods, Shell},
+    builder, sdk_path,
+    shell::{self, Shell},
     webexport,
+};
+#[cfg(feature = "window")]
+use pixel8_console::{
+    frame_duration, gpu,
+    shell::{Key, Mods},
 };
 use pixel8_runtime::{
     cart::{self, Cart},
     project::Project,
 };
+#[cfg(feature = "window")]
+use std::sync::Arc;
 use std::{
     path::{Path, PathBuf},
-    sync::Arc,
     time::Instant,
 };
+#[cfg(feature = "window")]
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -338,6 +345,7 @@ fn headless_snap(project: &Path, outdir: &Path) -> Result<()> {
 // Windowed console
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "window")]
 fn run_windowed(load: Option<String>, auto_run: bool) -> Result<()> {
     #[cfg(feature = "audio")]
     let audio_out = pixel8_runtime::audio::AudioOutput::start();
@@ -373,6 +381,17 @@ fn run_windowed(load: Option<String>, auto_run: bool) -> Result<()> {
     Ok(())
 }
 
+/// Opening the console needs the windowed frontend; everything headless
+/// still works in a build without it (how CI orchestrates cart builds).
+#[cfg(not(feature = "window"))]
+fn run_windowed(_load: Option<String>, _auto_run: bool) -> Result<()> {
+    bail!(
+        "This pixel8 build has no windowed frontend (`window` feature off). The headless \
+         subcommands still work, and `pixel8-tui` runs the console in a terminal."
+    );
+}
+
+#[cfg(feature = "window")]
 struct App {
     window: Option<Arc<Window>>,
     gpu: Option<gpu::Gpu>,
@@ -384,6 +403,7 @@ struct App {
     _audio_out: Option<pixel8_runtime::audio::AudioOutput>,
 }
 
+#[cfg(feature = "window")]
 impl App {
     /// Map physical keys to the six game buttons (active in run mode).
     fn game_button(code: KeyCode) -> Option<usize> {
@@ -423,6 +443,7 @@ impl App {
     }
 }
 
+#[cfg(feature = "window")]
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {

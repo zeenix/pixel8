@@ -65,9 +65,11 @@ The workspace excludes `examples/` (those are standalone wasm crates). Six membe
   desktop frontend. **The binary it builds is named `pixel8`, not `pixel8-console`.**
   `lib.rs` exports `shell.rs` (the mode machine), `builder.rs`, `webexport.rs`, `ui.rs`
   and `editor/` (the five editors: `code`, `sprite`, `map`, `sfx`, `music`) for reuse
-  by other frontends; `main.rs` (winit event loop + headless subcommand dispatch) and
-  `gpu.rs` (wgpu present) sit behind the default-on `window` feature, so frontends
-  depending on the library with `default-features = false` never build the GPU stack.
+  by other frontends; the winit event loop in `main.rs` and `gpu.rs` (wgpu present)
+  sit behind the default-on `window` feature, so frontends depending on the library
+  with `default-features = false` never build the GPU stack. The `pixel8` binary and
+  its headless subcommands build with or without `window` — CI's example/player
+  workflows rely on the featureless binary to orchestrate cart builds.
 - **`pixel8-tui/`** — the terminal frontend, a separate `pixel8-tui` binary: `tui.rs`
   (viuer sixel/half-block presenter + crossterm input) and `raw_keys.rs` (evdev key
   state for chords on terminals without key-release reporting; on Linux one of the
