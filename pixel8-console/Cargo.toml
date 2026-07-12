@@ -11,18 +11,23 @@ readme = "README.md"
 [[bin]]
 name = "pixel8"
 path = "src/main.rs"
+required-features = ["window"]
 
 [features]
-default = ["audio"]
+default = ["audio", "window"]
 # Disable for machines without audio (e.g. no ALSA headers on Linux).
 audio = ["pixel8-runtime/audio"]
+# The windowed `pixel8` binary (winit + wgpu). Other frontends — the
+# `pixel8-tui` crate — depend on this crate's library with the feature off,
+# so they never build the GPU stack.
+window = ["dep:winit", "dep:wgpu", "dep:pollster"]
 
 [dependencies]
 pixel8-runtime.workspace = true
 anyhow.workspace = true
-winit.workspace = true
-wgpu.workspace = true
-pollster.workspace = true
+winit = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }
+pollster = { workspace = true, optional = true }
 arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }
 
 [dev-dependencies]
