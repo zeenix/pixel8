@@ -161,7 +161,10 @@ struct Tui {
 
 impl Tui {
     fn new(shell: Shell, backend: Backend, buttons: ButtonTracker) -> Self {
-        let max_scale = parse_max_scale(std::env::var("PIXEL8_TUI_MAX_SCALE").ok().as_deref());
+        let max_scale = max_scale(
+            backend,
+            std::env::var("PIXEL8_TUI_MAX_SCALE").ok().as_deref(),
+        );
         Self {
             shell,
             backend,
@@ -562,17 +565,24 @@ impl Layout {
         }
     }
 
-    /// Half-block cells are one pixel wide and two tall. The bottom row is
-    /// kept free: viuer ends the image with a newline, which would scroll
-    /// the alternate screen if the image touched the last row — and the
-    /// status line lives there.
+    /// Half-block cells are one pixel wide and two tall, so the screen at
+    /// scale N occupies 128N columns and 64N rows. Take the largest scale
+    /// that fits, capped by `max_scale` — 1 by default, because a cell is
+    /// already several pixels wide: growing the screen to fill the terminal
+    /// would weld its on-screen size to the window, leaving the font size
+    /// with no effect on how big the console looks. The bottom row is kept
+    /// free: viuer ends the image with a newline, which would scroll the
+    /// alternate screen if the image touched the last row — and the status
+    /// line lives there.
     fn blocks(cols: u16, rows: u16, max_scale: u32) -> Layout {
         let rows_img = rows.saturating_sub(1).max(1) as u32;
-        let mut side = (2 * rows_img.min(cols as u32 / 2)).max(2);
-        if side >= WIDTH as u32 {
-            // Snap to whole multiples of the screen so pixels stay uniform.
-            side = (side - side % WIDTH as u32).min(WIDTH as u32 * max_scale);
-        }
+        let scale = (cols as u32 / WIDTH as u32).min(rows_img / BLOCK_ROWS);
+        let side = match scale {
+            // Too narrow or too short for even 1:1; shrink the screen to fit,
+            // losing pixels, rather than spilling off the terminal.
+            0 => (2 * rows_img.min(cols as u32 / 2)).max(2),
+            scale => WIDTH as u32 * scale.min(max_scale),
+        };
         Layout {
             cols,
             cells: (side, side / 2),
@@ -809,12 +819,19 @@ fn raw_keys_disabled(var: Option<&str>) -> bool {
     var.is_some_and(|v| !v.is_empty() && v != "0")
 }
 
-/// PIXEL8_TUI_MAX_SCALE: largest integer scale of the 128 px screen in
-/// sixel mode. Bigger frames cost more to encode 30 times a second.
-fn parse_max_scale(var: Option<&str>) -> u32 {
+/// PIXEL8_TUI_MAX_SCALE: largest integer scale of the 128 px screen. The
+/// two backends scale different units — sixel scales device pixels, blocks
+/// scale terminal cells, which are already ~8 px wide — so an unset knob
+/// means "fill a reasonable slice of the window" for sixel but 1:1 for
+/// blocks. Bigger frames cost more to encode 30 times a second either way.
+fn max_scale(backend: Backend, var: Option<&str>) -> u32 {
+    let default = match backend {
+        Backend::Sixel => DEFAULT_SIXEL_SCALE,
+        Backend::Blocks => DEFAULT_BLOCK_SCALE,
+    };
     var.and_then(|v| v.trim().parse::<u32>().ok())
         .map(|s| s.clamp(1, 7))
-        .unwrap_or(DEFAULT_MAX_SCALE)
+        .unwrap_or(default)
 }
 
 /// The number of game buttons (left, right, up, down, A, B).
@@ -834,7 +851,10 @@ const REPEAT_HOLD_MAX: Duration = Duration::from_millis(300);
 const MAX_SIXEL_PX: u32 = 996;
 /// Assumed cell pixel size when the terminal doesn't report one.
 const FALLBACK_CELL_PX: (f32, f32) = (8.0, 16.0);
-const DEFAULT_MAX_SCALE: u32 = 4;
+/// Rows a 1:1 half-block screen occupies: two screen pixels per cell.
+const BLOCK_ROWS: u32 = HEIGHT as u32 / 2;
+const DEFAULT_SIXEL_SCALE: u32 = 4;
+const DEFAULT_BLOCK_SCALE: u32 = 1;
 /// Never skip more than this many frames in a row (~3 fps floor at 30).
 const MAX_FRAME_SKIP: u32 = 9;
 
@@ -876,6 +896,37 @@ mod tests {
         assert_eq!(l.cells, (2, 1));
         // No room for a status line on a one-row terminal.
         assert_eq!(l.status_row, None);
+    }
+
+    #[test]
+    fn blocks_do_not_grow_with_the_terminal() {
+        let scale = max_scale(Backend::Blocks, None);
+        // Zooming the terminal out buys more, smaller cells — not a bigger
+        // console. Both of these render the screen 1:1, so it shrinks on
+        // screen exactly as the font does, instead of being welded to the
+        // window and ignoring the zoom entirely.
+        let modest = Layout::compute(Backend::Blocks, 130, 70, None, scale);
+        let roomy = Layout::compute(Backend::Blocks, 400, 200, None, scale);
+        assert_eq!(modest.cells, (128, 64));
+        assert_eq!(roomy.cells, (128, 64));
+        assert_eq!(roomy.px, (128, 128));
+        assert_eq!(roomy.status_row, Some(64));
+    }
+
+    #[test]
+    fn blocks_fill_the_terminal_only_when_asked() {
+        let l = Layout::compute(Backend::Blocks, 400, 200, None, 3);
+        assert_eq!(l.cells, (384, 192));
+        assert_eq!(l.px, (384, 384));
+        assert_eq!(l.status_row, Some(192));
+    }
+
+    #[test]
+    fn blocks_shrink_the_screen_only_when_1x_does_not_fit() {
+        // Wide enough for 1:1 but far too short: the screen has to give.
+        let l = Layout::compute(Backend::Blocks, 200, 40, None, 4);
+        assert_eq!(l.cells, (78, 39));
+        assert_eq!(l.px, (78, 78));
     }
 
     // -- Layout: sixel --
@@ -1177,10 +1228,18 @@ mod tests {
 
     #[test]
     fn max_scale_parses_and_clamps() {
-        assert_eq!(parse_max_scale(None), DEFAULT_MAX_SCALE);
-        assert_eq!(parse_max_scale(Some("2")), 2);
-        assert_eq!(parse_max_scale(Some("0")), 1);
-        assert_eq!(parse_max_scale(Some("99")), 7);
-        assert_eq!(parse_max_scale(Some("junk")), DEFAULT_MAX_SCALE);
+        assert_eq!(max_scale(Backend::Sixel, Some("2")), 2);
+        assert_eq!(max_scale(Backend::Sixel, Some("0")), 1);
+        assert_eq!(max_scale(Backend::Sixel, Some("99")), 7);
+        assert_eq!(max_scale(Backend::Sixel, Some("junk")), DEFAULT_SIXEL_SCALE);
+        assert_eq!(max_scale(Backend::Blocks, Some("3")), 3);
+    }
+
+    #[test]
+    fn block_scale_defaults_to_one_cell_per_pixel() {
+        // A sixel scale step is one device pixel, a block step a whole cell,
+        // so leaving the knob alone means very different things to them.
+        assert_eq!(max_scale(Backend::Blocks, None), 1);
+        assert_eq!(max_scale(Backend::Sixel, None), DEFAULT_SIXEL_SCALE);
     }
 }
