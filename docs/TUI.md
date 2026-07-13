@@ -44,6 +44,17 @@ nearest-neighbor (pixels stay square and crisp), and printed with
 - **Unicode half-blocks** (`▀`/`▄`) everywhere else: two screen pixels per cell,
   truecolor where `COLORTERM` says so.
 
+**How big the screen comes out.** A half-block cell holds one screen pixel across and
+two down, so at 1:1 the console needs 128 columns and 64 rows — and one screen pixel
+ends up exactly as wide as one character cell. That is the floor: the terminal's font
+size is what decides how big a Pixel8 pixel looks, and zooming out shrinks the console
+just as resizing the window does in the GUI. Scaling up beyond 1:1 is therefore opt-in
+(`PIXEL8_TUI_MAX_SCALE`); filling the terminal by default would peg the console to the
+window's size and make the zoom level a no-op. A terminal too small for 128x64 cells is
+the one exception — there the screen is shrunk to fit, which drops pixels, so zoom out
+if the pixel art looks uneven. Sixel has no such floor: it draws real pixels and
+defaults to a 4x screen.
+
 The kitty and iTerm graphics protocols are intentionally disabled: viuer transmits
 kitty images through temp files and neither protocol frees earlier frames, which
 leaks in the terminal at 30 fps. On those terminals the half-block fallback is used
@@ -106,7 +117,7 @@ degrades to a lower visual frame rate instead of lagging ever further behind.
 
 | variable                 | default | meaning                                             |
 | ------------------------ | ------- | --------------------------------------------------- |
-| `PIXEL8_TUI_MAX_SCALE`   | `4`     | Largest integer scale of the 128 px screen in sixel mode (1–7). Bigger costs more CPU per frame. |
+| `PIXEL8_TUI_MAX_SCALE`   | `4` sixel, `1` blocks | Largest integer scale of the 128 px screen (1–7). A sixel step is one device pixel; a half-block step is a whole character cell, hence the different defaults. Bigger costs more CPU per frame. |
 | `PIXEL8_TUI_NO_RAW_KEYS` | unset   | Set to `1` to never read `/dev/input` and accept degraded, autorepeat-inferred key releases (otherwise a Linux requirement — see above). |
 
 ## Features
