@@ -19,10 +19,12 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/zeenix/pixel8"
 
 [workspace.dependencies]
-pixel8-runtime = { path = "pixel8-runtime", default-features = false }
+# `version` alongside `path` is what lets these be published: cargo rejects a path dependency with
+# no version requirement, and the published manifest keeps only the version.
+pixel8-runtime = { path = "pixel8-runtime", version = "0.1.0", default-features = false }
 # The console shell as a library; default-features off so only the windowed
 # frontend builds the winit/wgpu stack.
-pixel8-console = { path = "pixel8-console", default-features = false }
+pixel8-console = { path = "pixel8-console", version = "0.1.0", default-features = false }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 # No `wat`: carts are always binary wasm (text format is test-only).

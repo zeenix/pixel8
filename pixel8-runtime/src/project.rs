@@ -27,6 +27,17 @@ use std::{
 /// and leave this at 1.
 const ASSETS_VERSION: u32 = 1;
 
+/// Version requirement for the SDK dependency of a project created by `new`.
+///
+/// Every crate in the workspace inherits one version, so this crate's major.minor is also the
+/// published SDK's. Pinning major.minor (not the patch) lets a project pick up SDK patch releases
+/// with a plain `cargo update`.
+const SDK_VERSION_REQ: &str = concat!(
+    env!("CARGO_PKG_VERSION_MAJOR"),
+    ".",
+    env!("CARGO_PKG_VERSION_MINOR")
+);
+
 /// Default game source created by `new`.
 pub const TEMPLATE_CODE: &str = r#"#![no_std]
 
@@ -94,7 +105,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-pixel8 = {{ git = "https://github.com/zeenix/pixel8", default-features = false }}
+pixel8 = {{ version = "{SDK_VERSION_REQ}", default-features = false }}
 
 # Standalone workspace so the project builds anywhere, independent of the
 # Pixel8 source tree.
@@ -445,14 +456,14 @@ mod tests {
         let lib = fs::read_to_string(dir.join("g/src/lib.rs")).unwrap();
         let manifest = fs::read_to_string(dir.join("g/Cargo.toml")).unwrap();
         assert!(lib.contains("#![no_std]"), "lib.rs:\n{lib}");
-        assert!(
-            manifest.contains("git = \"https://github.com/zeenix/pixel8\""),
-            "Cargo.toml:\n{manifest}"
+        // The SDK comes from crates.io, pinned to the major.minor this crate was built at: every
+        // workspace crate shares one version.
+        let dep = format!(
+            r#"pixel8 = {{ version = "{}.{}", default-features = false }}"#,
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR"),
         );
-        assert!(
-            manifest.contains("default-features = false"),
-            "Cargo.toml:\n{manifest}"
-        );
+        assert!(manifest.contains(&dep), "Cargo.toml:\n{manifest}");
         fs::remove_dir_all(&dir).unwrap();
     }
 
