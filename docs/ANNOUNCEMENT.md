@@ -47,3 +47,23 @@ Free and open source (GPL-3.0), on crates.io today:
 Code, docs and example carts: https://github.com/zeenix/pixel8
 
 #rust #rustlang #gamedev #wasm #webassembly #pico8 #fantasyconsole #opensource
+
+---
+
+## Screenshot alt-text
+
+**Platformer game:**
+
+> Pixel art platformer game on Pixel8's 128x128 pixel screen: a dark blue night sky
+> with white clouds, grey brick platforms floating at various heights, and gold coins
+> to collect. A red four-legged monster sprite stands mid-screen and two green slime
+> enemies sit on the grassy ground at the bottom. The top bar reads "Score 1",
+> "Best 10" and a coin counter showing 26.
+
+**Sprite editor:**
+
+> Pixel8's built-in sprite editor, itself rendered in chunky 128x128 pixel art with a
+> magenta and black theme. On the left, a zoomed 8x8 editing canvas shows the red
+> monster sprite; on the right, the 16-color palette, brush-size selector and tool
+> icons (pencil, fill, shapes, pan). Below, a strip of the project's other sprites —
+> bricks, coins, slimes, clouds — and a status bar reading "Spr 001 flags 00000000".
