@@ -128,9 +128,13 @@ commit_parsers = [
     { message = ".*", group = "Other" },
 ]
 
-# pixel8-web is a cdylib wasm artifact (built with wasm tooling), not a
-# crates.io library — it carries `publish = false`. Skip it entirely so it
-# gets no tag, GitHub release, or changelog.
+# pixel8-web is a cdylib wasm artifact (built with wasm tooling), not a crates.io library — it
+# carries `publish = false`. Skip it entirely so it gets no tag, GitHub release, or changelog.
+#
+# `publish` has to be restated here: the workspace section above turns it on for every package, and
+# release-plz refuses to run when that contradicts a package's own `publish = false`. `release` does
+# not imply it — the two are validated separately.
 [[package]]
 name = "pixel8-web"
 release = false
+publish = false
