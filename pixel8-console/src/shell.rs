@@ -2194,11 +2194,17 @@ mod tests {
             .unwrap();
         let manifest_path = project_dir.join("Cargo.toml");
         let manifest = std::fs::read_to_string(&manifest_path).unwrap();
-        let manifest = manifest.replace(
-            "git = \"https://github.com/zeenix/pixel8\"",
-            &format!("path = {:?}", sdk.display().to_string()),
+        // A scaffolded project depends on the released SDK; tests must build against the working
+        // tree instead. Every workspace crate shares one version, so this crate's major.minor is
+        // the requirement the template wrote.
+        let dep = format!(
+            "version = \"{}.{}\"",
+            env!("CARGO_PKG_VERSION_MAJOR"),
+            env!("CARGO_PKG_VERSION_MINOR"),
         );
-        std::fs::write(&manifest_path, manifest).unwrap();
+        let patched = manifest.replace(&dep, &format!("path = {:?}", sdk.display().to_string()));
+        assert_ne!(patched, manifest, "no `{dep}` to redirect in:\n{manifest}");
+        std::fs::write(&manifest_path, patched).unwrap();
     }
 
     #[test]
