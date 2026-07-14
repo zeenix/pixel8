@@ -21,8 +21,11 @@ What you get:
 the same 128x128 screen as the games — no native widgets anywhere.
 📦 Projects are real Cargo crates. Prefer your own editor? `$EDITOR` + `cargo build`
 works identically — the console hot-reloads the wasm on save.
-🖼️ Carts are shareable PNG images with the compiled wasm, assets, and (optionally) the
-Rust source embedded — a cart can be re-imported back into an editable project.
+🖼️ Carts are real PNG images — cartridge art with a screenshot of your game as the
+label — and the *full game* is embedded inside: compiled wasm, all assets, and
+(optionally) the Rust source. The picture you share IS the game; anyone can view it,
+Pixel8 can play it, and with source included it re-imports back into an editable
+project.
 🌐 One-command web export: a single self-contained HTML file anyone can play in a
 browser.
 ⌨️ A terminal frontend (`pixel8-tui`): the full console — editors, carts and all — over
