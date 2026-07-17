@@ -51,7 +51,7 @@ jobs:
           done
 
       - name: Build the index page
-        run: ./.github/build-index.sh site
+        run: ./scripts/build-index.sh site
 
       - uses: actions/upload-pages-artifact@v3
         with:

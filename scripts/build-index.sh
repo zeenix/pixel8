@@ -3,7 +3,7 @@
 # cartridges, each linking to its playable web export. Kept as a script
 # so the Pages build is reproducible locally:
 #
-#   ./.github/build-index.sh site
+#   ./scripts/build-index.sh site
 set -euo pipefail
 
 site="${1:?usage: build-index.sh <site-dir>}"

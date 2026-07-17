@@ -5,7 +5,7 @@
 # toolchain to install beyond rustup + the two targets: no zig, no Docker, no cross-gcc. The
 # launcher picks armhf vs aarch64 by the device's userland arch.
 #
-#   ./.github/build-handheld.sh [output-dir]
+#   ./scripts/build-handheld.sh [output-dir]
 set -euo pipefail
 
 out="${1:-dist/handheld}"
@@ -24,7 +24,7 @@ build_arch() {
 build_arch armv7-unknown-linux-musleabihf armhf
 build_arch aarch64-unknown-linux-musl aarch64
 
-cp "$root/.github/Pixel8.sh" "$out/Pixel8.sh"
+cp "$root/scripts/Pixel8.sh" "$out/Pixel8.sh"
 chmod +x "$out/Pixel8.sh" "$out/pixel8/"pixel8-player.*
 
 echo "built $out:"

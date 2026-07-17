@@ -4,7 +4,7 @@
 # Each cart PNG is what the pixel8 player loads directly, so the output directory mirrors the
 # handheld bundle's pixel8/carts folder and can be copied straight onto the device:
 #
-#   ./.github/build-example-carts.sh [output-dir]   # defaults to dist/handheld/pixel8/carts
+#   ./scripts/build-example-carts.sh [output-dir]   # defaults to dist/handheld/pixel8/carts
 set -euo pipefail
 
 out="${1:-dist/handheld/pixel8/carts}"

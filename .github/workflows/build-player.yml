@@ -43,10 +43,10 @@ jobs:
           ./target/debug/pixel8-player --smoke 60 /tmp/platformer.png
 
       - name: Cross-build the static musl ports bundle
-        run: ./.github/build-handheld.sh dist/handheld
+        run: ./scripts/build-handheld.sh dist/handheld
 
       - name: Add the example carts to the bundle
-        run: ./.github/build-example-carts.sh dist/handheld/pixel8/carts
+        run: ./scripts/build-example-carts.sh dist/handheld/pixel8/carts
 
       - uses: actions/upload-artifact@v4
         with:
