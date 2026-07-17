@@ -85,7 +85,7 @@ On any Linux x86_64 machine with Rust:
 
 ```text
 rustup target add aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf
-./.github/build-handheld.sh                   # writes dist/handheld/
+./scripts/build-handheld.sh                   # writes dist/handheld/
 ```
 
 That is all — no cross-compiler, no extra packages. The script produces fully

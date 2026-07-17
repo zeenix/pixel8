@@ -104,7 +104,8 @@ fn base64(data: &[u8]) -> String {
 }
 
 /// The wrapper page. Deliberately spartan: black page, cartridge art,
-/// click to boot, pixel-perfect canvas. No frameworks, no fetches.
+/// click to boot, pixel-perfect canvas, pause/stop controls underneath.
+/// No frameworks, no fetches.
 const TEMPLATE: &str = r#"<!doctype html>
 <html lang="en">
 <head>
@@ -127,6 +128,13 @@ const TEMPLATE: &str = r#"<!doctype html>
   #boot img { height: 80%; image-rendering: pixelated; }
   #boot span { color: #fff1e8; font-size: 16px; }
   #boot:hover span { color: #ffec27; }
+  #paused { position: absolute; inset: 0; display: none; align-items: center;
+            justify-content: center; background: rgba(0, 0, 0, 0.65);
+            color: #fff1e8; font-size: 16px; cursor: pointer; }
+  #controls { display: none; gap: 22px; }
+  #controls button { background: none; border: 0; padding: 0; cursor: pointer;
+                     font-family: monospace; font-size: 12px; color: #5f574f; }
+  #controls button:hover { color: #ffec27; }
   #title { color: #c2c3c7; font-size: 14px; }
   #hint { font-size: 11px; }
   a { color: #5f574f; }
@@ -168,6 +176,7 @@ const TEMPLATE: &str = r#"<!doctype html>
 <div id="stage">
   <canvas id="screen" width="128" height="128"></canvas>
   <button id="boot"><img alt="cartridge" id="cartimg"><span>click to play</span></button>
+  <div id="paused"><span>paused &mdash; click to resume</span></div>
 </div>
 <div id="touch">
   <div id="dpad">
@@ -179,8 +188,12 @@ const TEMPLATE: &str = r#"<!doctype html>
     <button class="ab" id="btn-x">x</button>
   </div>
 </div>
+<div id="controls">
+  <button id="btn-pause">pause</button>
+  <button id="btn-stop">stop</button>
+</div>
 <div id="title">{{TITLE}}</div>
-<div id="hint">arrows + z/x &middot; made with <a href="https://github.com/zeenix/pixel8">pixel8</a></div>
+<div id="hint">arrows + z/x &middot; esc pauses &middot; made with <a href="https://github.com/zeenix/pixel8">pixel8</a></div>
 <script>
 "use strict";
 const PLAYER_B64 = "{{PLAYER_B64}}";
@@ -211,10 +224,12 @@ let wasm = null;
 let audioCtx = null;
 let audioTime = 0;
 let last = 0, acc = 0;
+let rafId = 0, paused = false;
 
 async function boot() {
   document.getElementById("boot").style.display = "none";
   canvas.style.display = "block";
+  document.getElementById("controls").style.display = "flex";
 
   const { instance } =
     await WebAssembly.instantiate(b64bytes(PLAYER_B64), {});
@@ -231,22 +246,72 @@ async function boot() {
   }
   fps = wasm.pixel8_web_fps();
 
-  addEventListener("keydown", (e) => key(e, 1));
-  addEventListener("keyup", (e) => key(e, 0));
-
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   audioTime = 0;
 
   last = performance.now();
-  requestAnimationFrame(frame);
+  rafId = requestAnimationFrame(frame);
+}
+
+// Pause: freeze the logic clock and suspend audio, resumable in place.
+function togglePause() {
+  if (!wasm) return;
+  paused = !paused;
+  document.getElementById("paused").style.display = paused ? "flex" : "none";
+  document.getElementById("btn-pause").textContent = paused ? "resume" : "pause";
+  if (paused) {
+    cancelAnimationFrame(rafId);
+    if (audioCtx) audioCtx.suspend();
+  } else {
+    if (audioCtx) audioCtx.resume();
+    last = performance.now();
+    acc = 0;
+    rafId = requestAnimationFrame(frame);
+  }
+}
+
+// Stop: tear the player down and return to the click-to-play screen.
+// The next boot re-instantiates the module, so the cart starts fresh.
+function stop() {
+  if (!wasm) return;
+  cancelAnimationFrame(rafId);
+  paused = false;
+  wasm = null;
+  if (audioCtx) audioCtx.close();
+  audioCtx = null;
+  audioTime = 0;
+  const vis = ["d-l", "d-r", "d-u", "d-d", "btn-o", "btn-x"];
+  for (let b = 0; b < 6; b++) {
+    touchState[b] = 0;
+    el(vis[b]).classList.remove("on");
+  }
+  document.getElementById("paused").style.display = "none";
+  document.getElementById("btn-pause").textContent = "pause";
+  document.getElementById("controls").style.display = "none";
+  canvas.style.display = "none";
+  document.getElementById("boot").style.display = "";
 }
 
 function key(e, down) {
+  if (!wasm) return;
+  if (e.code === "Escape") {
+    e.preventDefault();
+    if (down) togglePause();
+    return;
+  }
   const b = KEYMAP[e.code];
   if (b === undefined) return;
   e.preventDefault();
-  wasm.pixel8_web_set_button(b, down);
+  if (!paused) wasm.pixel8_web_set_button(b, down);
 }
+
+addEventListener("keydown", (e) => key(e, 1));
+addEventListener("keyup", (e) => key(e, 0));
+
+// A hidden tab keeps its audio running otherwise; pause instead.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && wasm && !paused) togglePause();
+});
 
 // --- Touch controls: d-pad + O/X, multi-touch, 8-way diagonals. ---
 const touchState = [0, 0, 0, 0, 0, 0];
@@ -334,6 +399,16 @@ document.getElementById("boot").addEventListener("click", () => {
   boot().catch((e) => {
     document.getElementById("title").textContent = "boot failed: " + e;
   });
+});
+document.getElementById("paused").addEventListener("click", togglePause);
+// Blur after click so Space/Enter go back to the game, not the button.
+document.getElementById("btn-pause").addEventListener("click", (e) => {
+  e.currentTarget.blur();
+  togglePause();
+});
+document.getElementById("btn-stop").addEventListener("click", (e) => {
+  e.currentTarget.blur();
+  stop();
 });
 </script>
 </body>

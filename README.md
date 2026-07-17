@@ -8,6 +8,10 @@ a Rust compiler where the Lua interpreter would be. You write a little Rust, it 
 WebAssembly, and it runs inside the console's sandbox at a steady 60 fps (or 30, the cart's choice).
 Carts are shareable PNG images with the game embedded inside.
 
+New to Pixel8? **[The Pixel8 Book](https://zeenix.github.io/pixel8/)** is a hands-on tutorial —
+installation to shipped cartridge — with the [example carts](https://zeenix.github.io/pixel8/play/)
+playable right inside it.
+
 ```rust
 use pixel8::*;
 

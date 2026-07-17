@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Build the example-cart index page for GitHub Pages: a shelf of
-# cartridges, each linking to its playable web export. Kept as a script
-# so the Pages build is reproducible locally:
+# cartridges, each linking to its playable web export. It deploys under
+# play/, next to the tutorial book at the site root (see
+# .github/workflows/deploy-site.yml). Kept as a script so the Pages
+# build is reproducible locally:
 #
-#   ./.github/build-index.sh site
+#   ./scripts/build-index.sh site/play
 set -euo pipefail
 
 site="${1:?usage: build-index.sh <site-dir>}"
@@ -72,7 +74,8 @@ $cards</div>
 <footer>
   arrows + z/x to play &middot; the cartridge images <em>are</em> the games:<br>
   save a .png and <code>load</code> it in the
-  <a href="https://github.com/zeenix/pixel8">pixel8 console</a>
+  <a href="https://github.com/zeenix/pixel8">pixel8 console</a><br>
+  new here? <a href="../">read the tutorial book</a>
 </footer>
 </body>
 </html>

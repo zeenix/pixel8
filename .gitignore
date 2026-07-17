@@ -1,6 +1,9 @@
 /target
 /dist
 
+# mdbook build output (the tutorial's source is book/src)
+/book/book
+
 # Visual brainstorming companion
 .superpowers/
 docs/superpowers/

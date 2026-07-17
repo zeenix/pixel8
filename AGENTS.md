@@ -137,3 +137,7 @@ Commit messages, atomic commits, and top-down module ordering are covered in
 `docs/LIMITS.md` + `docs/LIMITS_TESTING.md`, `docs/PICO8_IMPORT.md`,
 `docs/WEB_EXPORT.md`, `docs/HANDHELD.md`, `docs/TUI.md` (the `pixel8-tui` terminal
 frontend). Design plans/specs live under `docs/superpowers/`.
+
+The user-facing tutorial is an mdbook under `book/` (see `book/README.md`),
+published to GitHub Pages together with the playable example carts by
+`.github/workflows/deploy-site.yml`; CI's `book` job builds it on every PR.
