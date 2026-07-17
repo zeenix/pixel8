@@ -42,6 +42,12 @@ Pixel8 error screen as the desktop console, drawn by the player
 itself. Keys match the desktop: arrows + `Z`/`X` (also `C`/`V`,
 `N`/`M`).
 
+While a cart runs, small `pause` / `stop` controls sit under the
+canvas. `Esc` (or `pause`) freezes the game and suspends audio,
+resumable in place; `stop` returns to the click-to-play screen, and
+the next boot starts the cart fresh. Hiding the tab pauses
+automatically, so a backgrounded page never keeps playing music.
+
 On touch devices (detected via `pointer: coarse`) the page shows
 on-screen controls under the canvas, PICO-8-web style: a d-pad on the
 left and round `O`/`X` buttons on the right. The d-pad is one touch
