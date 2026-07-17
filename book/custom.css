@@ -1,0 +1,63 @@
+/* Playable cart embeds: the published site places each example cart's
+ * self-contained web export under play/ next to the book, and chapters
+ * drop them in via <iframe>. In a book-only preview (mdbook serve) the
+ * frames are empty — see book/README.md. */
+.cart-embed {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4em;
+    margin: 1.6em 0;
+}
+
+.cart-embed iframe {
+    width: min(100%, 400px);
+    height: 430px;
+    border: 0;
+    border-radius: 8px;
+    background: #000;
+}
+
+.cart-embed .cart-caption {
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+/* Console/editor screenshots, generated into shots/ by the site build
+ * (pixel8 snap) — like the cart embeds, empty in a book-only preview. */
+.shot-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: center;
+    margin: 1.4em 0;
+}
+
+figure.shot {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+figure.shot img {
+    width: min(100%, 384px);
+    image-rendering: pixelated;
+    border-radius: 6px;
+}
+
+figure.shot figcaption {
+    font-size: 0.8em;
+    opacity: 0.7;
+}
+
+/* The 16-color palette table in the drawing chapter. */
+.swatch {
+    display: inline-block;
+    width: 2.2em;
+    height: 1.1em;
+    border-radius: 3px;
+    border: 1px solid rgba(128, 128, 128, 0.4);
+    vertical-align: middle;
+}

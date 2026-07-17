@@ -1,0 +1,25 @@
+[book]
+authors = ["Zeeshan Ali Khan"]
+language = "en"
+src = "src"
+title = "The Pixel8 Book"
+description = "A hands-on tutorial for Pixel8, the tiny fantasy console where the games are written in Rust."
+
+[rust]
+edition = "2021"
+
+[output.html]
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
+smart-punctuation = true
+git-repository-url = "https://github.com/zeenix/pixel8"
+edit-url-template = "https://github.com/zeenix/pixel8/edit/main/book/{path}"
+git-repository-icon = "fab-github"
+no-section-label = true
+additional-css = ["custom.css"]
+# The book deploys to GitHub Pages under /pixel8/ (used by 404.html).
+site-url = "/pixel8/"
+
+[output.html.playground]
+# Snippets depend on the pixel8 SDK, which the playground doesn't have.
+runnable = false
