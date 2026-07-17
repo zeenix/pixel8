@@ -2,6 +2,10 @@
 //!
 //! Write tiny games in Rust, run them on a tiny console.
 //!
+//! New to Pixel8? [The Pixel8 Book](https://zeenix.github.io/pixel8/) is the
+//! guided path — installation to shipped cartridge, with playable examples —
+//! and this reference documents every call it introduces.
+//!
 //! ```no_run
 //! use pixel8::*;
 //!

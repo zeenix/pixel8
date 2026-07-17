@@ -17,6 +17,8 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/zeenix/pixel8"
+# The tutorial book (crates that opt in surface it on crates.io/docs.rs).
+homepage = "https://zeenix.github.io/pixel8/"
 
 [workspace.dependencies]
 # `version` alongside `path` is what lets these be published: cargo rejects a path dependency with
