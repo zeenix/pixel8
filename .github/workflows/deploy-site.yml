@@ -1,0 +1,63 @@
+# Deploy the website to GitHub Pages on each push to main:
+# the mdBook tutorial at the site root, and every example cart under
+# play/ — a shelf of cartridge PNGs, each linking to its playable web
+# export, with the same exports embedded in the book's chapters.
+#
+# Requires Pages to be enabled with "GitHub Actions" as the source
+# (repo Settings -> Pages -> Build and deployment).
+
+name: deploy site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time; newer pushes win.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install latest mdbook
+        run: |
+          tag=$(curl -sS 'https://api.github.com/repos/rust-lang/mdbook/releases/latest' | jq -r '.tag_name')
+          url="https://github.com/rust-lang/mdbook/releases/download/${tag}/mdbook-${tag}-x86_64-unknown-linux-gnu.tar.gz"
+          mkdir mdbook
+          curl -sSL "$url" | tar -xz --directory=./mdbook
+          echo "$(pwd)/mdbook" >> "$GITHUB_PATH"
+
+      # The whole site build — book, cart exports, shelf, redirects — lives
+      # in one script so it is reproducible locally.
+      - name: Build the site
+        run: ./scripts/build-site.sh site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
