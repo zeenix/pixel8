@@ -1,44 +1,4 @@
-//! # pixel8 — the Pixel8 fantasy console SDK
-//!
-//! Write tiny games in Rust, run them on a tiny console.
-//!
-//! New to Pixel8? [The Pixel8 Book](https://zeenix.github.io/pixel8/) is the
-//! guided path — installation to shipped cartridge, with playable examples —
-//! and this reference documents every call it introduces.
-//!
-//! ```no_run
-//! use pixel8::*;
-//!
-//! struct MyGame {
-//!     x: i16,
-//!     y: i16,
-//! }
-//!
-//! impl Game for MyGame {
-//!     fn update(&mut self, ctx: &mut Context) {
-//!         if ctx.is_button_down(Button::Right) {
-//!             self.x += 1;
-//!         }
-//!     }
-//!
-//!     fn draw(&self, gfx: &mut Graphics) {
-//!         gfx.clear(Color::BLACK);
-//!         gfx.rect_fill(self.x, self.y, 8, 8, Color::WHITE).unwrap();
-//!     }
-//! }
-//!
-//! pixel8::game!(MyGame { x: 64, y: 64 });
-//! ```
-//!
-//! Carts are built for `wasm32-unknown-unknown` as a `cdylib` and run in
-//! a strict sandbox: the host functions wrapped by [`Context`] and
-//! [`Graphics`] are the only doors out. The screen is 128x128, the
-//! palette has 16 fixed colors, `update`/`draw` run at 60 fps (or 30,
-//! if the game sets [`Game::FRAME_RATE`]). The constraints
-//! are the point.
-//!
-//! For formatted on-screen text and debug logs, see the [`printf!`](crate::printf)
-//! and [`logf!`](crate::logf) macros.
+#![doc = include_str!("../README.md")]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 mod dim;
