@@ -45,17 +45,26 @@
 //! grows it further:
 //!
 //! ```no_run
-//! # use pixel8::plume::{Direction, Fire};
-//! let candle: Fire<2> = Fire::new(64, 100, Direction::Up);
-//! let bonfire: Fire<20> = Fire::new(64, 100, Direction::Up);
+//! # use pixel8::plume::Fire;
+//! let candle: Fire<2> = Fire::new(64, 100);
+//! let bonfire: Fire<20> = Fire::new(64, 100);
 //! ```
 //!
 //! # Direction
 //!
-//! Plumes travel in one of eight [`Direction`]s. A fire normally burns [`Up`](Direction::Up),
-//! but smoke pouring from a damaged aircraft flying up-screen wants [`Down`](Direction::Down),
-//! and a plume in a crosswind one of the diagonals. Particles sway from side to side as they
-//! travel, so the sway follows the direction too.
+//! Plumes travel in one of eight [`Direction`]s. They rise unless told otherwise, which is what
+//! a fire wants; smoke pouring from a damaged aircraft flying up-screen wants
+//! [`Down`](Direction::Down), and a plume in a crosswind one of the diagonals. Particles sway
+//! from side to side as they travel, so the sway follows the direction too.
+//!
+//! ```no_run
+//! # use pixel8::plume::{Direction, Smoke};
+//! let exhaust: Smoke<4> = Smoke::new(64, 40).with_direction(Direction::Down);
+//! ```
+//!
+//! A plume can be turned as it runs, with [`Fire::set_direction`] / [`Smoke::set_direction`].
+//! Particles already in the air carry on the way they were going, so a plume that turns bends
+//! rather than swinging around all at once.
 //!
 //! # Trails
 //!
@@ -108,14 +117,29 @@ pub struct Fire<const SCALE: usize = FULL_SCALE, const LIFETIME: usize = DEFAULT
 }
 
 impl<const SCALE: usize, const LIFETIME: usize> Fire<SCALE, LIFETIME> {
-    /// A new fire based at the pixel position (`x`, `y`), burning towards `direction`.
+    /// A new fire based at the pixel position (`x`, `y`), burning upwards. Point it another way
+    /// with [`with_direction`](Self::with_direction).
     ///
     /// The base is the middle of the bed the flames rise from — for a campfire, the logs — and
     /// is where they are widest; they narrow as they travel.
-    pub fn new(x: i16, y: i16, direction: Direction) -> Self {
+    pub fn new(x: i16, y: i16) -> Self {
         Self {
-            plume: Plume::new(x, y, direction, FIRE_SPEED, Some(DEFAULT_LIFETIME)),
+            plume: Plume::new(x, y, FIRE_SPEED, Some(DEFAULT_LIFETIME)),
         }
+    }
+
+    /// Sets which way the flames burn, to chain onto [`new`](Self::new).
+    pub fn with_direction(mut self, direction: Direction) -> Self {
+        self.set_direction(direction);
+        self
+    }
+
+    /// Turns the fire to burn towards `direction`.
+    ///
+    /// Flames already in the air keep burning the way they were, so a fire that turns bends
+    /// instead of swinging around all at once.
+    pub fn set_direction(&mut self, direction: Direction) {
+        self.plume.set_direction(direction);
     }
 
     /// Moves the fire to (`x`, `y`), for one carried or burning on something that moves.
@@ -177,11 +201,26 @@ pub struct Smoke<const SCALE: usize = FULL_SCALE, const LIFETIME: usize = SMOKE_
 
 impl<const SCALE: usize, const LIFETIME: usize> Smoke<SCALE, LIFETIME> {
     /// A new smoke plume based at the pixel position (`x`, `y`) — the middle of the bed it rises
-    /// from — billowing towards `direction`.
-    pub fn new(x: i16, y: i16, direction: Direction) -> Self {
+    /// from — billowing upwards. Point it another way with
+    /// [`with_direction`](Self::with_direction).
+    pub fn new(x: i16, y: i16) -> Self {
         Self {
-            plume: Plume::new(x, y, direction, SMOKE_SPEED, None),
+            plume: Plume::new(x, y, SMOKE_SPEED, None),
         }
+    }
+
+    /// Sets which way the smoke billows, to chain onto [`new`](Self::new).
+    pub fn with_direction(mut self, direction: Direction) -> Self {
+        self.set_direction(direction);
+        self
+    }
+
+    /// Turns the smoke to billow towards `direction`.
+    ///
+    /// Smoke already in the air keeps drifting the way it was, so the trail bends behind a
+    /// source that turns rather than swinging around all at once.
+    pub fn set_direction(&mut self, direction: Direction) {
+        self.plume.set_direction(direction);
     }
 
     /// Moves the source of the smoke to (`x`, `y`), for a trail off something that moves.
@@ -219,9 +258,10 @@ const SMOKE_COLOR_STOPS: [(usize, Color); 2] = [(8, Color::LIGHT_GREY), (20, Col
 /// fire's pace.
 const SMOKE_SPEED: Range<i32> = SUBPIXELS / 4..SUBPIXELS * 3 / 4;
 
-/// The direction a plume travels in, in steps of 45°.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The direction a plume travels in, in steps of 45°. Plumes rise unless told otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Direction {
+    #[default]
     Up,
     UpRight,
     Right,
@@ -319,13 +359,7 @@ struct Plume<const SCALE: usize, const LIFETIME: usize> {
 }
 
 impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
-    fn new(
-        x: i16,
-        y: i16,
-        direction: Direction,
-        speed: Range<i32>,
-        slow_after: Option<usize>,
-    ) -> Self {
+    fn new(x: i16, y: i16, speed: Range<i32>, slow_after: Option<usize>) -> Self {
         // In `new` rather than in `update`, so that a plume too big or too long-lived fails the
         // build of the cart that asks for one, not of the cart that gets around to running it.
         const {
@@ -352,7 +386,7 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
             forced: STARTING_FORCED,
             x,
             y,
-            direction,
+            direction: Direction::default(),
             speed,
             slow_after,
         }
@@ -363,6 +397,12 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
     fn move_to(&mut self, x: i16, y: i16) {
         self.x = x;
         self.y = y;
+    }
+
+    /// Points the plume a new way. Particles already let go of keep the direction they were
+    /// spawned with, so the plume bends rather than swinging around.
+    fn set_direction(&mut self, direction: Direction) {
+        self.direction = direction;
     }
 
     fn update(&mut self, ctx: &mut Context) {
@@ -382,6 +422,7 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
             particles: array::from_fn(|_| Particle::new(ctx, scale, speed.clone())),
             x: self.x,
             y: self.y,
+            direction: self.direction,
         });
         debug_assert!(
             spawned.is_ok(),
@@ -430,7 +471,9 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
             let base_x = generation.x as i32 * SUBPIXELS;
             let base_y = generation.y as i32 * SUBPIXELS;
             for particle in &generation.particles {
-                let (x, y) = self.direction.rotate(particle.x as i32, particle.y as i32);
+                let (x, y) = generation
+                    .direction
+                    .rotate(particle.x as i32, particle.y as i32);
                 let x = ((base_x + x) / SUBPIXELS) as i16;
                 let y = ((base_y + y) / SUBPIXELS) as i16;
                 let radius = (particle.radius / SUBPIXELS as u8) as u16;
@@ -453,6 +496,10 @@ struct Generation<const SCALE: usize> {
     /// The base these spawned against, in whole pixels.
     x: i16,
     y: i16,
+    /// The direction the plume was pointing when these spawned. Keeping it per generation is
+    /// what lets a plume turn: what is already in the air carries on the way it was going, so a
+    /// turn bends the plume instead of swinging all of it around at once.
+    direction: Direction,
 }
 
 /// One particle, in plume space: it spawns in a square around its generation's base and travels

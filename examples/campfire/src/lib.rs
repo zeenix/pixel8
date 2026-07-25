@@ -1,9 +1,6 @@
 #![no_std]
 
-use pixel8::{
-    plume::{Direction, SmokingFire},
-    *,
-};
+use pixel8::{plume::SmokingFire, *};
 
 game!(Campfire = Campfire::new());
 
@@ -16,7 +13,7 @@ struct Campfire {
 impl Campfire {
     fn new() -> Self {
         Self {
-            fire: SmokingFire::new(FIRE_X, FIRE_Y, Direction::Up),
+            fire: SmokingFire::new(FIRE_X, FIRE_Y),
         }
     }
 }
