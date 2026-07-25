@@ -14,12 +14,22 @@ default = ["std"]
 # can be allocation-free with `heapless`. Enabled by default; do-nothing carts
 # stay on `std`.
 std = []
+# Ready-made particle effects (`Fire`, `SmokingFire`, `Smoke`). Off by default
+# because it is what pulls in the SDK's only dependency: the fixed-capacity
+# buffers the effects hold their particles in. Future effect families get their
+# own feature, so a cart only ever links the ones it asks for.
+plume-effects = ["dep:heapless"]
 
-# Deliberately dependency-free: game carts build for
-# wasm32-unknown-unknown against this crate and nothing else.
+# Dependency-free unless an effect feature asks for something: a cart building
+# for wasm32-unknown-unknown links this crate and, by default, nothing else.
 [dependencies]
+heapless = { workspace = true, optional = true }
 
 # Tests only (carts never see dev-dependencies): pins the SDK's stack-buffer
 # JSON codec against the host's serde_json canonicalization.
 [dev-dependencies]
 serde_json.workspace = true
+
+# Effects are feature-gated, so docs.rs must build them all to document them.
+[package.metadata.docs.rs]
+all-features = true

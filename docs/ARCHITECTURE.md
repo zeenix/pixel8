@@ -37,7 +37,9 @@ This also makes the whole console testable headless: tests and the
 
 ## The SDK (`pixel8`)
 
-Carts depend on one crate, and it is deliberately dependency-free.
+Carts depend on one crate, and in its default build it is deliberately
+dependency-free. Only the off-by-default effect features (`plume-effects`)
+pull anything in — `heapless`, for their fixed-capacity particle buffers.
 `ffi.rs` declares the raw ABI imports
 (stubbed on non-wasm targets so carts also type-check natively);
 `lib.rs` wraps them in `Context` (update-time: input, map, audio,

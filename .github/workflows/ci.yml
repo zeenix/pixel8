@@ -53,6 +53,12 @@ jobs:
 
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo clippy -p pixel8-player --no-default-features --features kms --all-targets -- -D warnings
+      # The SDK's effect features are off by default, so the workspace run above
+      # never sees them. Once with the tests, and once the way a cart links the
+      # SDK: `no_std`, effects on. (The library only — the SDK's own tests need
+      # `std`.)
+      - run: cargo clippy -p pixel8 --all-features --all-targets -- -D warnings
+      - run: cargo clippy -p pixel8 --no-default-features --features plume-effects -- -D warnings
       - name: Clippy the example carts
         run: |
           fail=0
@@ -83,6 +89,9 @@ jobs:
 
       - run: cargo test --workspace
       - run: cargo test -p pixel8-player --no-default-features --features kms
+      # Feature-gated SDK code, including its doc examples, is skipped by the
+      # workspace run above.
+      - run: cargo test -p pixel8 --all-features
 
   book:
     runs-on: ubuntu-latest

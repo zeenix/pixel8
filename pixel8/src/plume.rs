@@ -1,0 +1,444 @@
+//! Fire and smoke, as particle plumes.
+//!
+//! A *plume* is a stream of particles that spawn around a base point, travel away from it and
+//! fade out on the way: the shape shared by a campfire, the smoke above it, a rocket's exhaust
+//! and the trail from a damaged engine. [`Fire`] and [`Smoke`] are the two this module ships,
+//! and they cost nothing but code — no sprites, no map, no assets of any kind.
+//!
+//! Both are sized at compile time and never allocate: a plume owns a fixed-capacity buffer of
+//! particles, six bytes each. A full-size [`Fire`] holds 260 of them (about 1.5 KiB) and a
+//! [`SmokingFire`] twice that.
+//!
+//! They are not free, though, and the bill lands in `draw`: every particle is one filled circle,
+//! costing about 0.05% of the draw budget. A full-size [`Fire`] runs at roughly 6% of `update`
+//! and 12% of `draw`, and a [`SmokingFire`] or a [`Smoke`] — twice the particles — about 10% and
+//! 24%. Scale a plume down and both fall away with the particle count. Budget for the ones on
+//! screen at once, and reach for a smaller `SCALE` before giving up on the effect.
+//!
+//! Everything here stays in this module — a cart's `use pixel8::*;` does not reach it, so name
+//! what the effect needs:
+//!
+//! ```no_run
+//! use pixel8::{plume::SmokingFire, *};
+//!
+//! struct Camp {
+//!     fire: SmokingFire,
+//! }
+//!
+//! impl Game for Camp {
+//!     fn update(&mut self, ctx: &mut Context) {
+//!         self.fire.update(ctx);
+//!     }
+//!
+//!     fn draw(&self, gfx: &mut Graphics) {
+//!         gfx.clear(Color::BLACK);
+//!         self.fire.draw(gfx);
+//!     }
+//! }
+//! ```
+//!
+//! # Size
+//!
+//! The `SCALE` parameter both sizes a plume and sets how many particles it spawns per update,
+//! so a small plume is sparse and a big one dense. [`FULL_SCALE`] is a fire about 30 pixels
+//! tall, a `2` or a `3` the flame of a candle or a torch, and anything up to [`MAX_SCALE`]
+//! grows it further:
+//!
+//! ```no_run
+//! # use pixel8::plume::{Direction, Fire};
+//! let candle: Fire<2> = Fire::new(64, 100, Direction::Up);
+//! let bonfire: Fire<20> = Fire::new(64, 100, Direction::Up);
+//! ```
+//!
+//! # Direction
+//!
+//! Plumes travel in one of eight [`Direction`]s. A fire normally burns [`Up`](Direction::Up),
+//! but smoke pouring from a damaged aircraft flying up-screen wants [`Down`](Direction::Down),
+//! and a plume in a crosswind one of the diagonals. Particles sway from side to side as they
+//! travel, so the sway follows the direction too.
+//!
+//! # Smoke from fire
+//!
+//! [`Smoke`] on its own is a plume that starts wherever it is placed. A fire that *turns into*
+//! smoke is a different thing: its particles have to keep the position and the sway they had as
+//! flames, or the two effects read as unrelated. That is what [`SmokingFire`] is — one plume
+//! whose particles live twice as long, spending the second half of their life grey and drifting
+//! at half the pace.
+
+use core::{array, ops::Range};
+
+use heapless::Deque;
+
+use crate::{Color, Context, Graphics};
+
+/// A fire: a plume of flame particles, white-hot at the base and fading to orange at the tips.
+///
+/// `SCALE` sizes the fire (see the [module docs](self#size)) and `LIFETIME` is how many updates
+/// each particle lives for, which is what makes the flames as long as they are. Particles that
+/// outlive [`DEFAULT_LIFETIME`] turn to smoke, so a `LIFETIME` past it — [`SmokingFire`] — is a
+/// fire that smokes.
+#[derive(Debug)]
+pub struct Fire<const SCALE: usize = FULL_SCALE, const LIFETIME: usize = DEFAULT_LIFETIME> {
+    plume: Plume<SCALE, LIFETIME>,
+}
+
+impl<const SCALE: usize, const LIFETIME: usize> Fire<SCALE, LIFETIME> {
+    /// A new fire based at the pixel position (`x`, `y`), burning towards `direction`.
+    ///
+    /// The base is the middle of the bed the flames rise from — for a campfire, the logs — and
+    /// is where they are widest; they narrow as they travel.
+    pub fn new(x: i16, y: i16, direction: Direction) -> Self {
+        Self {
+            plume: Plume::new(x, y, direction, FIRE_SPEED, Some(DEFAULT_LIFETIME)),
+        }
+    }
+
+    /// Advances the flames by one frame. Call this from [`Game::update`](crate::Game::update).
+    pub fn update(&mut self, ctx: &mut Context) {
+        self.plume.update(ctx);
+    }
+
+    /// Draws the flames. Call this from [`Game::draw`](crate::Game::draw).
+    pub fn draw(&self, gfx: &mut Graphics) {
+        self.plume.draw(gfx, FIRE_BIRTH_COLOR, &FIRE_COLOR_STOPS);
+    }
+}
+
+/// A fire whose burnt-out particles turn into smoke instead of vanishing.
+///
+/// The smoke picks up exactly where the flames end — same positions, same sway — and drifts on
+/// at half their pace, so the two read as one column rather than two effects sharing a screen.
+pub type SmokingFire<const SCALE: usize = FULL_SCALE> = Fire<SCALE, SMOKING_FIRE_LIFETIME>;
+
+/// The `LIFETIME` of a [`SmokingFire`]: a full flame life followed by an equally long smoky one.
+pub const SMOKING_FIRE_LIFETIME: usize = 2 * DEFAULT_LIFETIME;
+
+/// The color a flame particle is born with.
+const FIRE_BIRTH_COLOR: Color = Color::WHITE;
+
+/// What a flame particle turns into, and at what age: yellow, then orange, then — for a
+/// [`SmokingFire`], whose particles live long enough to reach them — the two greys of smoke.
+const FIRE_COLOR_STOPS: [(usize, Color); 4] = [
+    (4, Color::YELLOW),
+    (10, Color::ORANGE),
+    (DEFAULT_LIFETIME, Color::LIGHT_GREY),
+    (DEFAULT_LIFETIME + 10, Color::DARK_GREY),
+];
+
+/// How fast flame particles rise, in sub-pixel units per update at [`FULL_SCALE`].
+const FIRE_SPEED: Range<i32> = SUBPIXELS / 2..SUBPIXELS * 3 / 2;
+
+/// Smoke: a plume of grey particles that darken as they disperse.
+///
+/// This is smoke with no fire under it — an exhaust or a smouldering wreck. For smoke that
+/// continues a fire, use [`SmokingFire`].
+///
+/// `SCALE` sizes the plume (see the [module docs](self#size)) and `LIFETIME` is how many updates
+/// each particle lives for. Smoke drifts at half a fire's pace, so its default lifetime is twice
+/// as long: a plume the length of a fire's flames, but thinner and slower.
+#[derive(Debug)]
+pub struct Smoke<const SCALE: usize = FULL_SCALE, const LIFETIME: usize = SMOKE_LIFETIME> {
+    plume: Plume<SCALE, LIFETIME>,
+}
+
+impl<const SCALE: usize, const LIFETIME: usize> Smoke<SCALE, LIFETIME> {
+    /// A new smoke plume based at the pixel position (`x`, `y`) — the middle of the bed it rises
+    /// from — billowing towards `direction`.
+    pub fn new(x: i16, y: i16, direction: Direction) -> Self {
+        Self {
+            plume: Plume::new(x, y, direction, SMOKE_SPEED, None),
+        }
+    }
+
+    /// Advances the smoke by one frame. Call this from [`Game::update`](crate::Game::update).
+    pub fn update(&mut self, ctx: &mut Context) {
+        self.plume.update(ctx);
+    }
+
+    /// Draws the smoke. Call this from [`Game::draw`](crate::Game::draw).
+    pub fn draw(&self, gfx: &mut Graphics) {
+        self.plume.draw(gfx, SMOKE_BIRTH_COLOR, &SMOKE_COLOR_STOPS);
+    }
+}
+
+/// The default `LIFETIME` of [`Smoke`]: twice [`DEFAULT_LIFETIME`], which at half a fire's pace
+/// spans the same length.
+pub const SMOKE_LIFETIME: usize = 2 * DEFAULT_LIFETIME;
+
+/// The color a smoke particle is born with.
+const SMOKE_BIRTH_COLOR: Color = Color::WHITE;
+
+/// What a smoke particle turns into, and at what age. The ages are twice a fire's, matching the
+/// halved pace, so each band of color covers the same distance.
+const SMOKE_COLOR_STOPS: [(usize, Color); 2] = [(8, Color::LIGHT_GREY), (20, Color::DARK_GREY)];
+
+/// How fast smoke particles drift, in sub-pixel units per update at [`FULL_SCALE`] — half a
+/// fire's pace.
+const SMOKE_SPEED: Range<i32> = SUBPIXELS / 4..SUBPIXELS * 3 / 4;
+
+/// The direction a plume travels in, in steps of 45°.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Up,
+    UpRight,
+    Right,
+    DownRight,
+    Down,
+    DownLeft,
+    Left,
+    UpLeft,
+}
+
+impl Direction {
+    /// Plume-space offsets — where a plume travels towards negative `y` — rotated into screen
+    /// space.
+    fn rotate(self, x: i32, y: i32) -> (i32, i32) {
+        match self {
+            Self::Up => (x, y),
+            Self::UpRight => diagonal(x - y, x + y),
+            Self::Right => (-y, x),
+            Self::DownRight => diagonal(-x - y, x - y),
+            Self::Down => (-x, -y),
+            Self::DownLeft => diagonal(y - x, -x - y),
+            Self::Left => (y, -x),
+            Self::UpLeft => diagonal(x + y, y - x),
+        }
+    }
+}
+
+/// A 45° rotation mixes the two axes into sums that are a factor √2 too long; this scales them
+/// back, so a diagonal plume is as long as a straight one.
+fn diagonal(x: i32, y: i32) -> (i32, i32) {
+    // 181 / 256 ≈ 1 / √2.
+    (x * 181 / 256, y * 181 / 256)
+}
+
+/// The `SCALE` of a full-size plume: a fire about 30 pixels tall, spawning 10 particles an
+/// update.
+pub const FULL_SCALE: usize = 10;
+
+/// The largest `SCALE` a plume supports, twice [`FULL_SCALE`]. Exceeding it fails the build.
+///
+/// A plume this big already spans the screen, and it is as far as a particle's six bytes stretch:
+/// speeds stop fitting the byte they are stored in a little past it. Radii run out sooner — from
+/// around `14` the fattest particles saturate at four pixels instead of growing with the rest.
+pub const MAX_SCALE: usize = 2 * FULL_SCALE;
+
+/// The number of updates a plume's particles live for by default: [`Fire`] burns for this many
+/// and [`Smoke`] drifts for twice as long.
+pub const DEFAULT_LIFETIME: usize = 26;
+
+/// The longest `LIFETIME` a plume supports — nearly three seconds, and more than three times what
+/// the effects here use. Exceeding it fails the build.
+///
+/// Past this a particle could outrun the sub-pixel position it is stored in, and wrap around to
+/// the far side of the screen instead of drifting off it. So it is how far an `i16` reaches from
+/// the edge of the widest spawn bed, over the most ground the fastest particle of the biggest
+/// plume covers in one update.
+pub const MAX_LIFETIME: usize = {
+    let reach = i16::MAX as i32 - scaled(SPAWN_REACH, MAX_SCALE as i32);
+
+    (reach / scaled(MAX_PARTICLE_SPEED, MAX_SCALE as i32)) as usize
+};
+
+/// The fastest a plume's particles may travel, in sub-pixel units per update at [`FULL_SCALE`].
+/// [`MAX_LIFETIME`] is derived from it, so a plume asking for more is checked against it.
+const MAX_PARTICLE_SPEED: i32 = FIRE_SPEED.end;
+
+/// The engine behind [`Fire`] and [`Smoke`], which differ only in how they color and pace it.
+///
+/// The simulation runs in the plume's own frame, where particles always travel towards negative
+/// `y` and sway along `x`; [`Self::direction`] is applied when drawing. Rotating 260 particles
+/// every update would cost far more than rotating them as they are drawn, and the plume's own
+/// frame keeps the sway perpendicular to the travel for free.
+#[derive(Debug)]
+struct Plume<const SCALE: usize, const LIFETIME: usize> {
+    /// Generations of particles in spawn order: the front holds the oldest. Every update spawns
+    /// one generation and every particle lives exactly `LIFETIME` updates, so a full deque means
+    /// the front generation has expired, and the deque works as a ring buffer — no per-particle
+    /// liveness checks and no compaction.
+    particles: Deque<[Particle; SCALE], LIFETIME>,
+    /// The sideways velocity the sway is currently at, in pixels per update at [`FULL_SCALE`].
+    force: f32,
+    /// How much [`Self::force`] changes per update; its sign flips at the ends of the sway.
+    forced: f32,
+    /// The base position, in whole pixels. Particle positions are relative to it and in
+    /// sub-pixel units; keeping the base in pixels is what lets a plume sit anywhere an `i16`
+    /// reaches without the conversion overflowing.
+    x: i16,
+    y: i16,
+    direction: Direction,
+    /// The range particle speeds are drawn from, in sub-pixel units per update at
+    /// [`FULL_SCALE`].
+    speed: Range<i32>,
+    /// The age at which particles drop to half their speed, if they ever do.
+    slow_after: Option<usize>,
+}
+
+impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
+    fn new(
+        x: i16,
+        y: i16,
+        direction: Direction,
+        speed: Range<i32>,
+        slow_after: Option<usize>,
+    ) -> Self {
+        // In `new` rather than in `update`, so that a plume too big or too long-lived fails the
+        // build of the cart that asks for one, not of the cart that gets around to running it.
+        const {
+            assert!(SCALE > 0, "a plume needs a non-zero SCALE");
+            assert!(
+                SCALE <= MAX_SCALE,
+                "a plume's SCALE must not exceed MAX_SCALE"
+            );
+            assert!(LIFETIME > 0, "a plume needs a non-zero LIFETIME");
+            assert!(
+                LIFETIME <= MAX_LIFETIME,
+                "a plume's LIFETIME must not exceed MAX_LIFETIME"
+            );
+        }
+        // What `MAX_LIFETIME` is calculated against.
+        debug_assert!(
+            speed.end <= MAX_PARTICLE_SPEED,
+            "a plume may not outrun MAX_PARTICLE_SPEED"
+        );
+
+        Self {
+            particles: Deque::new(),
+            force: STARTING_FORCE,
+            forced: STARTING_FORCED,
+            x,
+            y,
+            direction,
+            speed,
+            slow_after,
+        }
+    }
+
+    fn update(&mut self, ctx: &mut Context) {
+        // The sway reverses at a random point, so the plume never settles into a rhythm.
+        if self.force < -MAX_FORCE || self.force > ctx.random(0.0..MAX_FORCE) {
+            self.forced = -self.forced;
+        }
+        self.force += self.forced;
+
+        if self.particles.is_full() {
+            self.particles.pop_front();
+        }
+
+        let scale = SCALE as i32;
+        let speed = self.speed.clone();
+        let spawned = self
+            .particles
+            .push_back(array::from_fn(|_| Particle::new(ctx, scale, speed.clone())));
+        debug_assert!(
+            spawned.is_ok(),
+            "the pop above leaves room for a generation"
+        );
+
+        let force = scaled((self.force * SUBPIXELS as f32) as i32, scale) as i16;
+        // At the smallest scales the scaled rate would round down to nothing, leaving particles
+        // that never thin out at all; a sub-pixel an update is the least they may shrink by.
+        let shrink = capped(scaled(RADIUS_SHRINK_SPEED, scale)).max(1);
+        let slow_after = self.slow_after;
+        let generations = self.particles.len();
+        for (i, generation) in self.particles.iter_mut().enumerate() {
+            // Ages count from the back, so a generation matches `slow_after` in exactly one
+            // update and slows down only once.
+            let slowing = slow_after == Some(generations - 1 - i);
+            for particle in generation {
+                particle.x += force;
+                particle.y -= particle.speed as i16;
+                particle.radius = particle.radius.saturating_sub(shrink);
+                if slowing {
+                    particle.speed /= 2;
+                }
+            }
+        }
+    }
+
+    /// Draws every particle, in `birth` until it reaches the first of the `stops` — which are
+    /// `(age, color)` pairs in ascending order — and in the color of the last stop it reaches
+    /// after that.
+    fn draw(&self, gfx: &mut Graphics, birth: Color, stops: &[(usize, Color)]) {
+        // Particle positions are sub-pixel and relative to the base, so the base joins them
+        // there — once, rather than per particle.
+        let (base_x, base_y) = (self.x as i32 * SUBPIXELS, self.y as i32 * SUBPIXELS);
+        let generations = self.particles.len();
+        for (i, generation) in self.particles.iter().enumerate() {
+            // Generations are in spawn order, so how many updates one has lived follows from its
+            // distance to the back. Drawing them oldest first layers the young over the old.
+            let age = generations - 1 - i;
+            let mut color = birth;
+            for &(stop, stop_color) in stops {
+                if age >= stop {
+                    color = stop_color;
+                }
+            }
+
+            for particle in generation {
+                let (x, y) = self.direction.rotate(particle.x as i32, particle.y as i32);
+                let x = ((base_x + x) / SUBPIXELS) as i16;
+                let y = ((base_y + y) / SUBPIXELS) as i16;
+                let radius = (particle.radius / SUBPIXELS as u8) as u16;
+                gfx.circle_fill(x, y, radius, color);
+            }
+        }
+    }
+}
+
+/// One particle, in plume space: it spawns in a square around the base and travels towards
+/// negative `y`, shrinking as it goes.
+///
+/// Six bytes, because a plume holds hundreds of them. Positions are sub-pixel: most particles
+/// move less than a pixel per update, so whole-pixel positions would round their motion away.
+#[derive(Debug)]
+struct Particle {
+    x: i16,
+    y: i16,
+    radius: u8,
+    speed: u8,
+}
+
+impl Particle {
+    fn new(ctx: &mut Context, scale: i32, speed: Range<i32>) -> Self {
+        Self {
+            x: scaled(ctx.random_integer(-SPAWN_REACH..SPAWN_REACH), scale) as i16,
+            y: scaled(ctx.random_integer(-SPAWN_REACH..SPAWN_REACH), scale) as i16,
+            radius: capped(scaled(ctx.random_integer(MIN_RADIUS..MAX_RADIUS), scale)),
+            speed: capped(scaled(ctx.random_integer(speed), scale)),
+        }
+    }
+}
+
+/// A `value` of the [`FULL_SCALE`] plume, adjusted for the given scale.
+const fn scaled(value: i32, scale: i32) -> i32 {
+    value * scale / FULL_SCALE as i32
+}
+
+/// A scaled value capped to what a [`Particle`]'s bytes hold, so that the biggest plumes
+/// saturate their fattest particles instead of overflowing them.
+fn capped(value: i32) -> u8 {
+    value.clamp(0, u8::MAX as i32) as u8
+}
+
+/// Spatial values are fixed-point, in units of 1/64th of a pixel: multiply by this to go from
+/// pixels to sub-pixel units, divide to go back.
+const SUBPIXELS: i32 = 64;
+
+// The sway, in pixels per update at `FULL_SCALE`: particles lean a quarter of a pixel per update
+// at most, taking about a second and a half to swing from one side to the other.
+const STARTING_FORCE: f32 = 0.0;
+const STARTING_FORCED: f32 = 0.005;
+const MAX_FORCE: f32 = 0.25;
+
+// Particles spawn anywhere within this much of the base on either axis, a 10x10 pixel bed
+// centered on it at `FULL_SCALE`.
+const SPAWN_REACH: i32 = 5 * SUBPIXELS;
+
+// Radii, in sub-pixel units at `FULL_SCALE`: up to 3 pixels, shrinking by a twentieth of a pixel
+// per update. Shrinking is what thins a plume out towards its end, not what ends a particle —
+// a fully shrunk one still draws as a single pixel until its generation is dropped.
+const MIN_RADIUS: i32 = 0;
+const MAX_RADIUS: i32 = SUBPIXELS * 3;
+const RADIUS_SHRINK_SPEED: i32 = SUBPIXELS / 20;

@@ -9,6 +9,8 @@ mod glue;
 pub mod memstat;
 mod motion;
 mod music;
+#[cfg(feature = "plume-effects")]
+pub mod plume;
 mod storage;
 
 // Install the live-tracking allocator for `std` carts. It lives here, not in
