@@ -399,6 +399,7 @@ mod tests {
             "sfx_demo",
             "music_demo",
             "stress",
+            "campfire",
         ] {
             let path = root.join(dir).join("assets.pixel8.json");
             let bytes =

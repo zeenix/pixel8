@@ -18,7 +18,7 @@ cd "$(dirname "$0")/.."
 
 # The carts to publish, in shelf order. The shelf page's descriptions live
 # with its markup in scripts/build-index.sh — keep the two lists in sync.
-carts=(sprite_move platformer sfx_demo music_demo)
+carts=(sprite_move platformer sfx_demo music_demo campfire)
 
 # The tutorial book is the site root.
 mdbook build book

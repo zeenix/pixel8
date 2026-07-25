@@ -3,7 +3,7 @@
 The repository ships example carts under
 [`examples/`](https://github.com/zeenix/pixel8/tree/main/examples) — each a
 standalone project you can open, run and take apart. They are all playable
-right here (and on the [cart shelf](play/index.html)), and each one is the
+right here (and on the [cart shelf](play/index.html)), and most are the
 worked answer to one of this book's chapters.
 
 From a source checkout, any of them opens in the console:
@@ -69,6 +69,24 @@ chapter.
 <div class="cart-embed">
 <iframe src="play/music_demo.html" title="music_demo — playable cart" loading="lazy"></iframe>
 </div>
+
+## campfire
+
+A fire burning at night — and not a sprite in it. It comes from [`Fire`] and
+[`Smoke`], the SDK's [`plume`] effects, which sit behind the off-by-default
+`plume-effects` feature: turn it on and a fire is three lines of code. This one
+is a `SmokingFire`, whose spent flames carry on as smoke instead of vanishing,
+so the column reads as one effect rather than two. Scale it down for a candle,
+point it another way for an exhaust trail.
+[Source](https://github.com/zeenix/pixel8/blob/main/examples/campfire/src/lib.rs).
+
+<div class="cart-embed">
+<iframe src="play/campfire.html" title="campfire — playable cart" loading="lazy"></iframe>
+</div>
+
+[`Fire`]: https://docs.rs/pixel8/latest/pixel8/plume/struct.Fire.html
+[`Smoke`]: https://docs.rs/pixel8/latest/pixel8/plume/struct.Smoke.html
+[`plume`]: https://docs.rs/pixel8/latest/pixel8/plume/index.html
 
 ## stress
 

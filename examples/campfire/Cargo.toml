@@ -1,0 +1,23 @@
+[package]
+name = "campfire"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+# The effects the cart is made of live behind `plume-effects`, which is off by
+# default so carts that don't use them keep the SDK dependency-free.
+[dependencies]
+pixel8 = { path = "../../pixel8", default-features = false, features = [
+    "plume-effects",
+] }
+
+# Standalone workspace: example carts build independently of the
+# pixel8 workspace, exactly like projects created with `new`.
+[workspace]
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"
