@@ -57,6 +57,31 @@
 //! and a plume in a crosswind one of the diagonals. Particles sway from side to side as they
 //! travel, so the sway follows the direction too.
 //!
+//! # Trails
+//!
+//! A plume is not pinned to where it started: [`Fire::move_to`] and [`Smoke::move_to`] move the
+//! point it spawns from. Particles already in the air keep the base they came off, so moving a
+//! plume trails it rather than dragging everything it has emitted along — which is what makes a
+//! plume a trail. That damaged aircraft is a `Smoke` moved to the plane every frame:
+//!
+//! ```no_run
+//! # use pixel8::{plume::{Direction, Smoke}, *};
+//! struct Plane {
+//!     x: i16,
+//!     y: i16,
+//!     smoke: Smoke<4>,
+//! }
+//!
+//! impl Plane {
+//!     fn update(&mut self, ctx: &mut Context) {
+//!         self.y -= 1;
+//!         // Move first, and this frame's puff comes off where the plane is now.
+//!         self.smoke.move_to(self.x, self.y);
+//!         self.smoke.update(ctx);
+//!     }
+//! }
+//! ```
+//!
 //! # Smoke from fire
 //!
 //! [`Smoke`] on its own is a plume that starts wherever it is placed. A fire that *turns into*
@@ -91,6 +116,15 @@ impl<const SCALE: usize, const LIFETIME: usize> Fire<SCALE, LIFETIME> {
         Self {
             plume: Plume::new(x, y, direction, FIRE_SPEED, Some(DEFAULT_LIFETIME)),
         }
+    }
+
+    /// Moves the fire to (`x`, `y`), for one carried or burning on something that moves.
+    ///
+    /// Flames already in the air stay where they were let go, so a fire on the move trails
+    /// behind itself. Move it before [`update`](Self::update) and the next flames come off the
+    /// new position.
+    pub fn move_to(&mut self, x: i16, y: i16) {
+        self.plume.move_to(x, y);
     }
 
     /// Advances the flames by one frame. Call this from [`Game::update`](crate::Game::update).
@@ -148,6 +182,15 @@ impl<const SCALE: usize, const LIFETIME: usize> Smoke<SCALE, LIFETIME> {
         Self {
             plume: Plume::new(x, y, direction, SMOKE_SPEED, None),
         }
+    }
+
+    /// Moves the source of the smoke to (`x`, `y`), for a trail off something that moves.
+    ///
+    /// Smoke already in the air stays where it was let go — which is what makes it a trail
+    /// rather than a cloud dragged along. Move it before [`update`](Self::update) and the next
+    /// puff comes off the new position.
+    pub fn move_to(&mut self, x: i16, y: i16) {
+        self.plume.move_to(x, y);
     }
 
     /// Advances the smoke by one frame. Call this from [`Game::update`](crate::Game::update).
@@ -257,14 +300,14 @@ struct Plume<const SCALE: usize, const LIFETIME: usize> {
     /// one generation and every particle lives exactly `LIFETIME` updates, so a full deque means
     /// the front generation has expired, and the deque works as a ring buffer — no per-particle
     /// liveness checks and no compaction.
-    particles: Deque<[Particle; SCALE], LIFETIME>,
+    generations: Deque<Generation<SCALE>, LIFETIME>,
     /// The sideways velocity the sway is currently at, in pixels per update at [`FULL_SCALE`].
     force: f32,
     /// How much [`Self::force`] changes per update; its sign flips at the ends of the sway.
     forced: f32,
-    /// The base position, in whole pixels. Particle positions are relative to it and in
-    /// sub-pixel units; keeping the base in pixels is what lets a plume sit anywhere an `i16`
-    /// reaches without the conversion overflowing.
+    /// Where the next generation will spawn, in whole pixels. Particle positions are relative to
+    /// the generation they belong to and in sub-pixel units; keeping bases in whole pixels is
+    /// what lets a plume sit anywhere an `i16` reaches without the conversion overflowing.
     x: i16,
     y: i16,
     direction: Direction,
@@ -304,7 +347,7 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
         );
 
         Self {
-            particles: Deque::new(),
+            generations: Deque::new(),
             force: STARTING_FORCE,
             forced: STARTING_FORCED,
             x,
@@ -315,6 +358,13 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
         }
     }
 
+    /// Moves where the plume spawns from. Particles already let go of keep the base they were
+    /// spawned against, so what is already in the air stays where it is.
+    fn move_to(&mut self, x: i16, y: i16) {
+        self.x = x;
+        self.y = y;
+    }
+
     fn update(&mut self, ctx: &mut Context) {
         // The sway reverses at a random point, so the plume never settles into a rhythm.
         if self.force < -MAX_FORCE || self.force > ctx.random(0.0..MAX_FORCE) {
@@ -322,15 +372,17 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
         }
         self.force += self.forced;
 
-        if self.particles.is_full() {
-            self.particles.pop_front();
+        if self.generations.is_full() {
+            self.generations.pop_front();
         }
 
         let scale = SCALE as i32;
         let speed = self.speed.clone();
-        let spawned = self
-            .particles
-            .push_back(array::from_fn(|_| Particle::new(ctx, scale, speed.clone())));
+        let spawned = self.generations.push_back(Generation {
+            particles: array::from_fn(|_| Particle::new(ctx, scale, speed.clone())),
+            x: self.x,
+            y: self.y,
+        });
         debug_assert!(
             spawned.is_ok(),
             "the pop above leaves room for a generation"
@@ -341,12 +393,12 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
         // that never thin out at all; a sub-pixel an update is the least they may shrink by.
         let shrink = capped(scaled(RADIUS_SHRINK_SPEED, scale)).max(1);
         let slow_after = self.slow_after;
-        let generations = self.particles.len();
-        for (i, generation) in self.particles.iter_mut().enumerate() {
+        let generations = self.generations.len();
+        for (i, generation) in self.generations.iter_mut().enumerate() {
             // Ages count from the back, so a generation matches `slow_after` in exactly one
             // update and slows down only once.
             let slowing = slow_after == Some(generations - 1 - i);
-            for particle in generation {
+            for particle in &mut generation.particles {
                 particle.x += force;
                 particle.y -= particle.speed as i16;
                 particle.radius = particle.radius.saturating_sub(shrink);
@@ -361,11 +413,8 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
     /// `(age, color)` pairs in ascending order — and in the color of the last stop it reaches
     /// after that.
     fn draw(&self, gfx: &mut Graphics, birth: Color, stops: &[(usize, Color)]) {
-        // Particle positions are sub-pixel and relative to the base, so the base joins them
-        // there — once, rather than per particle.
-        let (base_x, base_y) = (self.x as i32 * SUBPIXELS, self.y as i32 * SUBPIXELS);
-        let generations = self.particles.len();
-        for (i, generation) in self.particles.iter().enumerate() {
+        let generations = self.generations.len();
+        for (i, generation) in self.generations.iter().enumerate() {
             // Generations are in spawn order, so how many updates one has lived follows from its
             // distance to the back. Drawing them oldest first layers the young over the old.
             let age = generations - 1 - i;
@@ -376,7 +425,11 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
                 }
             }
 
-            for particle in generation {
+            // Particle positions are sub-pixel and relative to their generation's base, so the
+            // base joins them there — once per generation, rather than per particle.
+            let base_x = generation.x as i32 * SUBPIXELS;
+            let base_y = generation.y as i32 * SUBPIXELS;
+            for particle in &generation.particles {
                 let (x, y) = self.direction.rotate(particle.x as i32, particle.y as i32);
                 let x = ((base_x + x) / SUBPIXELS) as i16;
                 let y = ((base_y + y) / SUBPIXELS) as i16;
@@ -387,8 +440,23 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
     }
 }
 
-/// One particle, in plume space: it spawns in a square around the base and travels towards
-/// negative `y`, shrinking as it goes.
+/// One update's worth of particles, and the base they spawned against.
+///
+/// Anchoring each generation where it was emitted is what lets a plume move: particles the plume
+/// has already let go of keep their own base, so a moving fire leaves a trail behind it instead
+/// of dragging everything it has ever emitted along. It costs four bytes per generation rather
+/// than per particle, and it keeps particle positions small enough to stay in two bytes each —
+/// storing them against the world instead would put a plume's reach at 512 pixels.
+#[derive(Debug)]
+struct Generation<const SCALE: usize> {
+    particles: [Particle; SCALE],
+    /// The base these spawned against, in whole pixels.
+    x: i16,
+    y: i16,
+}
+
+/// One particle, in plume space: it spawns in a square around its generation's base and travels
+/// towards negative `y`, shrinking as it goes.
 ///
 /// Six bytes, because a plume holds hundreds of them. Positions are sub-pixel: most particles
 /// move less than a pixel per update, so whole-pixel positions would round their motion away.
