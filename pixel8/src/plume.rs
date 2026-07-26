@@ -43,16 +43,40 @@
 //!
 //! # Size
 //!
-//! The `SCALE` parameter both sizes a plume and sets how many particles it spawns per update,
-//! so a small plume is sparse and a big one dense. [`FULL_SCALE`] is a fire about 30 pixels
-//! tall, a `2` or a `3` the flame of a candle or a torch, and anything up to [`MAX_SCALE`]
-//! grows it further:
+//! The `SCALE` parameter sizes a plume. [`FULL_SCALE`] is a fire about 30 pixels tall, a `2` or
+//! a `3` the flame of a candle or a torch, and anything up to [`MAX_SCALE`] grows it further:
 //!
 //! ```no_run
 //! # use pixel8::plume::Fire;
 //! let candle: Fire<2> = Fire::new(64, 100);
 //! let bonfire: Fire<20> = Fire::new(64, 100);
 //! ```
+//!
+//! `SCALE` is also how many particles go in each puff, and that is the one part of a plume that
+//! cannot keep shrinking: a puff holds at least one particle however small the plume is, while
+//! the ground it covers shrinks with the square. So the smaller a plume gets the more crowded it
+//! is — a `Fire<1>` is around twelve times as dense as a `Fire<10>` — which is what
+//! [`with_puffs`](Fire::with_puffs) is for.
+//!
+//! # Thinning a small plume
+//!
+//! A plume puffs once an update by default, which at [`FULL_SCALE`] is what makes it look like
+//! something billowing. Far below that the puffs land on top of each other and it reads as a
+//! solid lump instead. Building the plume out of fewer, further-apart puffs fixes it:
+//!
+//! ```no_run
+//! # use pixel8::plume::{Direction, Smoke};
+//! // A cigarette: the smallest plume there is, and thinned, or it is a blob on someone's face.
+//! let wisp: Smoke<1> = Smoke::new(64, 100)
+//!     .with_direction(Direction::UpLeft)
+//!     .with_puffs(8);
+//! ```
+//!
+//! Particles still move every update, so the plume keeps the reach, pace and direction it had —
+//! there is simply less in it, spaced further apart. The colors spread out with the puffs too,
+//! so a thinned plume greys along its length instead of in its first pixel, and it costs
+//! proportionally less to update and draw. What it does not give back is memory: the buffer is
+//! sized for a puff an update whether or not the plume uses them.
 //!
 //! # Direction
 //!
@@ -138,6 +162,17 @@ impl<const SCALE: usize, const LIFETIME: usize> Fire<SCALE, LIFETIME> {
         self
     }
 
+    /// Builds the fire out of `puffs` puffs of flame rather than one an update, to chain onto
+    /// [`new`](Self::new).
+    ///
+    /// This is what keeps a small fire from burning as a solid lump — see
+    /// [Thinning a small plume](self#thinning-a-small-plume). `puffs` is clamped to `1..=LIFETIME`,
+    /// and `LIFETIME` (the default) is a puff an update.
+    pub fn with_puffs(mut self, puffs: usize) -> Self {
+        self.plume.set_puffs(puffs);
+        self
+    }
+
     /// Turns the fire to burn towards `direction`.
     ///
     /// Flames already in the air keep burning the way they were, so a fire that turns bends
@@ -216,6 +251,17 @@ impl<const SCALE: usize, const LIFETIME: usize> Smoke<SCALE, LIFETIME> {
     /// Sets which way the smoke billows, to chain onto [`new`](Self::new).
     pub fn with_direction(mut self, direction: Direction) -> Self {
         self.set_direction(direction);
+        self
+    }
+
+    /// Builds the plume out of `puffs` puffs rather than one an update, to chain onto
+    /// [`new`](Self::new).
+    ///
+    /// This is what turns the smallest scales from a solid lump into a wisp — see
+    /// [Thinning a small plume](self#thinning-a-small-plume). `puffs` is clamped to `1..=LIFETIME`,
+    /// and `LIFETIME` (the default) is a puff an update.
+    pub fn with_puffs(mut self, puffs: usize) -> Self {
+        self.plume.set_puffs(puffs);
         self
     }
 
@@ -360,6 +406,14 @@ struct Plume<const SCALE: usize, const LIFETIME: usize> {
     speed: Range<i32>,
     /// The age at which particles drop to half their speed, if they ever do.
     slow_after: Option<usize>,
+    /// How many generations the plume is made of: the deque's working capacity, which is its
+    /// full `LIFETIME` unless the plume has been thinned out.
+    puffs: u8,
+    /// Updates between generations, `LIFETIME / puffs`. Particles move every update either way,
+    /// so this thins a plume out without shortening it.
+    interval: u8,
+    /// Updates since the last generation spawned.
+    waited: u8,
 }
 
 impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
@@ -393,7 +447,21 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
             direction: Direction::default(),
             speed,
             slow_after,
+            puffs: LIFETIME as u8,
+            interval: 1,
+            waited: 0,
         }
+    }
+
+    /// Rebuilds the plume out of `puffs` generations instead of one per update.
+    ///
+    /// Only ever called before the plume runs, so there are no generations spawned under the old
+    /// interval for the age arithmetic to get wrong. A particle then lives `puffs` whole
+    /// intervals, which is `LIFETIME` rounded down — up to a puff's worth short of it.
+    fn set_puffs(&mut self, puffs: usize) {
+        let puffs = puffs.clamp(1, LIFETIME);
+        self.puffs = puffs as u8;
+        self.interval = (LIFETIME / puffs) as u8;
     }
 
     /// Moves where the plume spawns from. Particles already let go of keep the base they were
@@ -416,33 +484,43 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
         }
         self.force += self.forced;
 
-        if self.generations.is_full() {
-            self.generations.pop_front();
-        }
-
         let scale = SCALE as i32;
-        let speed = self.speed.clone();
-        let spawned = self.generations.push_back(Generation {
-            particles: array::from_fn(|_| Particle::new(ctx, scale, speed.clone())),
-            x: self.x,
-            y: self.y,
-            direction: self.direction,
-        });
-        debug_assert!(
-            spawned.is_ok(),
-            "the pop above leaves room for a generation"
-        );
+        // A thinned plume puffs less often than it updates. Particles still move every update,
+        // so the plume keeps its length and loses only the generations in between.
+        self.waited += 1;
+        let puffing = self.waited >= self.interval;
+        if puffing {
+            self.waited = 0;
+            if self.generations.len() == self.puffs as usize {
+                self.generations.pop_front();
+            }
+
+            let speed = self.speed.clone();
+            let spawned = self.generations.push_back(Generation {
+                particles: array::from_fn(|_| Particle::new(ctx, scale, speed.clone())),
+                x: self.x,
+                y: self.y,
+                direction: self.direction,
+            });
+            debug_assert!(
+                spawned.is_ok(),
+                "the pop above leaves room for a generation"
+            );
+        }
 
         let force = scaled((self.force * SUBPIXELS as f32) as i32, scale) as i16;
         // At the smallest scales the scaled rate would round down to nothing, leaving particles
         // that never thin out at all; a sub-pixel an update is the least they may shrink by.
         let shrink = capped(scaled(RADIUS_SHRINK_SPEED, scale)).max(1);
         let slow_after = self.slow_after;
+        let interval = self.interval as usize;
         let generations = self.generations.len();
         for (i, generation) in self.generations.iter_mut().enumerate() {
-            // Ages count from the back, so a generation matches `slow_after` in exactly one
-            // update and slows down only once.
-            let slowing = slow_after == Some(generations - 1 - i);
+            // Ages only advance when a generation spawns, and then by a whole interval, so this
+            // catches each generation on the one update its age crosses `slow_after`.
+            let age = (generations - 1 - i) * interval;
+            let slowing =
+                puffing && slow_after.is_some_and(|after| age >= after && age < after + interval);
             for particle in &mut generation.particles {
                 particle.x += force;
                 particle.y -= particle.speed as i16;
@@ -458,11 +536,12 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
     /// `(age, color)` pairs in ascending order — and in the color of the last stop it reaches
     /// after that.
     fn draw(&self, gfx: &mut Graphics, birth: Color, stops: &[(usize, Color)]) {
+        let interval = self.interval as usize;
         let generations = self.generations.len();
         for (i, generation) in self.generations.iter().enumerate() {
             // Generations are in spawn order, so how many updates one has lived follows from its
             // distance to the back. Drawing them oldest first layers the young over the old.
-            let age = generations - 1 - i;
+            let age = (generations - 1 - i) * interval;
             let mut color = birth;
             for &(stop, stop_color) in stops {
                 if age >= stop {
