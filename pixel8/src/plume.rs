@@ -94,6 +94,28 @@
 //! Particles already in the air carry on the way they were going, so a plume that turns bends
 //! rather than swinging around all at once.
 //!
+//! # Starting and stopping
+//!
+//! [`Fire::set_puffing`] / [`Smoke::set_puffing`] turn the source off and on. A plume that has
+//! stopped is not a plume that has vanished: it keeps everything it has already let go of, and
+//! that carries on rising, greying and thinning out until it ages away. So the plume empties over
+//! a `LIFETIME` from the base up, which is how a real one goes out.
+//!
+//! Simply not drawing it would blink the whole thing away instead — the difference between a
+//! cigarette between draws and one that stops existing:
+//!
+//! ```no_run
+//! # use pixel8::{plume::Smoke, *};
+//! # struct Smoker { smoke: Smoke<1>, inhaling: bool }
+//! impl Smoker {
+//!     fn update(&mut self, ctx: &mut Context) {
+//!         // Nothing new off the cigarette while it is at their lips; the last of it drifts off.
+//!         self.smoke.set_puffing(!self.inhaling);
+//!         self.smoke.update(ctx);
+//!     }
+//! }
+//! ```
+//!
 //! # Trails
 //!
 //! A plume is not pinned to where it started: [`Fire::move_to`] and [`Smoke::move_to`] move the
@@ -179,6 +201,15 @@ impl<const SCALE: usize, const LIFETIME: usize> Fire<SCALE, LIFETIME> {
     /// instead of swinging around all at once.
     pub fn set_direction(&mut self, direction: Direction) {
         self.plume.set_direction(direction);
+    }
+
+    /// Lets the fire go on throwing off flames, or stops it without clearing the screen of it.
+    ///
+    /// A fire that has stopped keeps what is already alight: the last flames rise, fade and go
+    /// out on their own, so it dies down over a `LIFETIME` rather than blinking away. Start it
+    /// again and it picks straight back up. See the [module docs](self#starting-and-stopping).
+    pub fn set_puffing(&mut self, puffing: bool) {
+        self.plume.set_puffing(puffing);
     }
 
     /// Moves the fire to (`x`, `y`), for one carried or burning on something that moves.
@@ -271,6 +302,16 @@ impl<const SCALE: usize, const LIFETIME: usize> Smoke<SCALE, LIFETIME> {
     /// source that turns rather than swinging around all at once.
     pub fn set_direction(&mut self, direction: Direction) {
         self.plume.set_direction(direction);
+    }
+
+    /// Lets the source go on puffing, or shuts it off without clearing the screen of it.
+    ///
+    /// Smoke already in the air is left to drift, fade and thin out on its own, so a source that
+    /// shuts off empties over a `LIFETIME` rather than blinking away — which is what a cigarette
+    /// between draws, or an engine that cuts out, actually looks like. Open it again and the next
+    /// puff comes off the base as usual. See the [module docs](self#starting-and-stopping).
+    pub fn set_puffing(&mut self, puffing: bool) {
+        self.plume.set_puffing(puffing);
     }
 
     /// Moves the source of the smoke to (`x`, `y`), for a trail off something that moves.
@@ -406,14 +447,17 @@ struct Plume<const SCALE: usize, const LIFETIME: usize> {
     speed: Range<i32>,
     /// The age at which particles drop to half their speed, if they ever do.
     slow_after: Option<usize>,
-    /// How many generations the plume is made of: the deque's working capacity, which is its
-    /// full `LIFETIME` unless the plume has been thinned out.
-    puffs: u8,
-    /// Updates between generations, `LIFETIME / puffs`. Particles move every update either way,
-    /// so this thins a plume out without shortening it.
+    /// Updates between puffs, `LIFETIME / puffs`. Particles move every update either way, so this
+    /// thins a plume out without shortening it.
     interval: u8,
-    /// Updates since the last generation spawned.
+    /// How many updates a particle lives: a whole number of [`Self::interval`]s, and `LIFETIME`
+    /// rounded down to one. Never more than [`MAX_LIFETIME`], which is what keeps ages in a byte.
+    life: u8,
+    /// Updates since the last puff.
     waited: u8,
+    /// Whether the plume is still puffing. A plume that has stopped keeps drifting and ageing
+    /// what it has already let go of; it just stops adding to it.
+    puffing: bool,
 }
 
 impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
@@ -447,9 +491,10 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
             direction: Direction::default(),
             speed,
             slow_after,
-            puffs: LIFETIME as u8,
             interval: 1,
+            life: LIFETIME as u8,
             waited: 0,
+            puffing: true,
         }
     }
 
@@ -460,8 +505,13 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
     /// intervals, which is `LIFETIME` rounded down — up to a puff's worth short of it.
     fn set_puffs(&mut self, puffs: usize) {
         let puffs = puffs.clamp(1, LIFETIME);
-        self.puffs = puffs as u8;
         self.interval = (LIFETIME / puffs) as u8;
+        self.life = (puffs * (LIFETIME / puffs)) as u8;
+    }
+
+    /// Stops or restarts the puffing, leaving everything already in the air to carry on.
+    fn set_puffing(&mut self, puffing: bool) {
+        self.puffing = puffing;
     }
 
     /// Moves where the plume spawns from. Particles already let go of keep the base they were
@@ -488,24 +538,35 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
         // A thinned plume puffs less often than it updates. Particles still move every update,
         // so the plume keeps its length and loses only the generations in between.
         self.waited += 1;
-        let puffing = self.waited >= self.interval;
-        if puffing {
+        let interval = self.interval;
+        let ticking = self.waited >= interval;
+        if ticking {
             self.waited = 0;
-            if self.generations.len() == self.puffs as usize {
+            for generation in self.generations.iter_mut() {
+                generation.age += interval;
+            }
+            // Generations are in spawn order, so the oldest is always the front and expiring one
+            // is a pop rather than a search. Ageing them here rather than reading their place in
+            // the deque is what lets a plume stop puffing: the gap it leaves would otherwise make
+            // every particle behind it read as younger than it is.
+            if self.generations.front().is_some_and(|g| g.age >= self.life) {
                 self.generations.pop_front();
             }
 
-            let speed = self.speed.clone();
-            let spawned = self.generations.push_back(Generation {
-                particles: array::from_fn(|_| Particle::new(ctx, scale, speed.clone())),
-                x: self.x,
-                y: self.y,
-                direction: self.direction,
-            });
-            debug_assert!(
-                spawned.is_ok(),
-                "the pop above leaves room for a generation"
-            );
+            if self.puffing {
+                let speed = self.speed.clone();
+                let spawned = self.generations.push_back(Generation {
+                    particles: array::from_fn(|_| Particle::new(ctx, scale, speed.clone())),
+                    x: self.x,
+                    y: self.y,
+                    direction: self.direction,
+                    age: 0,
+                });
+                debug_assert!(
+                    spawned.is_ok(),
+                    "expiring the oldest leaves room for a generation"
+                );
+            }
         }
 
         let force = scaled((self.force * SUBPIXELS as f32) as i32, scale) as i16;
@@ -513,14 +574,12 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
         // that never thin out at all; a sub-pixel an update is the least they may shrink by.
         let shrink = capped(scaled(RADIUS_SHRINK_SPEED, scale)).max(1);
         let slow_after = self.slow_after;
-        let interval = self.interval as usize;
-        let generations = self.generations.len();
-        for (i, generation) in self.generations.iter_mut().enumerate() {
-            // Ages only advance when a generation spawns, and then by a whole interval, so this
-            // catches each generation on the one update its age crosses `slow_after`.
-            let age = (generations - 1 - i) * interval;
-            let slowing =
-                puffing && slow_after.is_some_and(|after| age >= after && age < after + interval);
+        for generation in self.generations.iter_mut() {
+            // Ages advance a whole interval at a time, so this catches each generation on the one
+            // update its age crosses `slow_after`.
+            let age = generation.age as usize;
+            let slowing = ticking
+                && slow_after.is_some_and(|after| age >= after && age < after + interval as usize);
             for particle in &mut generation.particles {
                 particle.x += force;
                 particle.y -= particle.speed as i16;
@@ -536,12 +595,10 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
     /// `(age, color)` pairs in ascending order — and in the color of the last stop it reaches
     /// after that.
     fn draw(&self, gfx: &mut Graphics, birth: Color, stops: &[(usize, Color)]) {
-        let interval = self.interval as usize;
-        let generations = self.generations.len();
-        for (i, generation) in self.generations.iter().enumerate() {
-            // Generations are in spawn order, so how many updates one has lived follows from its
-            // distance to the back. Drawing them oldest first layers the young over the old.
-            let age = (generations - 1 - i) * interval;
+        for generation in &self.generations {
+            // Generations are in spawn order, so drawing them front to back layers the young over
+            // the old.
+            let age = generation.age as usize;
             let mut color = birth;
             for &(stop, stop_color) in stops {
                 if age >= stop {
@@ -583,6 +640,9 @@ struct Generation<const SCALE: usize> {
     /// what lets a plume turn: what is already in the air carries on the way it was going, so a
     /// turn bends the plume instead of swinging all of it around at once.
     direction: Direction,
+    /// How many updates these have lived, which decides their color and when they expire. It
+    /// rides along in the padding the fields above leave behind, so it is free.
+    age: u8,
 }
 
 /// One particle, in plume space: it spawns in a square around its generation's base and travels
