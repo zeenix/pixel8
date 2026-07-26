@@ -53,6 +53,21 @@ Real game logic — move sprites, read input, draw a tilemap — uses a tiny
 fraction of the budget. The limit catches runaway loops during development,
 not carefully written games.
 
+What the budget counts is the cart's own work. The console's side of a draw
+call is not charged: `circle_fill` costs the same whether it paints one pixel
+or twelve thousand, and drawing the whole tilemap costs the same as drawing
+one tile. Only the call itself is billed, at roughly a tenth of a percent of
+the budget — a price set by the number of arguments, not the pixels touched —
+so a single `draw` gets on the order of a thousand draw calls however much
+each one paints.
+
+The meter is therefore not a measure of how hard the console is working. That
+rarely matters, because most draw calls are cheap enough that a thousand of
+them still fit a frame comfortably. The exception is `sprite_stretch` scaling
+a sprite up, which is expensive per call: a cart leaning on it can cost the
+console a frame's worth of real time while `cpu_draw` still reads relaxed.
+Watch `fps` rather than `cpu_draw` when a cart draws that heavily.
+
 ## Save data — 128 KiB
 
 The persistent key-value store (`Context::storage_set` / `storage_get`, see

@@ -451,6 +451,11 @@ impl Context {
     }
 
     /// Fraction (`0.0`–`1.0`) of last frame's `draw` CPU budget used.
+    ///
+    /// Counts the cart's own work, not the console's: a [`Graphics`] call
+    /// costs the same whatever it paints, so filling the screen reads like
+    /// setting one pixel. Compare [`fps`](Self::fps) to see whether the
+    /// console is keeping up.
     pub fn cpu_draw(&self) -> f32 {
         unsafe { ffi::cpu_draw() }
     }

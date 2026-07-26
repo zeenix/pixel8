@@ -15,6 +15,10 @@
 //! 24%. Scale a plume down and both fall away with the particle count. Budget for the ones on
 //! screen at once, and reach for a smaller `SCALE` before giving up on the effect.
 //!
+//! Those are budget figures, which count the cart's side of each circle and not the console's
+//! rasterizing of it — see [`Context::cpu_draw`]. Particle radii are small, so the two track
+//! each other closely here, but on a slow device trust [`Context::fps`] over the percentages.
+//!
 //! Everything here stays in this module — a cart's `use pixel8::*;` does not reach it, so name
 //! what the effect needs:
 //!

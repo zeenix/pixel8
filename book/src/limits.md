@@ -27,6 +27,13 @@ ctx.mem()          // 0.0..1.0 of the 128 KiB RAM cap (high-water)
 ctx.fps()          // measured frames per second
 ```
 
+The two CPU meters count the cart's own work, not the console's: a screenful
+of `circle_fill` reads the same as a single pixel, because only the call is
+charged and not what it paints. That is usually what you want — it measures
+the thing you can actually optimize — but it does mean a cart that leans on
+the expensive draw calls can miss frames while the meters look relaxed.
+`fps()` is the honest number when that happens.
+
 If a frame genuinely can't fit the budget at 60 fps, a cart can opt into 30:
 
 ```rust
