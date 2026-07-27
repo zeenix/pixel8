@@ -16,6 +16,7 @@ carts=(
   "platformer:run, jump, collect coins"
   "sfx_demo:a soundboard"
   "music_demo:starting and stopping a song"
+  "campfire:an animated scene, not a game"
 )
 
 cards=""

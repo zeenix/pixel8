@@ -21,7 +21,7 @@ const PAL: (i32, i32) = (76, 20); // 4x4 grid of compact swatches
 const PAL_SW: i32 = 8; // palette swatch side (PICO-8-compact)
 const SIZE_BTNS: (i32, i32) = (76, 55); // four "1/2/4/8" block-size buttons
 const FLAGS: (i32, i32) = (74, 70); // 8 toggle dots
-const SHEET_Y: i32 = 88; // 4 rows of sprites (one page)
+const SHEET_Y: i32 = 88; // the sprite strip
 const PAGE_BTNS: (i32, i32) = (104, 81); // 4 page dots
 
 // Fullscreen canvas: anchored at (8, 8), zoom chosen to fit the ~112px area.
@@ -90,6 +90,10 @@ pub struct SpriteEditor {
     status: ui::StatusMsg,
     /// In-progress hand-tool pan, if any.
     pan: Option<PanDrag>,
+    /// The canvas pixel the pencil or eraser last painted this drag, if one is
+    /// in progress. Each frame joins up with it, so a stroke is a line rather
+    /// than the dots the frames happened to land on.
+    stroke: Option<(i32, i32)>,
     /// Undo/redo of the sprite sheet (last 10 edits).
     history: History<SpriteSheet>,
 }
@@ -108,6 +112,7 @@ impl SpriteEditor {
             my: -16,
             status: ui::StatusMsg::default(),
             pan: None,
+            stroke: None,
             history: History::new(),
         }
     }
@@ -163,6 +168,11 @@ impl SpriteEditor {
 
     fn sheet_origin(&self) -> (i32, i32) {
         (self.view_x, self.view_y)
+    }
+
+    /// The strip along the bottom, sized and positioned for the edited block.
+    fn strip(&self) -> ui::Strip {
+        ui::Strip::new(self.size, self.origin_cell().1, self.page)
     }
 
     pub fn key(&mut self, key: Key, mods: Mods, assets: &mut Assets) {
@@ -241,6 +251,28 @@ impl SpriteEditor {
         }
     }
 
+    /// Paint the tool along the line from `(x0, y0)` to `(x1, y1)`, leaving the
+    /// start alone — the previous frame painted it. Bresenham, so the joined-up
+    /// stroke is the same one-pixel-wide line the canvas would draw itself.
+    fn stroke_to(&mut self, assets: &mut Assets, x0: i32, y0: i32, x1: i32, y1: i32) {
+        let (dx, dy) = ((x1 - x0).abs(), -(y1 - y0).abs());
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let (mut x, mut y, mut err) = (x0, y0, dx + dy);
+        while (x, y) != (x1, y1) {
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+            self.apply_tool(assets, x, y, false);
+        }
+    }
+
     /// Hand-tool drag: slide the canvas window across the sheet, grabbing a
     /// point and dragging it so neighbouring pixels scroll into view (PICO-8's
     /// pan, like the map editor's camera). It scrolls the window origin by whole
@@ -302,11 +334,24 @@ impl SpriteEditor {
         } else if (m.left || m.right) && over_canvas {
             let px = (m.x - cx) / z;
             let py = (m.y - cy) / z;
+            let right = m.right && !m.left;
             // Fill and picker should fire once per click, not per frame.
             let one_shot = matches!(self.tool, Tool::Fill | Tool::Picker);
             if !one_shot || m.left_pressed || m.right_pressed {
-                self.apply_tool(assets, px, py, m.right && !m.left);
+                match self.stroke {
+                    // Join a dragged pencil or eraser to where it was last frame.
+                    // The canvas is a fixed 64px however big the block is, so at
+                    // 8x8 a canvas pixel is a screen pixel and any drag but the
+                    // slowest outruns the frames, landing as a dotted line.
+                    Some((lx, ly)) if !one_shot && !right => self.stroke_to(assets, lx, ly, px, py),
+                    _ => self.apply_tool(assets, px, py, right),
+                }
+                self.stroke = (!one_shot && !right).then_some((px, py));
             }
+        } else {
+            // Off the canvas or button up: the next press starts a fresh stroke
+            // rather than joining up with wherever the last one ended.
+            self.stroke = None;
         }
         // The palette, tools, flags, page dots and sheet exist only in the
         // normal view; fullscreen is a bare canvas.
@@ -344,17 +389,20 @@ impl SpriteEditor {
                     .set_flag(flag_sprite, f as u8, cur & (1 << f) == 0);
             }
         }
-        // Page dots.
+        // Page dots. A block big enough that the strip follows it rather than
+        // the page would leave them inert, so they move the window instead.
         for p in 0..4 {
             let x = PAGE_BTNS.0 + p * 6;
             if m.over(x, PAGE_BTNS.1, x + 4, PAGE_BTNS.1 + 5) {
                 self.page = p as u32;
+                if ui::Strip::follows_block(self.size) {
+                    self.view_y = p * 32;
+                    self.clamp_view();
+                }
             }
         }
         // Sheet strip: snap the window to the clicked cell.
-        if m.over(0, SHEET_Y, 127, SHEET_Y + 31) {
-            let col = m.x / 8;
-            let row = self.page as i32 * 4 + (m.y - SHEET_Y) / 8;
+        if let Some((col, row)) = self.strip().cell_at(SHEET_Y, m.x, m.y) {
             self.view_x = col * 8;
             self.view_y = row * 8;
             self.clamp_view();
@@ -462,42 +510,11 @@ impl SpriteEditor {
             fb.rectfill(x, PAGE_BTNS.1, x + 4, PAGE_BTNS.1 + 4, c);
         }
 
-        // Sheet strip: 64 sprites of the current page.
-        for cy in 0..4i32 {
-            for cx in 0..16i32 {
-                let n = self.page * 64 + (cy * 16 + cx) as u32;
-                let (sx, sy) = (
-                    (n as i32 % SPRITES_PER_ROW as i32) * 8,
-                    (n as i32 / SPRITES_PER_ROW as i32) * 8,
-                );
-                for py in 0..8 {
-                    for px in 0..8 {
-                        fb.pset(
-                            cx * 8 + px,
-                            SHEET_Y + cy * 8 + py,
-                            assets.sprites.get(sx + px, sy + py),
-                        );
-                    }
-                }
-            }
-        }
-        // Selection box on the strip: the N-sprite block, clipped to the four
-        // rows this page shows (an 8-tall block spans two pages).
+        // Sheet strip, and the edited block boxed on it.
+        let strip = self.strip();
+        strip.draw(fb, &assets.sprites, SHEET_Y);
         let (col, row) = self.origin_cell();
-        let page_row0 = self.page as i32 * 4;
-        let y0 = (row - page_row0).max(0);
-        let y1 = (row + self.size - page_row0).min(4);
-        if y1 > y0 {
-            let x = col * 8;
-            let y = SHEET_Y + y0 * 8;
-            fb.rect(
-                x,
-                y,
-                x + self.size * 8 - 1,
-                y + (y1 - y0) * 8 - 1,
-                col::WHITE,
-            );
-        }
+        strip.draw_block(fb, SHEET_Y, col, row, self.size);
 
         self.draw_status(fb, assets);
     }
@@ -1010,6 +1027,49 @@ mod tests {
         assert_eq!(a.sprites.get(112, 0), 7);
     }
 
+    // The 8x8 block is the tight case: the canvas is 1x, so a drag of n screen
+    // pixels is a stroke of n canvas pixels. Canvas origin is (3, 20).
+    fn block8_editor() -> SpriteEditor {
+        let mut ed = SpriteEditor::new();
+        ed.size = 8;
+        ed.view_x = 0;
+        ed.view_y = 0;
+        ed
+    }
+
+    #[test]
+    fn a_fast_drag_paints_a_solid_line() {
+        let mut ed = block8_editor();
+        let mut a = Assets::default();
+        ed.tick(&press(3, 20), &mut a); // pixel (0, 0)
+        ed.tick(&held(13, 20), &mut a); // ten pixels on in one frame
+        let row: Vec<u8> = (0..=10).map(|x| a.sprites.get(x, 0)).collect();
+        assert_eq!(row, vec![7; 11]);
+    }
+
+    #[test]
+    fn a_diagonal_drag_is_joined_up() {
+        let mut ed = block8_editor();
+        let mut a = Assets::default();
+        ed.tick(&press(3, 20), &mut a); // pixel (0, 0)
+        ed.tick(&held(8, 25), &mut a); // pixel (5, 5)
+        let diagonal: Vec<u8> = (0..=5).map(|n| a.sprites.get(n, n)).collect();
+        assert_eq!(diagonal, vec![7; 6]);
+        assert_eq!(a.sprites.get(0, 5), 0, "the line is not filled in");
+    }
+
+    #[test]
+    fn letting_go_starts_a_new_stroke() {
+        let mut ed = block8_editor();
+        let mut a = Assets::default();
+        ed.tick(&press(3, 20), &mut a);
+        ed.tick(&Mouse::default(), &mut a); // button up
+        ed.tick(&press(13, 20), &mut a);
+        assert_eq!(a.sprites.get(0, 0), 7);
+        assert_eq!(a.sprites.get(10, 0), 7);
+        assert_eq!(a.sprites.get(5, 0), 0, "two dots, not a line between them");
+    }
+
     #[test]
     fn copy_covers_the_whole_block() {
         use pixel8_runtime::clipboard::{parse, Pasted};
@@ -1061,6 +1121,44 @@ mod tests {
         ed.tick(&press(2 * 8 + 1, SHEET_Y + 8 + 1), &mut a);
         assert_eq!((ed.view_x, ed.view_y), (16, 40));
         assert_eq!(ed.top_left_sprite(), 82);
+    }
+
+    #[test]
+    fn an_8x_block_is_boxed_over_the_strips_full_height() {
+        let ed = block8_editor();
+        let a = Assets::default();
+        let mut fb = Framebuffer::new();
+        ed.draw(&mut fb, &a);
+        // Half-size cells, centred: 8 cells is 32 px each way, and the box
+        // reaches the last row of the band rather than stopping half way.
+        assert_eq!(fb.pget(32, SHEET_Y), col::WHITE);
+        assert_eq!(fb.pget(63, SHEET_Y + ui::STRIP_H - 1), col::WHITE);
+        assert_ne!(
+            fb.pget(64, SHEET_Y + ui::STRIP_H - 1),
+            col::WHITE,
+            "the block is 8 cells wide"
+        );
+    }
+
+    #[test]
+    fn clicking_the_half_size_strip_picks_through_its_smaller_cells() {
+        let mut ed = block8_editor();
+        let mut a = Assets::default();
+        // Column 3, row 2 of a strip that starts at sheet row 0 and sits at
+        // x = 32: sprite 35, which an 8x8 block still fits under.
+        ed.tick(&press(32 + 3 * 4 + 1, SHEET_Y + 2 * 4 + 1), &mut a);
+        assert_eq!(ed.top_left_sprite(), 2 * 16 + 3);
+    }
+
+    #[test]
+    fn page_dots_move_a_block_the_strip_is_following() {
+        let mut ed = block8_editor();
+        let mut a = Assets::default();
+        // With the strip pinned to the block, a dot that only changed the page
+        // would do nothing on screen, so it moves the block instead.
+        ed.tick(&press(PAGE_BTNS.0 + 6 + 1, PAGE_BTNS.1 + 1), &mut a);
+        assert_eq!(ed.top_left_sprite(), 64, "dot 1 is sheet row 4");
+        assert_eq!(ed.strip().row0, 4, "and the strip followed it");
     }
 
     #[test]

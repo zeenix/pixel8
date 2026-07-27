@@ -28,6 +28,9 @@ pixel8-runtime = { path = "pixel8-runtime", version = "0.1.0", default-features 
 # frontend builds the winit/wgpu stack.
 pixel8-console = { path = "pixel8-console", version = "0.1.0", default-features = false }
 anyhow = "1"
+# Fixed-capacity collections: what the SDK's optional effects hold their
+# particles in. (Example carts are outside the workspace and pin their own.)
+heapless = "0.9.3"
 serde = { version = "1", features = ["derive"] }
 # No `wat`: carts are always binary wasm (text format is test-only).
 wasmi = { version = "0.51", default-features = false, features = ["std"] }

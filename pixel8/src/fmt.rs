@@ -1,6 +1,6 @@
 //! Allocation-free text formatting for the `printf!`/`logf!` macros.
 //!
-//! Carts have no allocator on `no_std` and the SDK takes no dependencies, so
+//! Carts have no allocator on `no_std` and the SDK core takes no dependencies, so
 //! formatted text is collected into a fixed stack buffer that implements
 //! [`core::fmt::Write`]. Writes past the end are dropped.
 

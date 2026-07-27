@@ -8,7 +8,7 @@ use crate::{
     ui::{self, draw_icon8, Icon8, Mouse, ICON_PENCIL},
 };
 use pixel8_runtime::{
-    assets::{Assets, MapData, MAP_H, MAP_W, SPRITES_PER_ROW},
+    assets::{Assets, MapData, MAP_H, MAP_W, SPRITES_PER_ROW, SPRITE_COUNT},
     clipboard::{self, ClipboardPayload, Pasted},
     fb::Framebuffer,
     palette::col,
@@ -23,11 +23,20 @@ const VIEW_Y: i32 = 22;
 const VIEW_TILES_X: i32 = 16;
 const VIEW_TILES_Y: i32 = 8;
 const SEP_Y: i32 = 86;
-const SHEET_Y: i32 = 88; // 4 rows of 8 px, flush with the status bar.
-const SHEET_BOTTOM: i32 = SHEET_Y + 4 * 8 - 1; // 119
-const BRUSH_X: i32 = 88; // 8×8 brush preview
+const SHEET_Y: i32 = 88; // the sprite strip, flush with the status bar.
+const SIZE_BTNS: (i32, i32) = (57, TOOLBAR_Y); // four "1/2/4/8" block-size buttons
+const BRUSH_X: i32 = 92; // 8×8 brush preview
 const PAGE_X: i32 = 104; // four 5×5 page dots
 const PAGE_Y: i32 = 11;
+
+/// Selectable brush sizes, in sprites per side — the same 1x1/2x2/4x4/8x8 blocks
+/// the sprite editor draws, so a block drawn there goes down as one stamp here.
+/// Only the Draw tool stamps the whole block; the area tools (fill, circle) paint
+/// single cells with its top-left sprite.
+const SIZES: [i32; 4] = [1, 2, 4, 8];
+
+/// Rows of sprites on the sheet (16), the limit a brush block must stay within.
+const SHEET_ROWS: i32 = (SPRITE_COUNT / SPRITES_PER_ROW) as i32;
 
 fn tool_x(i: usize) -> i32 {
     2 + i as i32 * 9
@@ -109,7 +118,11 @@ enum Drag {
 pub struct MapEditor {
     tool: Tool,
     fullscreen: bool,
+    /// The brush's top-left sprite. With [`size`](Self::size) above 1 it is the
+    /// corner of a block, not the whole brush.
     brush: u32,
+    /// Brush size in sprites per side (one of [`SIZES`]).
+    size: i32,
     cam_x: i32,
     cam_y: i32,
     page: u32,
@@ -131,6 +144,7 @@ impl MapEditor {
             tool: Tool::Draw,
             fullscreen: false,
             brush: 1,
+            size: 1,
             cam_x: 0,
             cam_y: 0,
             page: 0,
@@ -151,6 +165,40 @@ impl MapEditor {
         self.drag = Drag::None;
     }
 
+    /// The sheet cell (column, row) of the brush's top-left sprite.
+    fn brush_cell(&self) -> (i32, i32) {
+        let n = self.brush as i32;
+        (n % SPRITES_PER_ROW as i32, n / SPRITES_PER_ROW as i32)
+    }
+
+    /// Keep the whole block on the sheet: one picked near the right or bottom
+    /// edge slides back until it fits, as the sprite editor's window does.
+    fn clamp_brush(&mut self) {
+        let (col, row) = self.brush_cell();
+        let col = col.min(SPRITES_PER_ROW as i32 - self.size);
+        let row = row.min(SHEET_ROWS - self.size);
+        self.brush = (row * SPRITES_PER_ROW as i32 + col) as u32;
+    }
+
+    /// The strip along the bottom, sized and positioned for the brush block.
+    fn strip(&self) -> ui::Strip {
+        ui::Strip::new(self.size, self.brush_cell().1, self.page)
+    }
+
+    /// The sprite at offset `(dx, dy)` within the brush block.
+    fn brush_sprite(&self, dx: i32, dy: i32) -> u8 {
+        (self.brush as i32 + dy * SPRITES_PER_ROW as i32 + dx) as u8
+    }
+
+    /// Lay the whole block down with its top-left at map cell `(cx, cy)`.
+    fn stamp_brush(&self, assets: &mut Assets, cx: i32, cy: i32) {
+        for dy in 0..self.size {
+            for dx in 0..self.size {
+                assets.map.set(cx + dx, cy + dy, self.brush_sprite(dx, dy));
+            }
+        }
+    }
+
     /// Whether the fullscreen (bare-map) view is active.
     pub fn is_fullscreen(&self) -> bool {
         self.fullscreen
@@ -165,26 +213,52 @@ impl MapEditor {
         }
     }
 
-    /// Visible tile rows for the active view.
-    fn view_tiles_y(&self) -> i32 {
-        if self.fullscreen {
-            14
-        } else {
-            VIEW_TILES_Y
-        }
+    /// Screen pixels a tile is drawn at. The viewport is a fixed size, so a
+    /// bigger brush zooms it out rather than filling it: the block covers the
+    /// same 8 px whatever it is made of, and the map behind it comes down to
+    /// suit, exactly as the sprite editor's canvas holds one block at any size.
+    fn tile_px(&self) -> i32 {
+        8 / self.size
     }
 
-    /// Bottom y (inclusive) of the map viewport for the active view.
+    /// Visible tile columns for the active view.
+    fn view_tiles_x(&self) -> i32 {
+        VIEW_TILES_X * self.size
+    }
+
+    /// Visible tile rows for the active view.
+    fn view_tiles_y(&self) -> i32 {
+        let rows = if self.fullscreen { 14 } else { VIEW_TILES_Y };
+        rows * self.size
+    }
+
+    /// Bottom y (inclusive) of the map viewport for the active view. Zooming
+    /// trades tiles against their size, so the viewport itself never moves.
     fn view_bottom(&self) -> i32 {
-        self.view_y() + self.view_tiles_y() * 8 - 1
+        self.view_y() + self.view_tiles_y() * self.tile_px() - 1
+    }
+
+    /// The camera's furthest scroll, which a zoomed-out view can pull back to
+    /// nothing — at 8x the whole map is on screen already.
+    fn cam_limit(&self) -> (i32, i32) {
+        (
+            (MAP_W as i32 - self.view_tiles_x()).max(0),
+            (MAP_H as i32 - self.view_tiles_y()).max(0),
+        )
     }
 
     /// Switch the view, re-clamping the camera so the (taller) fullscreen view
     /// cannot scroll past the map's edges.
     fn set_fullscreen(&mut self, on: bool) {
         self.fullscreen = on;
-        self.cam_x = self.cam_x.min(MAP_W as i32 - VIEW_TILES_X).max(0);
-        self.cam_y = self.cam_y.min(MAP_H as i32 - self.view_tiles_y()).max(0);
+        self.clamp_camera();
+    }
+
+    /// Pull the camera back inside the map for the current view and zoom.
+    fn clamp_camera(&mut self) {
+        let (max_x, max_y) = self.cam_limit();
+        self.cam_x = self.cam_x.clamp(0, max_x);
+        self.cam_y = self.cam_y.clamp(0, max_y);
     }
 
     /// Abandon any in-progress drag. The shell calls this on an editor switch,
@@ -221,9 +295,9 @@ impl MapEditor {
         self.history.begin(&assets.map);
         match key {
             Key::Left => self.cam_x = (self.cam_x - 1).max(0),
-            Key::Right => self.cam_x = (self.cam_x + 1).min(MAP_W as i32 - VIEW_TILES_X),
+            Key::Right => self.cam_x = (self.cam_x + 1).min(self.cam_limit().0),
             Key::Up => self.cam_y = (self.cam_y - 1).max(0),
-            Key::Down => self.cam_y = (self.cam_y + 1).min(MAP_H as i32 - self.view_tiles_y()),
+            Key::Down => self.cam_y = (self.cam_y + 1).min(self.cam_limit().1),
             Key::PageUp => self.page = (self.page + 3) % 4,
             Key::PageDown => self.page = (self.page + 1) % 4,
             Key::Delete | Key::Backspace => self.delete_selection(assets),
@@ -264,7 +338,7 @@ impl MapEditor {
             Tool::Draw => {
                 if mouse.left {
                     if let Some((cx, cy)) = self.hovered_cell() {
-                        assets.map.set(cx, cy, self.brush as u8);
+                        self.stamp_brush(assets, cx, cy);
                     }
                 }
             }
@@ -381,10 +455,9 @@ impl MapEditor {
                 }
                 if let Drag::Panning { amx, amy, acx, acy } = self.drag {
                     if mouse.left {
-                        self.cam_x =
-                            (acx + (amx - mouse.x) / 8).clamp(0, MAP_W as i32 - VIEW_TILES_X);
-                        self.cam_y = (acy + (amy - mouse.y) / 8)
-                            .clamp(0, MAP_H as i32 - self.view_tiles_y());
+                        let (tile_px, (max_x, max_y)) = (self.tile_px(), self.cam_limit());
+                        self.cam_x = (acx + (amx - mouse.x) / tile_px).clamp(0, max_x);
+                        self.cam_y = (acy + (amy - mouse.y) / tile_px).clamp(0, max_y);
                     } else {
                         self.drag = Drag::None;
                     }
@@ -424,19 +497,37 @@ impl MapEditor {
                 return true;
             }
         }
-        // Page dots.
+        // Block-size buttons.
+        for (i, &n) in SIZES.iter().enumerate() {
+            let x = SIZE_BTNS.0 + i as i32 * 8;
+            if m.over(x, SIZE_BTNS.1, x + 6, SIZE_BTNS.1 + 7) {
+                self.size = n;
+                self.clamp_brush(); // a bigger block may not fit at the old corner.
+                self.clamp_camera(); // and zooming out can put the map's edge on screen.
+                return true;
+            }
+        }
+        // Page dots. A block big enough that the strip follows it rather than
+        // the page would leave them inert, so they move the brush instead.
         for p in 0..4 {
             let x = PAGE_X + p * 6;
             if m.over(x, PAGE_Y, x + 4, PAGE_Y + 4) {
                 self.page = p as u32;
+                if ui::Strip::follows_block(self.size) {
+                    self.brush = p as u32 * 64;
+                    self.clamp_brush();
+                }
                 return true;
             }
         }
-        // Sprite sheet: pick the brush.
-        if m.over(0, SHEET_Y, 127, SHEET_BOTTOM) {
-            let cx = m.x / 8;
-            let cy = (m.y - SHEET_Y) / 8;
-            self.brush = (self.page * 64 + cy as u32 * 16 + cx as u32) % 256;
+        // Sprite sheet: pick the brush. The whole band belongs to the strip,
+        // including the margins half-size cells leave at its sides, so a click
+        // there is never taken for a map gesture.
+        if m.over(0, SHEET_Y, 127, SHEET_Y + ui::STRIP_H - 1) {
+            if let Some((cx, cy)) = self.strip().cell_at(SHEET_Y, m.x, m.y) {
+                self.brush = (cy * SPRITES_PER_ROW as i32 + cx) as u32;
+                self.clamp_brush();
+            }
             return true;
         }
         false
@@ -468,14 +559,27 @@ impl MapEditor {
             };
             draw_icon8(fb, icon, x, TOOLBAR_Y + 1, color);
         }
-        // Brush preview (the selected sprite, drawn as-is).
+        // Block-size buttons ("1/2/4/8", one per entry in SIZES), laid out like
+        // the sprite editor's: a 3x5 digit centred in a 9x9 highlight box.
+        for (i, &n) in SIZES.iter().enumerate() {
+            let x = SIZE_BTNS.0 + i as i32 * 8;
+            let color = if n == self.size {
+                fb.rectfill(x - 1, SIZE_BTNS.1, x + 7, SIZE_BTNS.1 + 8, col::BLACK);
+                col::WHITE
+            } else {
+                col::LAVENDER
+            };
+            fb.print(&n.to_string(), x + 2, SIZE_BTNS.1 + 2, color);
+        }
+        // Brush preview: the whole block squeezed into the 8x8 box, so a bigger
+        // brush shows what it stamps rather than just its corner sprite.
         let (ox, oy) = sprite_origin(self.brush);
         for py in 0..8 {
             for px in 0..8 {
                 fb.pset(
                     BRUSH_X + px,
                     TOOLBAR_Y + 1 + py,
-                    assets.sprites.get(ox + px, oy + py),
+                    assets.sprites.get(ox + px * self.size, oy + py * self.size),
                 );
             }
         }
@@ -500,22 +604,53 @@ impl MapEditor {
 
     fn draw_view(&self, fb: &mut Framebuffer, assets: &Assets) {
         fb.rectfill(0, self.view_y(), 127, self.view_bottom(), col::BLACK);
-        fb.map(
-            &assets.map,
-            &assets.sprites,
-            self.cam_x,
-            self.cam_y,
-            0,
-            self.view_y(),
-            VIEW_TILES_X,
-            self.view_tiles_y(),
-            0,
-        );
+        self.draw_tiles(fb, assets);
         if let Some((cx, cy)) = self.hovered_cell() {
-            let sx = (cx - self.cam_x) * 8;
-            let sy = self.view_y() + (cy - self.cam_y) * 8;
-            fb.rect(sx, sy, sx + 7, sy + 7, col::WHITE);
+            // What a click would stamp: the block is 8 px at every zoom, so the
+            // box is the same box whatever the brush is made of.
+            let (sx, sy) = self.tile_screen(cx, cy);
+            fb.rect(
+                sx,
+                sy,
+                sx + self.size * self.tile_px() - 1,
+                sy + self.size * self.tile_px() - 1,
+                col::WHITE,
+            );
         }
+    }
+
+    /// The visible tiles, at the zoom the brush size asks for. Follows the
+    /// runtime's map blit — tile 0 and colour 0 are both holes, so the black
+    /// behind shows through — but samples the sheet, so a tile can come out
+    /// smaller than the 8 px it is stored as.
+    fn draw_tiles(&self, fb: &mut Framebuffer, assets: &Assets) {
+        let tile_px = self.tile_px();
+        for ty in 0..self.view_tiles_y() {
+            for tx in 0..self.view_tiles_x() {
+                let tile = assets.map.get(self.cam_x + tx, self.cam_y + ty);
+                if tile == 0 {
+                    continue;
+                }
+                let (ox, oy) = sprite_origin(tile as u32);
+                for py in 0..tile_px {
+                    for px in 0..tile_px {
+                        let c = ui::sprite_sample(&assets.sprites, ox, oy, tile_px, px, py);
+                        if c != 0 {
+                            fb.pset(tx * tile_px + px, self.view_y() + ty * tile_px + py, c);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The screen pixel that map cell `(cx, cy)` is drawn at.
+    fn tile_screen(&self, cx: i32, cy: i32) -> (i32, i32) {
+        let tile_px = self.tile_px();
+        (
+            (cx - self.cam_x) * tile_px,
+            self.view_y() + (cy - self.cam_y) * tile_px,
+        )
     }
 
     fn draw_selection(&self, fb: &mut Framebuffer) {
@@ -524,9 +659,9 @@ impl MapEditor {
             .or_else(|| self.sel.map(|s| (s.x, s.y, s.w, s.h)));
         let Some((x, y, w, h)) = rect else { return };
         let (view_y, view_bottom) = (self.view_y(), self.view_bottom());
-        let sx = (x - self.cam_x) * 8;
-        let sy = view_y + (y - self.cam_y) * 8;
-        let (x0, y0, x1, y1) = (sx, sy, sx + w * 8 - 1, sy + h * 8 - 1);
+        let tile_px = self.tile_px();
+        let (sx, sy) = self.tile_screen(x, y);
+        let (x0, y0, x1, y1) = (sx, sy, sx + w * tile_px - 1, sy + h * tile_px - 1);
         let mut i = 0i32;
         let ant = |fb: &mut Framebuffer, px: i32, py: i32, i: &mut i32| {
             if (0..=127).contains(&px) && (view_y..=view_bottom).contains(&py) {
@@ -550,49 +685,42 @@ impl MapEditor {
     }
 
     fn draw_sheet(&self, fb: &mut Framebuffer, assets: &Assets) {
-        fb.rectfill(0, SHEET_Y, 127, SHEET_BOTTOM, col::DARK_GREY);
-        for cy in 0..4i32 {
-            for cx in 0..16i32 {
-                let n = self.page * 64 + (cy * 16 + cx) as u32;
-                let (sx, sy) = sprite_origin(n);
-                for py in 0..8 {
-                    for px in 0..8 {
-                        fb.pset(
-                            cx * 8 + px,
-                            SHEET_Y + cy * 8 + py,
-                            assets.sprites.get(sx + px, sy + py),
-                        );
-                    }
-                }
-            }
-        }
-        if self.brush / 64 == self.page {
-            let i = self.brush % 64;
-            let x = (i as i32 % 16) * 8;
-            let y = SHEET_Y + (i as i32 / 16) * 8;
-            fb.rect(x, y, x + 7, y + 7, col::WHITE);
-        }
+        let strip = self.strip();
+        strip.draw(fb, &assets.sprites, SHEET_Y);
+        let (col, row) = self.brush_cell();
+        strip.draw_block(fb, SHEET_Y, col, row, self.size);
     }
 
     fn draw_status(&self, fb: &mut Framebuffer, assets: &Assets) {
+        let brush = self.brush_label();
         let text = if let Some((_, _, w, h)) = self.selection_in_progress() {
-            format!("Sel {}x{}        b{:03} pg{}", w, h, self.brush, self.page)
+            format!("Sel {}x{}        {} pg{}", w, h, brush, self.page)
         } else if let Some(tool) = self.tool_under_cursor() {
             tool_label(tool).to_string()
         } else {
             match self.hovered_cell() {
                 Some((cx, cy)) => format!(
-                    "x{:03} y{:03} t{:03} b{:03} pg{}",
+                    "x{:03} y{:03} t{:03} {} pg{}",
                     cx,
                     cy,
                     assets.map.get(cx, cy),
-                    self.brush,
+                    brush,
                     self.page
                 ),
-                None => format!("b{:03} pg{}", self.brush, self.page),
+                None => format!("{} pg{}", brush, self.page),
             }
         };
         self.status.show(fb, &text);
+    }
+
+    /// The brush's status-bar label: its sprite number, and the block size too
+    /// once the brush covers more than one tile.
+    fn brush_label(&self) -> String {
+        if self.size == 1 {
+            format!("b{:03}", self.brush)
+        } else {
+            format!("b{:03}x{}", self.brush, self.size)
+        }
     }
 
     /// The tool whose toolbar icon is under the cursor, if any.
@@ -613,7 +741,7 @@ impl MapEditor {
     fn clamped_cell(&self) -> (i32, i32) {
         let mx = self.mx.clamp(0, 127);
         let my = self.my.clamp(self.view_y(), self.view_bottom());
-        (self.cam_x + mx / 8, self.cam_y + (my - self.view_y()) / 8)
+        self.screen_cell(mx, my)
     }
 
     /// The rectangle (x, y, w, h) of an in-progress selection drag, if any.
@@ -778,9 +906,15 @@ impl MapEditor {
         };
         let (cx, cy) = self.clamped_cell();
         let (x, y, w, h) = normalize_rect(ax, ay, cx, cy);
-        let sx = (x - self.cam_x) * 8;
-        let sy = self.view_y() + (y - self.cam_y) * 8;
-        fb.rect(sx, sy, sx + w * 8 - 1, sy + h * 8 - 1, col::WHITE);
+        let tile_px = self.tile_px();
+        let (sx, sy) = self.tile_screen(x, y);
+        fb.rect(
+            sx,
+            sy,
+            sx + w * tile_px - 1,
+            sy + h * tile_px - 1,
+            col::WHITE,
+        );
     }
 
     /// The map cell under the cursor, if the cursor is over the view.
@@ -788,10 +922,17 @@ impl MapEditor {
         if self.mx < 0 || self.mx > 127 || self.my < self.view_y() || self.my > self.view_bottom() {
             return None;
         }
-        Some((
-            self.cam_x + self.mx / 8,
-            self.cam_y + (self.my - self.view_y()) / 8,
-        ))
+        Some(self.screen_cell(self.mx, self.my))
+    }
+
+    /// The map cell drawn at screen point `(x, y)` — the inverse of
+    /// [`tile_screen`](Self::tile_screen), and unclamped like it.
+    fn screen_cell(&self, x: i32, y: i32) -> (i32, i32) {
+        let tile_px = self.tile_px();
+        (
+            self.cam_x + x / tile_px,
+            self.cam_y + (y - self.view_y()) / tile_px,
+        )
     }
 }
 
@@ -874,6 +1015,132 @@ mod tests {
                      // Second row, third column of the strip -> 64 + 1*16 + 2 = 82.
         ed.tick(&press(2 * 8 + 1, SHEET_Y + 8 + 1), &mut a);
         assert_eq!(ed.brush, 82);
+    }
+
+    #[test]
+    fn clicking_a_size_button_sets_the_brush_size() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        assert_eq!(ed.size, 1);
+        // Button index 3 -> size 8, at x = SIZE_BTNS.0 + 3*8.
+        ed.tick(&press(SIZE_BTNS.0 + 3 * 8 + 1, SIZE_BTNS.1 + 1), &mut a);
+        assert_eq!(ed.size, 8);
+    }
+
+    #[test]
+    fn the_view_zooms_out_with_the_brush() {
+        let mut ed = MapEditor::new();
+        let full = (ed.tile_px(), ed.view_tiles_x(), ed.view_tiles_y());
+        assert_eq!(full, (8, 16, 8));
+        ed.size = 8;
+        // The same rectangle of screen, holding the whole 128x64 map.
+        assert_eq!(
+            (ed.tile_px(), ed.view_tiles_x(), ed.view_tiles_y()),
+            (1, 128, 64)
+        );
+        assert_eq!(ed.view_bottom(), VIEW_Y + VIEW_TILES_Y * 8 - 1);
+    }
+
+    #[test]
+    fn the_cursor_maps_through_the_zoom() {
+        let mut ed = MapEditor::new();
+        ed.size = 4; // 2 px a tile.
+        ed.mx = 10;
+        ed.my = VIEW_Y + 6;
+        assert_eq!(ed.hovered_cell(), Some((5, 3)));
+    }
+
+    #[test]
+    fn the_camera_stays_put_once_the_whole_map_fits() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.size = 8;
+        ed.cam_x = 40;
+        ed.cam_y = 20;
+        ed.clamp_camera();
+        assert_eq!((ed.cam_x, ed.cam_y), (0, 0));
+        ed.key(Key::Right, Mods::default(), &mut a);
+        ed.key(Key::Down, Mods::default(), &mut a);
+        assert_eq!(
+            (ed.cam_x, ed.cam_y),
+            (0, 0),
+            "and the arrows cannot push it off"
+        );
+    }
+
+    #[test]
+    fn a_zoomed_out_tile_comes_from_the_middle_of_its_sprite() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.size = 8; // one screen pixel a tile.
+        a.sprites.set(12, 4, 11); // the middle of sprite 1, whose origin is (8, 0).
+        a.map.set(0, 0, 1);
+        let mut fb = Framebuffer::new();
+        ed.draw(&mut fb, &a);
+        assert_eq!(fb.pget(0, VIEW_Y), 11);
+        assert_eq!(fb.pget(1, VIEW_Y), col::BLACK, "and it is one pixel wide");
+    }
+
+    #[test]
+    fn draw_tool_stamps_the_whole_block() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.brush = 7;
+        ed.size = 2;
+        // At 2x the view is at 4 px a tile, so this is cell (1, 0): the block's
+        // top-left, with 8 to its right and the next sheet row (23, 24) below.
+        ed.tick(&press(4 + 1, VIEW_Y + 1), &mut a);
+        assert_eq!(
+            [
+                a.map.get(1, 0),
+                a.map.get(2, 0),
+                a.map.get(1, 1),
+                a.map.get(2, 1)
+            ],
+            [7, 8, 23, 24]
+        );
+    }
+
+    #[test]
+    fn picking_a_big_brush_keeps_the_block_on_the_sheet() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.size = 8;
+        ed.brush = 0;
+        // At 8x the strip is half-size and centred, so this is column 12 of row
+        // 3 — a corner an 8x8 block runs off, sliding back to column 8.
+        ed.tick(&press(32 + 12 * 4 + 1, SHEET_Y + 3 * 4 + 1), &mut a);
+        assert_eq!(ed.brush, 3 * 16 + 8);
+    }
+
+    #[test]
+    fn a_big_block_is_boxed_over_the_strips_full_height() {
+        let mut ed = MapEditor::new();
+        let a = Assets::default();
+        let mut fb = Framebuffer::new();
+        ed.size = 8;
+        ed.brush = 0;
+        ed.draw(&mut fb, &a);
+        // Half-size cells, centred: 8 cells is 32 px each way, and the box
+        // reaches the last row of the band rather than stopping half way.
+        assert_eq!(fb.pget(32, SHEET_Y), col::WHITE);
+        assert_eq!(fb.pget(63, SHEET_Y + ui::STRIP_H - 1), col::WHITE);
+        assert_ne!(
+            fb.pget(64, SHEET_Y + ui::STRIP_H - 1),
+            col::WHITE,
+            "the block is 8 cells wide"
+        );
+    }
+
+    #[test]
+    fn growing_the_brush_pulls_it_back_onto_the_sheet() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        // The sheet's bottom-right cell, then button index 1 -> size 2, which
+        // needs room for one more cell each way.
+        ed.brush = 255;
+        ed.tick(&press(SIZE_BTNS.0 + 8 + 1, SIZE_BTNS.1 + 1), &mut a);
+        assert_eq!((ed.size, ed.brush), (2, 14 * 16 + 14));
     }
 
     #[test]
@@ -1154,7 +1421,7 @@ mod tests {
     fn sheet_sits_flush_against_the_status_bar() {
         // No stray band between the sheet and the status bar (which starts at
         // HEIGHT - 8); the sheet's last row is the row directly above it.
-        assert_eq!(SHEET_BOTTOM + 1, pixel8_runtime::fb::HEIGHT - 8);
+        assert_eq!(SHEET_Y + ui::STRIP_H, pixel8_runtime::fb::HEIGHT - 8);
     }
 
     #[test]

@@ -172,9 +172,11 @@ Pixel8 is a handful of crates. Most people only ever touch the first two — the
 against, and the console that builds and runs it.
 
 - **[`pixel8`](https://crates.io/crates/pixel8)** — the SDK your cart depends on, and the only crate
-  a game links against. Deliberately zero-dependency and `#![no_std]`-friendly: the `Game` trait,
-  the `Context` (update-time) and `Graphics` (draw-time) handles, the 16-color palette and the
-  `game!` macro that wires it all up. `cargo add pixel8` in a `cdylib` crate and you have a cart.
+  a game links against. Zero-dependency out of the box and `#![no_std]`-friendly: the `Game`
+  trait, the `Context` (update-time) and `Graphics` (draw-time) handles, the 16-color palette and
+  the `game!` macro that wires it all up. `cargo add pixel8` in a `cdylib` crate and you have a
+  cart. Optional features add ready-made effects, each in a module of its own — `plume-effects`
+  brings `plume`, with the `Fire`, `SmokingFire` and `Smoke` particle plumes in it.
 - **[`pixel8-console`](https://crates.io/crates/pixel8-console)** — the desktop console and
   toolchain. `cargo install pixel8-console` gives you the `pixel8` command: the boot prompt, the
   five editors (code, sprite, map, sfx, music), the build-and-hot-reload loop and every headless

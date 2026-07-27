@@ -1,4 +1,4 @@
-//! A tiny `u8`-backed bit-flags abstraction, so the SDK stays dependency-free.
+//! A tiny `u8`-backed bit-flags abstraction, so the SDK core stays dependency-free.
 //!
 //! Only the behaviour the SDK needs: build a set from raw bits (rejecting unknown bits),
 //! test membership, and combine flags with `|`. Both flag spaces in the console —
