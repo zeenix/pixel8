@@ -90,6 +90,10 @@ pub struct SpriteEditor {
     status: ui::StatusMsg,
     /// In-progress hand-tool pan, if any.
     pan: Option<PanDrag>,
+    /// The canvas pixel the pencil or eraser last painted this drag, if one is
+    /// in progress. Each frame joins up with it, so a stroke is a line rather
+    /// than the dots the frames happened to land on.
+    stroke: Option<(i32, i32)>,
     /// Undo/redo of the sprite sheet (last 10 edits).
     history: History<SpriteSheet>,
 }
@@ -108,6 +112,7 @@ impl SpriteEditor {
             my: -16,
             status: ui::StatusMsg::default(),
             pan: None,
+            stroke: None,
             history: History::new(),
         }
     }
@@ -241,6 +246,28 @@ impl SpriteEditor {
         }
     }
 
+    /// Paint the tool along the line from `(x0, y0)` to `(x1, y1)`, leaving the
+    /// start alone — the previous frame painted it. Bresenham, so the joined-up
+    /// stroke is the same one-pixel-wide line the canvas would draw itself.
+    fn stroke_to(&mut self, assets: &mut Assets, x0: i32, y0: i32, x1: i32, y1: i32) {
+        let (dx, dy) = ((x1 - x0).abs(), -(y1 - y0).abs());
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let (mut x, mut y, mut err) = (x0, y0, dx + dy);
+        while (x, y) != (x1, y1) {
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+            self.apply_tool(assets, x, y, false);
+        }
+    }
+
     /// Hand-tool drag: slide the canvas window across the sheet, grabbing a
     /// point and dragging it so neighbouring pixels scroll into view (PICO-8's
     /// pan, like the map editor's camera). It scrolls the window origin by whole
@@ -302,11 +329,24 @@ impl SpriteEditor {
         } else if (m.left || m.right) && over_canvas {
             let px = (m.x - cx) / z;
             let py = (m.y - cy) / z;
+            let right = m.right && !m.left;
             // Fill and picker should fire once per click, not per frame.
             let one_shot = matches!(self.tool, Tool::Fill | Tool::Picker);
             if !one_shot || m.left_pressed || m.right_pressed {
-                self.apply_tool(assets, px, py, m.right && !m.left);
+                match self.stroke {
+                    // Join a dragged pencil or eraser to where it was last frame.
+                    // The canvas is a fixed 64px however big the block is, so at
+                    // 8x8 a canvas pixel is a screen pixel and any drag but the
+                    // slowest outruns the frames, landing as a dotted line.
+                    Some((lx, ly)) if !one_shot && !right => self.stroke_to(assets, lx, ly, px, py),
+                    _ => self.apply_tool(assets, px, py, right),
+                }
+                self.stroke = (!one_shot && !right).then_some((px, py));
             }
+        } else {
+            // Off the canvas or button up: the next press starts a fresh stroke
+            // rather than joining up with wherever the last one ended.
+            self.stroke = None;
         }
         // The palette, tools, flags, page dots and sheet exist only in the
         // normal view; fullscreen is a bare canvas.
@@ -1008,6 +1048,49 @@ mod tests {
         // Painting the top-left of the canvas writes to sprite 14 at sheet (112, 0).
         ed.tick(&press(CANVAS.0, CANVAS.1), &mut a);
         assert_eq!(a.sprites.get(112, 0), 7);
+    }
+
+    // The 8x8 block is the tight case: the canvas is 1x, so a drag of n screen
+    // pixels is a stroke of n canvas pixels. Canvas origin is (3, 20).
+    fn block8_editor() -> SpriteEditor {
+        let mut ed = SpriteEditor::new();
+        ed.size = 8;
+        ed.view_x = 0;
+        ed.view_y = 0;
+        ed
+    }
+
+    #[test]
+    fn a_fast_drag_paints_a_solid_line() {
+        let mut ed = block8_editor();
+        let mut a = Assets::default();
+        ed.tick(&press(3, 20), &mut a); // pixel (0, 0)
+        ed.tick(&held(13, 20), &mut a); // ten pixels on in one frame
+        let row: Vec<u8> = (0..=10).map(|x| a.sprites.get(x, 0)).collect();
+        assert_eq!(row, vec![7; 11]);
+    }
+
+    #[test]
+    fn a_diagonal_drag_is_joined_up() {
+        let mut ed = block8_editor();
+        let mut a = Assets::default();
+        ed.tick(&press(3, 20), &mut a); // pixel (0, 0)
+        ed.tick(&held(8, 25), &mut a); // pixel (5, 5)
+        let diagonal: Vec<u8> = (0..=5).map(|n| a.sprites.get(n, n)).collect();
+        assert_eq!(diagonal, vec![7; 6]);
+        assert_eq!(a.sprites.get(0, 5), 0, "the line is not filled in");
+    }
+
+    #[test]
+    fn letting_go_starts_a_new_stroke() {
+        let mut ed = block8_editor();
+        let mut a = Assets::default();
+        ed.tick(&press(3, 20), &mut a);
+        ed.tick(&Mouse::default(), &mut a); // button up
+        ed.tick(&press(13, 20), &mut a);
+        assert_eq!(a.sprites.get(0, 0), 7);
+        assert_eq!(a.sprites.get(10, 0), 7);
+        assert_eq!(a.sprites.get(5, 0), 0, "two dots, not a line between them");
     }
 
     #[test]
