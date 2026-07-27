@@ -72,19 +72,28 @@ chapter.
 
 ## campfire
 
-A fire burning at night — and not a sprite in it. It comes from [`Fire`] and
-[`Smoke`], the SDK's [`plume`] effects, which sit behind the off-by-default
-`plume-effects` feature: turn it on and a fire is three lines of code. This one
-is a `SmokingFire`, whose spent flames carry on as smoke instead of vanishing,
-so the column reads as one effect rather than two. Scale it down for a candle,
-point it another way for an exhaust trail.
-[Source](https://github.com/zeenix/pixel8/blob/main/examples/campfire/src/lib.rs).
+Not a game: a scene that plays itself. Nothing reads the buttons and there
+is nothing to win — it is an animation that happens to be a cartridge. A
+fire burns under a moon and a scatter of stars, one figure sat beside it
+rocking in and back, another stood off to the side working through a
+cigarette, and an owl blinking on a branch of the old tree; the fire, the
+crickets and an occasional hoot loop underneath it all.
+
+The flames are a [`SmokingFire`], one of the SDK's [`plume`] effects, which
+sit behind the off-by-default `plume-effects` feature: turn it on and a fire
+is three lines of code. Its spent flames carry on as smoke instead of
+vanishing, so the column reads as one effect rather than two — and the
+cigarette is the same [`Smoke`], turned right down and pointed up-left.
+Everything else is the cheapest animation there is: compare `ctx.time()`
+against a constant, pick one of two sprites. Scale the fire down for a
+candle, point it another way for an exhaust trail.
+[Source](https://github.com/zeenix/pixel8/tree/main/examples/campfire/src).
 
 <div class="cart-embed">
 <iframe src="play/campfire.html" title="campfire — playable cart" loading="lazy"></iframe>
 </div>
 
-[`Fire`]: https://docs.rs/pixel8/latest/pixel8/plume/struct.Fire.html
+[`SmokingFire`]: https://docs.rs/pixel8/latest/pixel8/plume/type.SmokingFire.html
 [`Smoke`]: https://docs.rs/pixel8/latest/pixel8/plume/struct.Smoke.html
 [`plume`]: https://docs.rs/pixel8/latest/pixel8/plume/index.html
 

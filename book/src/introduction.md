@@ -23,6 +23,18 @@ all the art and sound, and (by default) the compressed Rust source embedded
 inside. Anyone can *look* at the cartridge; Pixel8 can *play* it; and if the
 source is included, anyone can turn it back into an editable project.
 
+## Not only games
+
+A cart is just code that redraws the screen every frame, so it needn't be a
+game at all. Point the same sprites, map and sound chip at something nobody
+plays and what you have is an **animation** — one that fits in a PNG, runs
+in a browser, and can be taken apart by whoever it reaches:
+
+<div class="cart-embed">
+<iframe src="play/campfire.html" title="campfire — an animated Pixel8 cart" loading="lazy"></iframe>
+<span class="cart-caption">campfire: a night that plays itself — no input, nothing to win (<a href="https://github.com/zeenix/pixel8/tree/main/examples/campfire/src">source</a>).</span>
+</div>
+
 ## The constraints are the point
 
 | thing     | size                              |

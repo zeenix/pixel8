@@ -96,6 +96,10 @@ let frame = if self.walking && (self.frame / 4).is_multiple_of(2) { 2 } else { 1
 (<a href="https://github.com/zeenix/pixel8/blob/main/examples/sprite_move/src/lib.rs">source</a>).</span>
 </div>
 
+A whole cart can be nothing but this. The [campfire](examples.md#campfire)
+example never reads a button: it is a scene that animates itself, out of
+sprites swapped on a timer and the particle effects the SDK ships with.
+
 ### Transparency and palette tricks
 
 By default color 0 (black) is transparent in sprite draws. Change that per
