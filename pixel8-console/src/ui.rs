@@ -4,7 +4,7 @@
 
 use crate::shell::Mode;
 use pixel8_runtime::{
-    assets::Note,
+    assets::{Note, SpriteSheet, SPRITES_PER_ROW, SPRITE_COUNT},
     fb::{Framebuffer, HEIGHT, WIDTH},
     font,
     palette::col,
@@ -232,6 +232,113 @@ impl StatusMsg {
     #[cfg(test)]
     pub fn current(&self) -> Option<&str> {
         self.text.as_deref()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The sprite strip along the bottom of the sprite and map editors.
+// ---------------------------------------------------------------------------
+
+/// Height of the strip band: four rows of sprites at full size.
+pub const STRIP_H: i32 = 32;
+
+/// Pixel `(px, py)` of the sprite at sheet pixel `(ox, oy)` drawn `n` pixels a
+/// side, `n` being 8 or a half of it. Each sample comes from the middle of the
+/// block it stands for rather than its corner — at one pixel a sprite that is
+/// the difference between showing the art and showing its margin.
+pub fn sprite_sample(sheet: &SpriteSheet, ox: i32, oy: i32, n: i32, px: i32, py: i32) -> u8 {
+    let step = 8 / n;
+    sheet.get(ox + px * step + step / 2, oy + py * step + step / 2)
+}
+
+const SHEET_COLS: i32 = SPRITES_PER_ROW as i32;
+const SHEET_ROWS: i32 = (SPRITE_COUNT / SPRITES_PER_ROW) as i32;
+
+/// A window onto the sprite sheet, filling the band: `rows` sheet rows from
+/// `row0`, drawn at `cell` pixels a side.
+///
+/// Blocks up to four cells tall are shown at full size, four rows to a page.
+/// A taller one would run off the bottom of the band, so the strip halves its
+/// cells to fit eight rows instead and follows the block rather than the page —
+/// the point of the strip being to show what is selected.
+#[derive(Debug, Clone, Copy)]
+pub struct Strip {
+    /// Screen side of one cell.
+    pub cell: i32,
+    /// Sheet rows on show.
+    pub rows: i32,
+    /// Left edge: half-size cells are half as wide, so the strip sits centred.
+    pub x0: i32,
+    /// First sheet row on show.
+    pub row0: i32,
+}
+
+impl Strip {
+    /// The strip for a `size`-cell block whose top-left is at sheet row `row`,
+    /// with `page` choosing the rows whenever the block leaves a choice.
+    pub fn new(size: i32, row: i32, page: u32) -> Self {
+        let follows = Self::follows_block(size);
+        let (cell, rows) = if follows { (4, 8) } else { (8, 4) };
+        let row0 = if follows { row } else { page as i32 * rows };
+        Self {
+            cell,
+            rows,
+            x0: (WIDTH - SHEET_COLS * cell) / 2,
+            row0: row0.clamp(0, SHEET_ROWS - rows),
+        }
+    }
+
+    /// Whether the strip follows the block instead of the page, which it does
+    /// once the block no longer fits the band at full size.
+    pub fn follows_block(size: i32) -> bool {
+        size * 8 > STRIP_H
+    }
+
+    /// The sheet cell `(column, row)` at screen point `(x, y)`, for a strip with
+    /// its top edge at `top`.
+    pub fn cell_at(&self, top: i32, x: i32, y: i32) -> Option<(i32, i32)> {
+        let (cx, cy) = ((x - self.x0) / self.cell, (y - top) / self.cell);
+        let inside = x >= self.x0 && cx < SHEET_COLS && y >= top && cy < self.rows;
+        inside.then_some((cx, self.row0 + cy))
+    }
+
+    /// Paint the band and the rows on show, sampling the sheet down when the
+    /// cells are at half size.
+    pub fn draw(&self, fb: &mut Framebuffer, sprites: &SpriteSheet, top: i32) {
+        fb.rectfill(0, top, WIDTH - 1, top + STRIP_H - 1, col::DARK_GREY);
+        for cy in 0..self.rows {
+            for cx in 0..SHEET_COLS {
+                let (sx, sy) = (cx * 8, (self.row0 + cy) * 8);
+                for py in 0..self.cell {
+                    for px in 0..self.cell {
+                        fb.pset(
+                            self.x0 + cx * self.cell + px,
+                            top + cy * self.cell + py,
+                            sprite_sample(sprites, sx, sy, self.cell, px, py),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Box the `size`-cell block at sheet cell `(col, row)`, clipped to the rows
+    /// on show — a block the strip does not follow can start on another page.
+    pub fn draw_block(&self, fb: &mut Framebuffer, top: i32, col: i32, row: i32, size: i32) {
+        let y0 = (row - self.row0).max(0);
+        let y1 = (row + size - self.row0).min(self.rows);
+        if y1 <= y0 {
+            return;
+        }
+        let x = self.x0 + col * self.cell;
+        let y = top + y0 * self.cell;
+        fb.rect(
+            x,
+            y,
+            x + size * self.cell - 1,
+            y + (y1 - y0) * self.cell - 1,
+            col::WHITE,
+        );
     }
 }
 

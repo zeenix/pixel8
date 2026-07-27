@@ -82,7 +82,9 @@ canvas fills the left; the toolbar above it holds the drawing tools. Down
 the right side: the 16-color palette, the block-size buttons (`1 2 4 8` —
 edit a single sprite or a block up to 8×8 cells at once), and eight dots for
 the sprite's flag bits. The strip along the bottom is the sheet itself, for
-picking which sprite to edit; the status bar shows its number and flags.
+picking which sprite to edit; the status bar shows its number and flags. An
+8×8 block is taller than the four rows the strip shows, so at that size it
+halves its cells and shows eight — the selection is always visible whole.
 The flags mean nothing to the console — a game assigns its own meanings and
 reads them back (this is how the platformer marks tiles as solid).
 

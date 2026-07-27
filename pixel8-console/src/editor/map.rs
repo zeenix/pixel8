@@ -23,8 +23,7 @@ const VIEW_Y: i32 = 22;
 const VIEW_TILES_X: i32 = 16;
 const VIEW_TILES_Y: i32 = 8;
 const SEP_Y: i32 = 86;
-const SHEET_Y: i32 = 88; // 4 rows of 8 px, flush with the status bar.
-const SHEET_BOTTOM: i32 = SHEET_Y + 4 * 8 - 1; // 119
+const SHEET_Y: i32 = 88; // the sprite strip, flush with the status bar.
 const SIZE_BTNS: (i32, i32) = (57, TOOLBAR_Y); // four "1/2/4/8" block-size buttons
 const BRUSH_X: i32 = 92; // 8×8 brush preview
 const PAGE_X: i32 = 104; // four 5×5 page dots
@@ -179,6 +178,11 @@ impl MapEditor {
         let col = col.min(SPRITES_PER_ROW as i32 - self.size);
         let row = row.min(SHEET_ROWS - self.size);
         self.brush = (row * SPRITES_PER_ROW as i32 + col) as u32;
+    }
+
+    /// The strip along the bottom, sized and positioned for the brush block.
+    fn strip(&self) -> ui::Strip {
+        ui::Strip::new(self.size, self.brush_cell().1, self.page)
     }
 
     /// The sprite at offset `(dx, dy)` within the brush block.
@@ -477,20 +481,27 @@ impl MapEditor {
                 return true;
             }
         }
-        // Page dots.
+        // Page dots. A block big enough that the strip follows it rather than
+        // the page would leave them inert, so they move the brush instead.
         for p in 0..4 {
             let x = PAGE_X + p * 6;
             if m.over(x, PAGE_Y, x + 4, PAGE_Y + 4) {
                 self.page = p as u32;
+                if ui::Strip::follows_block(self.size) {
+                    self.brush = p as u32 * 64;
+                    self.clamp_brush();
+                }
                 return true;
             }
         }
-        // Sprite sheet: pick the brush.
-        if m.over(0, SHEET_Y, 127, SHEET_BOTTOM) {
-            let cx = m.x / 8;
-            let cy = (m.y - SHEET_Y) / 8;
-            self.brush = (self.page * 64 + cy as u32 * 16 + cx as u32) % 256;
-            self.clamp_brush();
+        // Sprite sheet: pick the brush. The whole band belongs to the strip,
+        // including the margins half-size cells leave at its sides, so a click
+        // there is never taken for a map gesture.
+        if m.over(0, SHEET_Y, 127, SHEET_Y + ui::STRIP_H - 1) {
+            if let Some((cx, cy)) = self.strip().cell_at(SHEET_Y, m.x, m.y) {
+                self.brush = (cy * SPRITES_PER_ROW as i32 + cx) as u32;
+                self.clamp_brush();
+            }
             return true;
         }
         false
@@ -624,39 +635,10 @@ impl MapEditor {
     }
 
     fn draw_sheet(&self, fb: &mut Framebuffer, assets: &Assets) {
-        fb.rectfill(0, SHEET_Y, 127, SHEET_BOTTOM, col::DARK_GREY);
-        for cy in 0..4i32 {
-            for cx in 0..16i32 {
-                let n = self.page * 64 + (cy * 16 + cx) as u32;
-                let (sx, sy) = sprite_origin(n);
-                for py in 0..8 {
-                    for px in 0..8 {
-                        fb.pset(
-                            cx * 8 + px,
-                            SHEET_Y + cy * 8 + py,
-                            assets.sprites.get(sx + px, sy + py),
-                        );
-                    }
-                }
-            }
-        }
-        // Selection box: the whole block, clipped to the four rows this page
-        // shows (an 8-tall block spans two pages).
+        let strip = self.strip();
+        strip.draw(fb, &assets.sprites, SHEET_Y);
         let (col, row) = self.brush_cell();
-        let page_row0 = self.page as i32 * 4;
-        let y0 = (row - page_row0).max(0);
-        let y1 = (row + self.size - page_row0).min(4);
-        if y1 > y0 {
-            let x = col * 8;
-            let y = SHEET_Y + y0 * 8;
-            fb.rect(
-                x,
-                y,
-                x + self.size * 8 - 1,
-                y + (y1 - y0) * 8 - 1,
-                col::WHITE,
-            );
-        }
+        strip.draw_block(fb, SHEET_Y, col, row, self.size);
     }
 
     fn draw_status(&self, fb: &mut Framebuffer, assets: &Assets) {
@@ -1007,26 +989,27 @@ mod tests {
         let mut ed = MapEditor::new();
         let mut a = Assets::default();
         ed.size = 8;
-        ed.page = 3;
-        // Column 12 of the strip's last row is sprite 252 — a corner an 8x8
-        // block runs off, so it slides back to (8, 8) = sprite 136.
-        ed.tick(&press(12 * 8 + 1, SHEET_Y + 3 * 8 + 1), &mut a);
-        assert_eq!(ed.brush, 136);
+        ed.brush = 0;
+        // At 8x the strip is half-size and centred, so this is column 12 of row
+        // 3 — a corner an 8x8 block runs off, sliding back to column 8.
+        ed.tick(&press(32 + 12 * 4 + 1, SHEET_Y + 3 * 4 + 1), &mut a);
+        assert_eq!(ed.brush, 3 * 16 + 8);
     }
 
     #[test]
-    fn the_sheet_highlight_follows_a_block_across_pages() {
+    fn a_big_block_is_boxed_over_the_strips_full_height() {
         let mut ed = MapEditor::new();
         let a = Assets::default();
         let mut fb = Framebuffer::new();
         ed.size = 8;
         ed.brush = 0;
-        ed.page = 1; // sheet rows 4..7: the bottom half of the block.
         ed.draw(&mut fb, &a);
-        assert_eq!(fb.pget(0, SHEET_Y), col::WHITE);
-        assert_eq!(fb.pget(63, SHEET_BOTTOM), col::WHITE);
+        // Half-size cells, centred: 8 cells is 32 px each way, and the box
+        // reaches the last row of the band rather than stopping half way.
+        assert_eq!(fb.pget(32, SHEET_Y), col::WHITE);
+        assert_eq!(fb.pget(63, SHEET_Y + ui::STRIP_H - 1), col::WHITE);
         assert_ne!(
-            fb.pget(64, SHEET_BOTTOM),
+            fb.pget(64, SHEET_Y + ui::STRIP_H - 1),
             col::WHITE,
             "the block is 8 cells wide"
         );
@@ -1321,7 +1304,7 @@ mod tests {
     fn sheet_sits_flush_against_the_status_bar() {
         // No stray band between the sheet and the status bar (which starts at
         // HEIGHT - 8); the sheet's last row is the row directly above it.
-        assert_eq!(SHEET_BOTTOM + 1, pixel8_runtime::fb::HEIGHT - 8);
+        assert_eq!(SHEET_Y + ui::STRIP_H, pixel8_runtime::fb::HEIGHT - 8);
     }
 
     #[test]
