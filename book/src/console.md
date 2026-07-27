@@ -100,8 +100,10 @@ fill and circle — the current brush shown beside them, and the sprite-sheet
 picker along the bottom; the status bar tracks the tile under the cursor.
 The block-size buttons (`1 2 4 8`) are the sprite editor's, so something
 drawn there as a 2×2 or 8×8 block goes onto the grid as one stamp instead of
-a cell at a time. Rooms, levels, backgrounds: draw once here, then blit
-whole regions with one `map` call from your game.
+a cell at a time. The view zooms out to match — the brush is always 8 px on
+screen, and at 8× the whole map is in front of you. Rooms, levels,
+backgrounds: draw once here, then blit whole regions with one `map` call
+from your game.
 
 ### SFX
 
