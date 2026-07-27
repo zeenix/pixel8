@@ -94,10 +94,12 @@ reads them back (this is how the platformer marks tiles as solid).
 
 Paints sprites onto the 128×64 tile map. A scrollable viewport onto the map
 fills the screen, with six tools in the toolbar — draw, paste, select, pan,
-fill and circle — the current sprite shown beside them, and the sprite-sheet
+fill and circle — the current brush shown beside them, and the sprite-sheet
 picker along the bottom; the status bar tracks the tile under the cursor.
-Rooms, levels, backgrounds: draw once here, then blit whole regions with one
-`map` call from your game.
+The block-size buttons (`1 2 4 8`) are the sprite editor's, so something
+drawn there as a 2×2 or 8×8 block goes onto the grid as one stamp instead of
+a cell at a time. Rooms, levels, backgrounds: draw once here, then blit
+whole regions with one `map` call from your game.
 
 ### SFX
 
