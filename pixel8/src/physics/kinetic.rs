@@ -5,8 +5,8 @@ use crate::{Body, Context};
 
 /// An entity a [`Force`] can push: a [`Body`] and the [`Velocity`] it travels at.
 ///
-/// Implementing it is two accessors, and it is what lets one gravity or wind be applied to a
-/// whole cast of entities that otherwise have nothing in common. Everything past those two is
+/// Implementing it is three accessors, and it is what lets one gravity or wind be applied to a
+/// whole cast of entities that otherwise have nothing in common. Everything past those three is
 /// optional and describes the entity: what it weighs, and what shape it is when it hits a wall.
 ///
 /// [`step`](Self::step) is what a cart calls each update, handing over the forces of the moment;
@@ -20,6 +20,10 @@ use crate::{Body, Context};
 /// }
 ///
 /// impl Kinetic for Crate {
+///     fn body(&self) -> &Body {
+///         &self.body
+///     }
+///
 ///     fn body_mut(&mut self) -> &mut Body {
 ///         &mut self.body
 ///     }
@@ -41,7 +45,13 @@ use crate::{Body, Context};
 /// }
 /// ```
 pub trait Kinetic: dynamic::AsKinetic {
-    /// The body the entity is drawn from and collides with.
+    /// Where the entity is: the body it is drawn from and collides with.
+    ///
+    /// [`Game::draw`](crate::Game::draw) is handed a `&self`, so this is the one a cart reads
+    /// there, and the one an entity is measured by when it is asked what it covers.
+    fn body(&self) -> &Body;
+
+    /// The same body, for the one thing that moves it.
     fn body_mut(&mut self) -> &mut Body;
 
     /// The velocity forces act on.
@@ -171,7 +181,7 @@ mod tests {
 
     #[test]
     fn an_entity_weighs_one_and_collides_with_nothing_unless_it_says_otherwise() {
-        /// A [`Kinetic`] that implements only the two accessors it has to — the shape of every
+        /// A [`Kinetic`] that implements only the three accessors it has to — the shape of every
         /// entity in a cart that has never heard of mass.
         struct Pebble {
             body: Body,
@@ -179,6 +189,10 @@ mod tests {
         }
 
         impl Kinetic for Pebble {
+            fn body(&self) -> &Body {
+                &self.body
+            }
+
             fn body_mut(&mut self) -> &mut Body {
                 &mut self.body
             }
@@ -325,6 +339,10 @@ mod tests {
         }
 
         impl Kinetic for Walker {
+            fn body(&self) -> &Body {
+                &self.body
+            }
+
             fn body_mut(&mut self) -> &mut Body {
                 &mut self.body
             }
@@ -358,5 +376,9 @@ mod tests {
         let forces: [&dyn Force; 1] = [&GRAVITY];
         entity.step(&ctx, &forces);
         assert_eq!(mob.body.pos(), (1.0, Gravity::DEFAULT_STRENGTH));
+
+        // And read back through a shared one, which is all a cart's `draw` is handed.
+        let entity: &dyn Kinetic = &mob;
+        assert_eq!(entity.body().pos(), (1.0, Gravity::DEFAULT_STRENGTH));
     }
 }

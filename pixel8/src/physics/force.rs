@@ -156,6 +156,10 @@ impl Mob {
 
 #[cfg(test)]
 impl Kinetic for Mob {
+    fn body(&self) -> &crate::Body {
+        &self.body
+    }
+
     fn body_mut(&mut self) -> &mut crate::Body {
         &mut self.body
     }

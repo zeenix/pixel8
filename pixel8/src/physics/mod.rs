@@ -36,6 +36,10 @@
 //! }
 //!
 //! impl Kinetic for Leaf {
+//!     fn body(&self) -> &Body {
+//!         &self.body
+//!     }
+//!
 //!     fn body_mut(&mut self) -> &mut Body {
 //!         &mut self.body
 //!     }
@@ -174,6 +178,10 @@
 //! }
 //!
 //! impl Kinetic for Walker {
+//!     fn body(&self) -> &Body {
+//!         &self.body
+//!     }
+//!
 //!     fn body_mut(&mut self) -> &mut Body {
 //!         &mut self.body
 //!     }

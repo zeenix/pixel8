@@ -142,6 +142,10 @@ impl Hero {
 // velocity forces bend, and the shape it is when it meets a tile. `step` does the rest
 // — no gravity to add by hand, no corners to check against the map.
 impl Kinetic for Hero {
+    fn body(&self) -> &Body {
+        &self.body
+    }
+
     fn body_mut(&mut self) -> &mut Body {
         &mut self.body
     }
