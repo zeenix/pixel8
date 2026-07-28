@@ -14,10 +14,10 @@ default = ["std"]
 # can be allocation-free with `heapless`. Enabled by default; do-nothing carts
 # stay on `std`.
 std = []
-# Ready-made particle effects (`Fire`, `SmokingFire`, `Smoke`). Off by default
-# because it is what pulls in the SDK's only dependency: the fixed-capacity
-# buffers the effects hold their particles in. Future effect families get their
-# own feature, so a cart only ever links the ones it asks for.
+# Ready-made particle effects (`Fire`, `SmokingFire`, `Smoke`, `Explosion`).
+# Off by default because it is what pulls in the SDK's only dependency: the
+# fixed-capacity buffers the effects hold their particles in. Future effect
+# families get their own feature, so a cart only ever links the ones it asks for.
 plume-effects = ["dep:heapless"]
 # Gravity, wind and the force fields carts write themselves (`physics`). Off by
 # default like every other family, though this one pulls in nothing at all: it
