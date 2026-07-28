@@ -32,8 +32,8 @@ impl GreenHat {
     }
 }
 
-// Just in front of the fire & wood.
-const X: i16 = 8 * 8;
+// Just in front of the fire & wood, sat back a step from the flames.
+const X: i16 = 8 * 8 - 4;
 const Y: i16 = 8 * 12;
 const WIDTH: i16 = 16;
 const HEIGHT: i16 = 16;

@@ -4,7 +4,9 @@ mod green_hat;
 mod owl;
 mod smoker;
 
-use pixel8::{plume::SmokingFire, *};
+use core::ops::RangeInclusive;
+
+use pixel8::{physics::Wind, plume::SmokingFire, *};
 
 use green_hat::GreenHat;
 use smoker::Smoker;
@@ -16,7 +18,13 @@ game!(Campfire = Campfire::new());
 /// A campfire and nothing else, out of one of the SDK's plume effects: a fire whose spent flames
 /// carry on as smoke, so the column reads as a single effect rather than a fire with smoke on top.
 struct Campfire {
-    fire: SmokingFire<6>,
+    /// Kept small: the night air leans the flames a few pixels off their bed, and the pile of
+    /// wood they burn on is only two tiles wide.
+    fire: SmokingFire<5>,
+    /// The night air. A plume handed a wind takes all of its swaying from it, so this is not an
+    /// extra on top of the fire — it is what the fire sways in, and one of them for the whole
+    /// scene means the cigarette wanders on the same breath.
+    wind: Wind,
     green_hat: GreenHat,
     smoker: Smoker,
     owl: Owl,
@@ -28,6 +36,7 @@ impl Campfire {
     fn new() -> Self {
         Self {
             fire: SmokingFire::new(FIRE_X, FIRE_Y),
+            wind: Wind::new(WIND_SPEED).with_gusts(WIND_GUSTS),
             green_hat: GreenHat::new(),
             smoker: Smoker::new(),
             owl: Owl::new(),
@@ -49,9 +58,13 @@ impl Game for Campfire {
                 .ok();
         }
 
+        // The gust first: everything that sways this frame sways on the same one.
+        self.wind.update(ctx);
+        self.fire.blown_by(&self.wind);
+
         self.fire.update(ctx);
         self.green_hat.update(ctx);
-        self.smoker.update(ctx);
+        self.smoker.update(ctx, &self.wind);
         self.owl.update(ctx);
     }
 
@@ -66,9 +79,19 @@ impl Game for Campfire {
     }
 }
 
-// On top of the wood.
+// On top of the wood, in the middle of the pile: the air only sways the column, so the flames
+// stay over the bed they burn on and well short of the figure sat to the left of it.
 const FIRE_X: i16 = 8 * 11;
 const FIRE_Y: i16 = 8 * 13 + 5;
+
+// Air that barely moves, wandering either side of still with a lean towards the tree — the way
+// the cigarette smoke already drifts. A plume takes all of its swaying from the wind it is given,
+// so this is tuned against how the fire swayed before it had one: the same wander, a touch wider,
+// and a column that spends most of its time upright. The ends are further out than they look,
+// because a gust turns back at a random point past the middle of its range and so spends little
+// of its time near them.
+const WIND_SPEED: f32 = -0.05;
+const WIND_GUSTS: RangeInclusive<f32> = -0.55..=0.45;
 
 // The night: the fire on one channel, crickets on another, and an owl on a third, over sixteen
 // patterns that hand round to each other so nothing lands in the same place twice for about
