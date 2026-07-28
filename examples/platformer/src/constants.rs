@@ -14,6 +14,9 @@ pub const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
 pub const HERO_HAPPY_SPRITE: SpriteId = SpriteId(5);
 pub const HERO_WIDTH: i16 = 8;
 pub const HERO_HEIGHT: i16 = 7;
+// The square the hero hits walls with: one sprite's worth, unlike the height above,
+// which is the slightly forgiving box the badie is judged against.
+pub const HERO_HITBOX: u16 = 8;
 
 pub const BADIE_SPRITE: SpriteId = SpriteId(6);
 pub const BADIE_ALT_SPRITE: SpriteId = SpriteId(7);
