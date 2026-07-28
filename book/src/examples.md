@@ -36,6 +36,10 @@ here, in a few hundred lines split into small modules:
 - a **camera** that follows the hero, with the HUD drawn in screen space;
 - a **[`Body`](input.md#smooth-sub-pixel-movement-body)** for the hero, so
   running jumps climb clean staircases;
+- the falling *and* the walls from the `physics` feature: the hero says what
+  **[`Collider`]** it meets tiles with, and one **[`step`]** an update —
+  handed the level's **[`Gravity`]** — pulls it down, stops it at the solid
+  tiles and reports whether it landed;
 - coins collected by **rewriting the map** in RAM and put back on restart;
 - the best score kept in **[storage](storage.md)** across runs;
 - win/lose **music held inside the game-state enum** — leaving the state
@@ -84,6 +88,9 @@ sit behind the off-by-default `plume-effects` feature: turn it on and a fire
 is three lines of code. Its spent flames carry on as smoke instead of
 vanishing, so the column reads as one effect rather than two — and the
 cigarette is the same [`Smoke`], turned right down and pointed up-left.
+One gusty [`Wind`] from the `physics` feature stands in for the sway both of
+them do on their own, so the column wanders on the night air with a lean
+towards the tree and never quite repeats itself.
 Everything else is the cheapest animation there is: compare `ctx.time()`
 against a constant, pick one of two sprites. Scale the fire down for a
 candle, point it another way for an exhaust trail.
@@ -96,6 +103,10 @@ candle, point it another way for an exhaust trail.
 [`SmokingFire`]: https://docs.rs/pixel8/latest/pixel8/plume/type.SmokingFire.html
 [`Smoke`]: https://docs.rs/pixel8/latest/pixel8/plume/struct.Smoke.html
 [`plume`]: https://docs.rs/pixel8/latest/pixel8/plume/index.html
+[`Wind`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Wind.html
+[`Gravity`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Gravity.html
+[`Collider`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Collider.html
+[`step`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html#method.step
 
 ## stress
 

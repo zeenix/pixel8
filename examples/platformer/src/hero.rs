@@ -1,18 +1,28 @@
-use pixel8::{Body, Button, Context, Graphics, SpriteId, SCREEN_WIDTH};
+use pixel8::{
+    physics::{Collider, Gravity, Kinetic, Velocity},
+    Body, Button, Context, Graphics, SpriteId, SCREEN_WIDTH,
+};
 
 use crate::{
     constants::{
-        COIN_SFX, COIN_SPRITE, HERO_HAPPY_SPRITE, HERO_LEGS_EXTEND_SPRITE, HERO_SPEED, HERO_SPRITE,
-        JUMP_SFX, SOLID, TROPHY_SPRITE,
+        COIN_SFX, COIN_SPRITE, HERO_HAPPY_SPRITE, HERO_HITBOX, HERO_LEGS_EXTEND_SPRITE, HERO_SPEED,
+        HERO_SPRITE, JUMP_SFX, SOLID, TROPHY_SPRITE,
     },
     GameMode, Taken,
 };
 
+/// The level's pull, and the whole of the weather the hero walks around in — a constant,
+/// so nothing holds a copy of it and no level has to pass one around.
+const GRAVITY: Gravity = Gravity::new();
+
 #[derive(Debug)]
 pub struct Hero {
     body: Body,
-    vx: f32,
-    vy: f32,
+    velocity: Velocity,
+    /// Whether the buttons are asking the hero to walk, which is what the walk cycle is
+    /// drawn from. Not the velocity: the step zeroes an axis that ran into a wall, and a
+    /// hero leaning on one is still walking as far as the animation is concerned.
+    walking: bool,
     flip: bool,
     dead: bool,
     grounded: bool,
@@ -22,8 +32,8 @@ impl Hero {
     pub fn new() -> Self {
         Self {
             body: Body::new(16.0, 80.0),
-            vx: 0.0,
-            vy: 0.0,
+            velocity: Velocity::default(),
+            walking: false,
             flip: false,
             dead: false,
             grounded: false,
@@ -31,41 +41,32 @@ impl Hero {
     }
 
     pub fn update(&mut self, ctx: &mut Context) -> Option<Taken> {
-        // Horizontal movement (pixels per frame).
+        // Horizontal movement (pixels per frame), written afresh every update: a wall
+        // the step below walks into zeroes it, and the buttons put it straight back.
         if ctx.is_button_down(Button::Left) {
-            self.vx = -HERO_SPEED;
+            self.velocity.dx = -HERO_SPEED;
             self.flip = true;
         } else if ctx.is_button_down(Button::Right) {
-            self.vx = HERO_SPEED;
+            self.velocity.dx = HERO_SPEED;
             self.flip = false;
         } else {
-            self.vx = 0.0;
+            self.velocity.dx = 0.0;
         }
-        // Jump + gravity.
+        // Taken here, from the buttons, rather than from what survives the step below.
+        self.walking = self.velocity.dx != 0.0;
+        // Jump first, so the push is part of the same update's movement.
         if self.grounded && (ctx.is_button_pressed(Button::O) || ctx.is_button_pressed(Button::Up))
         {
             self.jump(ctx);
         }
-        self.vy = (self.vy + 0.25).min(4.0);
 
-        // Resolve collision axis by axis against the body's exact position,
-        // then hand the allowed movement over in one call so the diagonal
-        // render stays coherent. Tile lookups want whole pixels; positions
-        // stay >= 0, so the truncating cast floors.
-        let (x, y) = (self.body.x(), self.body.y());
-        let mut dx = self.vx;
-        if self.collide(ctx, (x + dx) as i16, y as i16) {
-            dx = 0.0;
-        }
-        let mut dy = self.vy;
-        if self.collide(ctx, (x + dx) as i16, (y + dy) as i16) {
-            self.grounded = self.vy > 0.0;
-            self.vy = 0.0;
-            dy = 0.0;
-        } else {
-            self.grounded = false;
-        }
-        self.body.move_by(dx, dy);
+        // One call moves the hero: the pull it is handed, the tiles its collider stops
+        // at, and the body moved by what survives — diagonals included, so a running
+        // jump climbs a clean staircase. The fall the pull builds up is capped by the
+        // gravity's terminal velocity, without which a long drop would clear a whole
+        // tile in one update and land inside the floor.
+        let contacts = self.step(ctx, &[&GRAVITY]);
+        self.grounded = contacts.below();
 
         // Coins & trophy: sample the hitbox center.
         let cx = (self.body.x() as i16 + 4) / 8;
@@ -85,7 +86,7 @@ impl Hero {
     }
 
     pub fn jump(&mut self, ctx: &mut Context) {
-        self.vy = -3.25;
+        self.velocity.dy = -3.25;
         ctx.sfx(JUMP_SFX);
     }
 
@@ -102,7 +103,7 @@ impl Hero {
             return;
         }
 
-        let sprite = if !self.grounded || (self.vx != 0.0 && is_alt_frame) {
+        let sprite = if !self.grounded || (self.walking && is_alt_frame) {
             match mode {
                 GameMode::Ended { won, .. } if *won => HERO_HAPPY_SPRITE,
                 GameMode::InGame { .. } | GameMode::Ended { .. } => HERO_LEGS_EXTEND_SPRITE,
@@ -135,17 +136,22 @@ impl Hero {
     pub fn die(&mut self) {
         self.dead = true;
     }
+}
 
-    fn collide(&self, ctx: &Context, x: i16, y: i16) -> bool {
-        // Check the four corners of the 8x8 hitbox (in pixels).
-        self.solid_at(ctx, x, y)
-            || self.solid_at(ctx, x + 7, y)
-            || self.solid_at(ctx, x, y + 7)
-            || self.solid_at(ctx, x + 7, y + 7)
+// Everything the SDK's physics needs to move the hero: the body it occupies, the
+// velocity forces bend, and the shape it is when it meets a tile. `step` does the rest
+// — no gravity to add by hand, no corners to check against the map.
+impl Kinetic for Hero {
+    fn body_mut(&mut self) -> &mut Body {
+        &mut self.body
     }
 
-    fn solid_at(&self, ctx: &Context, px: i16, py: i16) -> bool {
-        ctx.map_tile(px / 8, py / 8)
-            .is_some_and(|tile| ctx.has_sprite_flag(tile, SOLID))
+    fn velocity_mut(&mut self) -> &mut Velocity {
+        &mut self.velocity
+    }
+
+    fn collider(&self) -> Option<Collider> {
+        // One sprite's worth of hitbox, stopping at the tiles the level flags solid.
+        Collider::new(HERO_HITBOX, HERO_HITBOX, SOLID).ok()
     }
 }

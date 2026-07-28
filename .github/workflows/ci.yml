@@ -54,11 +54,12 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo clippy -p pixel8-player --no-default-features --features kms --all-targets -- -D warnings
       # The SDK's effect features are off by default, so the workspace run above
-      # never sees them. Once with the tests, and once the way a cart links the
-      # SDK: `no_std`, effects on. (The library only — the SDK's own tests need
-      # `std`.)
+      # never sees them. Once with all of them and the tests, then each family on
+      # its own the way a cart links the SDK: `no_std`, one feature on. (The
+      # library only — the SDK's own tests need `std`.)
       - run: cargo clippy -p pixel8 --all-features --all-targets -- -D warnings
       - run: cargo clippy -p pixel8 --no-default-features --features plume-effects -- -D warnings
+      - run: cargo clippy -p pixel8 --no-default-features --features physics -- -D warnings
       - name: Clippy the example carts
         run: |
           fail=0
@@ -90,8 +91,13 @@ jobs:
       - run: cargo test --workspace
       - run: cargo test -p pixel8-player --no-default-features --features kms
       # Feature-gated SDK code, including its doc examples, is skipped by the
-      # workspace run above.
+      # workspace run above. Once with all the families on, then each on its own
+      # the way a cart links it: a family's docs and doctests may only mention
+      # what its own feature brings in, and the all-features run cannot see that.
+      # (`std` stays on — the SDK's own tests need it.)
       - run: cargo test -p pixel8 --all-features
+      - run: cargo test -p pixel8 --features plume-effects
+      - run: cargo test -p pixel8 --features physics
 
   book:
     runs-on: ubuntu-latest
@@ -130,4 +136,9 @@ jobs:
       # --no-deps keeps the gate on our own docs: a noisy dependency must not
       # trip -D warnings.
       - run: cargo doc --no-deps --all-features -p pixel8
+      # And each SDK effect family on its own, as docs.rs never builds it but a
+      # cart does: a link into a family that is off then resolves to nothing, and
+      # only a single-feature build sees it.
+      - run: cargo doc --no-deps -p pixel8 --features plume-effects
+      - run: cargo doc --no-deps -p pixel8 --features physics
       - run: cargo doc --no-deps --all-features -p pixel8-runtime

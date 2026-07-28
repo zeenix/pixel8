@@ -10,8 +10,17 @@
 //!
 //! The hero owns a [`Body`], so a running jump (hold Right + jump) — a
 //! sub-pixel diagonal — climbs a clean staircase instead of shimmering. The
-//! body owns the position; the cart just hands it the movement it worked out
-//! for the frame and draws at `draw_x`/`draw_y`.
+//! body owns the position, the physics below hands it the movement worked out
+//! for the frame, and the cart draws at `draw_x`/`draw_y`.
+//!
+//! The falling and the walls both come from the SDK's `physics` module (the
+//! `physics` feature). The hero is a [`Kinetic`](pixel8::physics::Kinetic): it
+//! says what shape it is when it meets a tile — a
+//! [`Collider`](pixel8::physics::Collider) — and one
+//! [`step`](pixel8::physics::Kinetic::step) an update, handed the level's pull
+//! (a [`Gravity`](pixel8::physics::Gravity) constant), applies it, stops
+//! whatever ran into a solid tile, moves the body with what survives and
+//! reports the sides it touched; `below()` is the hero's *grounded*.
 //!
 //! The code is split into small modules: `hero` and `badie` (the two moving
 //! actors), `taken` (a collected coin or trophy, so it can be scored and put

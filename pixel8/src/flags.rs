@@ -88,6 +88,16 @@ where
         let other = other.into().bits;
         self.bits & other == other
     }
+
+    /// Whether any flag in `other` is also set here.
+    ///
+    /// This is the question a filter asks — "is this one of the flags I am after?" — and it is
+    /// the one that reads an empty `other` as matching nothing.
+    /// [`contains`](Self::contains) holds vacuously there instead, every set containing the
+    /// empty one.
+    pub fn intersects(self, other: impl Into<BitFlags<T>>) -> bool {
+        self.bits & other.into().bits != 0
+    }
 }
 
 /// The error from [`BitFlags::from_bits`]: the raw value had bits set that do
@@ -280,6 +290,19 @@ mod tests {
         let set = Test::A | Test::B;
         assert!(set.contains(Test::A | Test::B));
         assert!(!set.contains(Test::A | Test::C));
+    }
+
+    #[test]
+    fn intersects_is_any_rather_than_all() {
+        let set = Test::A | Test::B;
+        assert!(set.intersects(Test::A | Test::C));
+        assert!(set.intersects(Test::B));
+        assert!(!set.intersects(Test::C));
+        // The one place the two part company: nothing intersects the empty set, while every set
+        // contains it.
+        assert!(!set.intersects(BitFlags::<Test>::empty()));
+        assert!(set.contains(BitFlags::<Test>::empty()));
+        assert!(!BitFlags::<Test>::empty().intersects(Test::A));
     }
 
     #[test]

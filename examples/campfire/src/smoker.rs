@@ -1,7 +1,4 @@
-use pixel8::{
-    plume::{Direction, Smoke},
-    *,
-};
+use pixel8::{physics::Wind, plume::Smoke, *};
 
 pub struct Smoker {
     smoke: Smoke<1>,
@@ -20,7 +17,7 @@ impl Smoker {
         }
     }
 
-    pub fn update(&mut self, ctx: &mut Context) {
+    pub fn update(&mut self, ctx: &mut Context, wind: &Wind) {
         let duration = if self.inhaling {
             INHALING_DURATION
         } else {
@@ -34,6 +31,9 @@ impl Smoker {
             self.smoke.set_puffing(!self.inhaling);
         }
 
+        // The same air the fire sways in, on a wisp small enough to show every bit of it. It
+        // takes the place of the drifting the smoke does for itself, rather than adding to it.
+        self.smoke.blown_by(wind);
         self.smoke.update(ctx);
     }
 
