@@ -58,9 +58,12 @@ The workspace excludes `examples/` (those are standalone wasm crates). Six membe
   hook. Defaults to `std`; disabling the `std` feature makes it `#![no_std]` for
   allocation-free carts with `heapless`. Ready-made effects sit behind off-by-default
   features, one per family (`plume-effects` — `plume.rs`, the fire and smoke of
-  `examples/campfire`), which is the only thing that pulls a dependency (`heapless`)
-  into a cart. Each family stays in its own module rather than being re-exported at
-  the root, so a cart's `use pixel8::*` never depends on which features are on.
+  `examples/campfire`; `physics` — `physics/`, gravity, atmosphere, wind, map
+  collision and the `Force` trait carts write their own force fields against), and
+  `plume-effects` is the only one
+  that pulls a dependency (`heapless`) into a cart. Each family stays in its own
+  module rather than being re-exported at the root, so a cart's `use pixel8::*` never
+  depends on which features are on.
   Feature-gated code is invisible to a default `cargo clippy`/`test`, so CI lints and
   tests each effect feature explicitly.
 - **`pixel8-runtime/`** — the heart. Modules: `fb` (128x128 indexed framebuffer),

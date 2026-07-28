@@ -9,6 +9,8 @@ mod glue;
 pub mod memstat;
 mod motion;
 mod music;
+#[cfg(feature = "physics")]
+pub mod physics;
 #[cfg(feature = "plume-effects")]
 pub mod plume;
 mod storage;
@@ -182,6 +184,27 @@ bitflag_enum! {
 /// The ABI channel index (`0..=3`) for a [`Channel`] flag.
 const fn channel_index(c: Channel) -> u32 {
     (c as u8).trailing_zeros()
+}
+
+/// One of eight headings, in steps of 45°.
+///
+/// Screen space throughout, so [`Up`](Self::Up) is towards the top of the screen — where `y` is
+/// smallest — and [`Right`](Self::Right) towards the larger `x`. It is plain data and carries no
+/// meaning of its own: what a direction *means* is the reading of whatever takes one. A particle
+/// plume travels the way it points; a wind comes from the side it names. Each says which it is.
+///
+/// `Up` is the default, being the way most things a cart points are pointed to begin with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Direction {
+    #[default]
+    Up,
+    UpRight,
+    Right,
+    DownRight,
+    Down,
+    DownLeft,
+    Left,
+    UpLeft,
 }
 
 /// A sprite on the 16x16 sprite sheet (`0..=255`).

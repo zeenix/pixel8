@@ -175,8 +175,10 @@ against, and the console that builds and runs it.
   a game links against. Zero-dependency out of the box and `#![no_std]`-friendly: the `Game`
   trait, the `Context` (update-time) and `Graphics` (draw-time) handles, the 16-color palette and
   the `game!` macro that wires it all up. `cargo add pixel8` in a `cdylib` crate and you have a
-  cart. Optional features add ready-made effects, each in a module of its own — `plume-effects`
-  brings `plume`, with the `Fire`, `SmokingFire` and `Smoke` particle plumes in it.
+  cart. Optional features add ready-made effect families, each in a module of its own —
+  `plume-effects` brings `plume`, with the `Fire`, `SmokingFire` and `Smoke` particle plumes in
+  it, and `physics` brings `physics`, with `Gravity`, `Atmosphere`, `Wind`, map collision and
+  the `Force` trait a cart writes its own against.
 - **[`pixel8-console`](https://crates.io/crates/pixel8-console)** — the desktop console and
   toolchain. `cargo install pixel8-console` gives you the `pixel8` command: the boot prompt, the
   five editors (code, sprite, map, sfx, music), the build-and-hot-reload loop and every headless
