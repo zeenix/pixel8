@@ -57,8 +57,9 @@ The workspace excludes `examples/` (those are standalone wasm crates). Six membe
   the `game!` macro exports `pixel8_init/update/draw` and installs the panic-forwarding
   hook. Defaults to `std`; disabling the `std` feature makes it `#![no_std]` for
   allocation-free carts with `heapless`. Ready-made effects sit behind off-by-default
-  features, one per family (`plume-effects` — `plume.rs`, the fire and smoke of
-  `examples/campfire`; `physics` — `physics/`, gravity, atmosphere, wind, map
+  features, one per family (`plume-effects` — `plume/`, particle fire, smoke
+  and explosions, two of which are the campfire of `examples/campfire`;
+  `physics` — `physics/`, gravity, atmosphere, wind, map
   collision and the `Force` trait carts write their own force fields against), and
   `plume-effects` is the only one
   that pulls a dependency (`heapless`) into a cart. Each family stays in its own
