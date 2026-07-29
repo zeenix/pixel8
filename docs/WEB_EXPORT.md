@@ -2,7 +2,9 @@
 
 ```text
 pixel8 export-web <project-dir|cart.png> <out.html>   # headless
+pixel8 export-web <in> <out.html> --no-controls       # ... without controls
 > export mygame.html                                 # from the console
+> export mygame.html -noctrl                         # ... without controls
 ```
 
 Either produces **one self-contained HTML file**. No server, no asset
@@ -54,6 +56,15 @@ left and round `O`/`X` buttons on the right. The d-pad is one touch
 zone with 8-way sectors, so diagonals and sliding between directions
 work, and multi-touch lets you hold a direction while tapping a
 button.
+
+Not every cart is a game, though: an animation, a demo or a
+visualization reads no input, and a d-pad it ignores is furniture that
+also costs the screen the room it takes. `--no-controls` (`-noctrl`
+from the console prompt) leaves them out — no touch pad, no
+`arrows + z/x` hint, and the canvas takes the width the pad would have
+had. The page keeps everything that isn't the cart's input: `pause`,
+`stop`, `Esc`, and the keys themselves, which still reach a cart that
+turns out to want them.
 
 ## Limitations
 

@@ -52,7 +52,11 @@ fn main() -> Result<()> {
         ),
         ["extract", png, dir] => headless_extract(Path::new(png), Path::new(dir)),
         ["import-pico8", rest @ ..] => headless_import_pico8_cli(rest),
-        ["export-web", input, out] => headless_export_web(Path::new(input), Path::new(out)),
+        ["export-web", input, out, rest @ ..] => headless_export_web(
+            Path::new(input),
+            Path::new(out),
+            !rest.contains(&"--no-controls"),
+        ),
         ["verify", png] => headless_verify(Path::new(png)),
         ["snap", project, outdir] => headless_snap(Path::new(project), Path::new(outdir)),
         ["run", path] => run_windowed(Some(path.to_string()), true),
@@ -93,8 +97,10 @@ fn print_help() {
          \x20 pixel8 import-pico8 <cart.p8|.p8.png> --into <project-dir>\n\
          \x20                            [--sprites R] [--sfx R] [--music R]\n\
          \x20                            Append selected assets into an existing project\n\
-         \x20 pixel8 export-web <dir|cart.png> <out.html>\n\
+         \x20 pixel8 export-web <dir|cart.png> <out.html> [--no-controls]\n\
          \x20                            Export a self-contained playable web page\n\
+         \x20                            (--no-controls suits carts that take no input:\n\
+         \x20                            no on-screen touch pad, no key hint)\n\
          \x20 pixel8 verify <cart.png>    Load a cart and run 60 frames headless",
         shell::VERSION
     );
@@ -254,7 +260,7 @@ fn headless_import_pico8_into(
 }
 
 /// Export a project or cart as a single playable HTML file.
-fn headless_export_web(input: &Path, out: &Path) -> Result<()> {
+fn headless_export_web(input: &Path, out: &Path, controls: bool) -> Result<()> {
     let cart = if input.extension().is_some_and(|e| e == "png") {
         cart::load_png(input)?
     } else {
@@ -274,7 +280,7 @@ fn headless_export_web(input: &Path, out: &Path) -> Result<()> {
             source: None,
         }
     };
-    webexport::export_html(&cart, out, &webexport::web_crate_dir(&sdk_path()))?;
+    webexport::export_html(&cart, out, &webexport::web_crate_dir(&sdk_path()), controls)?;
     println!("Exported {}", out.display());
     Ok(())
 }

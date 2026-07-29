@@ -153,6 +153,7 @@ pixel8 export <dir> <out.png>     build + write a png cart (--no-source to omit 
 pixel8 extract <cart.png> <dir>   editable cart -> project
 pixel8 import-pico8 <c> [dir]     pico-8 cart (.p8/.p8.png) -> project
 pixel8 export-web <in> <o.html>   one self-contained playable web page
+                                  (--no-controls for a cart that reads no input)
 pixel8 verify <cart.png>          load a cart and run 60 frames headless
 ```
 

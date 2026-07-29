@@ -39,9 +39,15 @@ cargo build -p pixel8-console --no-default-features
 # The book's chapters embed these exports as iframes (play/<cart>.html).
 mkdir -p "$site/play"
 for cart in "${carts[@]}"; do
+  case "$cart" in
+    # A scene that plays itself: no touch pad, no key hint, just the canvas.
+    campfire) web_flags=(--no-controls) ;;
+    *) web_flags=() ;;
+  esac
   ./target/debug/pixel8 export "examples/$cart" "$site/play/$cart.png"
   ./target/debug/pixel8 verify "$site/play/$cart.png"
-  ./target/debug/pixel8 export-web "$site/play/$cart.png" "$site/play/$cart.html"
+  ./target/debug/pixel8 export-web "$site/play/$cart.png" "$site/play/$cart.html" \
+    "${web_flags[@]}"
 done
 
 ./scripts/build-index.sh "$site/play"
