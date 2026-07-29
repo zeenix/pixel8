@@ -15,12 +15,17 @@
 //!
 //! The falling and the walls both come from the SDK's `physics` module (the
 //! `physics` feature). The hero is a [`Kinetic`](pixel8::physics::Kinetic): it
-//! says what shape it is when it meets a tile — a
-//! [`Collider`](pixel8::physics::Collider) — and one
-//! [`step`](pixel8::physics::Kinetic::step) an update, handed the level's pull
-//! (a [`Gravity`](pixel8::physics::Gravity) constant), applies it, stops
-//! whatever ran into a solid tile, moves the body with what survives and
-//! reports the sides it touched; `below()` is the hero's *grounded*.
+//! says which rectangle it covers — its
+//! [`Bounds`](pixel8::physics::Bounds) — and which sprite flag is a wall to
+//! it, and one [`step`](pixel8::physics::Kinetic::step) an update, handed the
+//! level's pull (a [`Gravity`](pixel8::physics::Gravity) constant), applies
+//! it, stops whatever ran into a solid tile, moves the body with what survives
+//! and reports the sides it touched; `below()` is the hero's *grounded*.
+//!
+//! The level's own edges are not tiles and there is no floor past the last
+//! one, so [`keep_within`](pixel8::physics::Kinetic::keep_within) holds the
+//! hero inside them. The hero's own rectangle is also what the badie is judged
+//! against, so there is only ever one hero-shaped box to reason about.
 //!
 //! The code is split into small modules: `hero` and `badie` (the two moving
 //! actors), `taken` (a collected coin or trophy, so it can be scored and put
@@ -36,13 +41,14 @@ mod hero;
 mod taken;
 
 use heapless::Vec;
-use pixel8::*;
+// `Kinetic` for the hero's own rectangle, which is what the badie is judged against.
+use pixel8::{physics::Kinetic, *};
 
 use crate::{
     badie::Badie,
     constants::{
-        BADIE_DEAD_SFX, BADIE_HEIGHT, BADIE_KILL_POINTS, BADIE_WIDTH, COMPLETION_MUSIC,
-        GAME_OVER_MUSIC, GAME_OVER_TIMEOUT, GAME_TIMEOUT, HERO_HEIGHT, HERO_WIDTH, MAX_TAKEN,
+        BADIE_DEAD_SFX, BADIE_KILL_POINTS, COMPLETION_MUSIC, GAME_OVER_MUSIC, GAME_OVER_TIMEOUT,
+        GAME_TIMEOUT, MAX_TAKEN,
     },
     game_mode::GameMode,
     hero::Hero,
@@ -109,25 +115,23 @@ impl Platformer {
         }
 
         // Check for collision between our hero and the badie, and decide who dies if there is one.
-        if let Some(badie) = &mut self.badie {
-            if self.hero.draw_x() + HERO_WIDTH >= badie.draw_x()
-                && self.hero.draw_x() < badie.draw_x() + BADIE_WIDTH
-            {
-                if self.hero.draw_y() == badie.draw_y() {
+        // The badie is no `Kinetic` — nothing pushes it — so it comes into this as a rectangle.
+        if let Some(badie) = &self.badie {
+            if self.hero.overlaps(badie.bounds()) {
+                let (hero, badie) = (self.hero.bounds(), badie.bounds());
+                if hero.y() == badie.y() {
                     // Hero ramming into badie horizontally is a suicide.
                     self.hero.die();
                     self.game_over(ctx);
 
                     return;
-                } else if self.hero.draw_y() + HERO_HEIGHT >= badie.draw_y()
-                    && self.hero.draw_y() < badie.draw_y() + BADIE_HEIGHT
-                {
-                    // Hero hitting the badie from the top, kills the badie and gives hero a boost.
-                    self.badie = None;
-                    self.badies_killed += 1;
-                    self.hero.jump(ctx);
-                    ctx.sfx(BADIE_DEAD_SFX);
                 }
+
+                // Hero hitting the badie from the top, kills the badie and gives hero a boost.
+                self.badie = None;
+                self.badies_killed += 1;
+                self.hero.jump(ctx);
+                ctx.sfx(BADIE_DEAD_SFX);
             }
         }
 

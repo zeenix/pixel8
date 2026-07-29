@@ -156,12 +156,20 @@ impl Mob {
 
 #[cfg(test)]
 impl Kinetic for Mob {
+    fn body(&self) -> &crate::Body {
+        &self.body
+    }
+
     fn body_mut(&mut self) -> &mut crate::Body {
         &mut self.body
     }
 
     fn velocity_mut(&mut self) -> &mut super::Velocity {
         &mut self.velocity
+    }
+
+    fn bounds(&self) -> super::Bounds {
+        super::Bounds::of(&self.body, 8, 8)
     }
 
     fn mass(&self) -> f32 {

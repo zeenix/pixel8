@@ -1,12 +1,12 @@
 use pixel8::{
-    physics::{Collider, Gravity, Kinetic, Velocity},
-    Body, Button, Context, Graphics, SpriteId, SCREEN_WIDTH,
+    physics::{Bounds, Gravity, Kinetic, Velocity},
+    BitFlags, Body, Button, Context, Graphics, SpriteFlag, SpriteId, SCREEN_WIDTH,
 };
 
 use crate::{
     constants::{
-        COIN_SFX, COIN_SPRITE, HERO_HAPPY_SPRITE, HERO_HITBOX, HERO_LEGS_EXTEND_SPRITE, HERO_SPEED,
-        HERO_SPRITE, JUMP_SFX, SOLID, TROPHY_SPRITE,
+        COIN_SFX, COIN_SPRITE, HERO_HAPPY_SPRITE, HERO_HEIGHT, HERO_LEGS_EXTEND_SPRITE, HERO_SPEED,
+        HERO_SPRITE, HERO_WIDTH, JUMP_SFX, LEVEL_HEIGHT, LEVEL_WIDTH, SOLID, TROPHY_SPRITE,
     },
     GameMode, Taken,
 };
@@ -14,6 +14,10 @@ use crate::{
 /// The level's pull, and the whole of the weather the hero walks around in — a constant,
 /// so nothing holds a copy of it and no level has to pass one around.
 const GRAVITY: Gravity = Gravity::new();
+
+/// The level itself, which is as far as the hero is allowed to get. A rectangle the cart knows
+/// at compile time, so it is written down once rather than built every update.
+const LEVEL: Bounds = Bounds::new(0, 0, LEVEL_WIDTH, LEVEL_HEIGHT);
 
 #[derive(Debug)]
 pub struct Hero {
@@ -60,13 +64,18 @@ impl Hero {
             self.jump(ctx);
         }
 
-        // One call moves the hero: the pull it is handed, the tiles its collider stops
-        // at, and the body moved by what survives — diagonals included, so a running
+        // One call moves the hero: the pull it is handed, the tiles it calls solid,
+        // and the body moved by what survives — diagonals included, so a running
         // jump climbs a clean staircase. The fall the pull builds up is capped by the
         // gravity's terminal velocity, without which a long drop would clear a whole
         // tile in one update and land inside the floor.
         let contacts = self.step(ctx, &[&GRAVITY]);
-        self.grounded = contacts.below();
+        // The walls are only where the level has tiles; its own edges are not walls at all, and
+        // the last column has nothing but sky past it. This level is floored across its whole
+        // width, so the bottom edge never comes up — `held.below()` is there for a level that
+        // is not, where being pinned at the bottom should still count as standing on something.
+        let held = self.keep_within(LEVEL);
+        self.grounded = contacts.below() || held.below();
 
         // Coins & trophy: sample the hitbox center.
         let cx = (self.body.x() as i16 + 4) / 8;
@@ -90,9 +99,9 @@ impl Hero {
         ctx.sfx(JUMP_SFX);
     }
 
-    // Camera follows the player across the 32-tile-wide level.
+    // Camera follows the player across the level.
     pub fn center(&self, gfx: &mut Graphics) {
-        let cam = (self.body.x() - 60.0).clamp(8.0, (32 * 8 - SCREEN_WIDTH as i16) as f32);
+        let cam = (self.body.x() - 60.0).clamp(8.0, (LEVEL_WIDTH - SCREEN_WIDTH) as f32);
         gfx.camera(cam as i16, 0);
     }
 
@@ -125,23 +134,19 @@ impl Hero {
         .unwrap();
     }
 
-    pub fn draw_x(&self) -> i16 {
-        self.body.draw_x()
-    }
-
-    pub fn draw_y(&self) -> i16 {
-        self.body.draw_y()
-    }
-
     pub fn die(&mut self) {
         self.dead = true;
     }
 }
 
 // Everything the SDK's physics needs to move the hero: the body it occupies, the
-// velocity forces bend, and the shape it is when it meets a tile. `step` does the rest
-// — no gravity to add by hand, no corners to check against the map.
+// velocity forces bend, the rectangle it covers and the tiles that stop it. `step`
+// does the rest — no gravity to add by hand, no corners to check against the map.
 impl Kinetic for Hero {
+    fn body(&self) -> &Body {
+        &self.body
+    }
+
     fn body_mut(&mut self) -> &mut Body {
         &mut self.body
     }
@@ -150,8 +155,13 @@ impl Kinetic for Hero {
         &mut self.velocity
     }
 
-    fn collider(&self) -> Option<Collider> {
-        // One sprite's worth of hitbox, stopping at the tiles the level flags solid.
-        Collider::new(HERO_HITBOX, HERO_HITBOX, SOLID).ok()
+    // One sprite's worth: what the walls stop, what the badie is judged against, and what
+    // the level's edges hold.
+    fn bounds(&self) -> Bounds {
+        Bounds::of(&self.body, HERO_WIDTH, HERO_HEIGHT)
+    }
+
+    fn solid(&self) -> BitFlags<SpriteFlag> {
+        SOLID.into()
     }
 }
