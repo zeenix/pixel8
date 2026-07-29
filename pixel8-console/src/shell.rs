@@ -1330,12 +1330,13 @@ impl Shell {
 
     fn cmd_export(&mut self, args: &[&str]) -> Result<()> {
         let mut include_source = true;
+        let mut controls = true;
         let mut file = None;
         for a in args {
-            if *a == "-nosrc" {
-                include_source = false;
-            } else {
-                file = Some(*a);
+            match *a {
+                "-nosrc" => include_source = false,
+                "-noctrl" => controls = false,
+                _ => file = Some(*a),
             }
         }
         let file = file
@@ -1347,7 +1348,7 @@ impl Shell {
             let cart = self.make_cart(false)?;
             self.say("Exporting for web...", col::LIGHT_GREY);
             let web_dir = crate::webexport::web_crate_dir(&self.sdk_path);
-            crate::webexport::export_html(&cart, &out, &web_dir)?;
+            crate::webexport::export_html(&cart, &out, &web_dir, controls)?;
         } else {
             let cart = self.make_cart(include_source)?;
             cart::save_png(&cart, &out)?;

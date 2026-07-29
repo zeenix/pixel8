@@ -52,7 +52,9 @@ browser's autoplay rule, so audio just works). While the cart runs,
 `pause` and `stop` controls sit under the canvas — `Esc` pauses too,
 a hidden tab pauses automatically, and `stop` returns to the
 click-to-play screen. On touch screens the page grows an on-screen
-d-pad and `O`/`X` buttons.
+d-pad and `O`/`X` buttons — unless you pass `-noctrl` (`--no-controls`
+headless), which suits a cart that reads no input: no touch pad, no key
+hint, and the screen keeps the room they would have taken.
 
 The playable carts embedded throughout this book are exactly these files —
 each frame is one `export-web` output. Anything that hosts static files can

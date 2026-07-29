@@ -14,7 +14,12 @@ use std::{
 };
 
 /// Export `cart` as a playable single-file HTML page.
-pub fn export_html(cart: &Cart, out: &Path, web_crate_dir: &Path) -> Result<()> {
+///
+/// `controls` decides whether the page carries player controls: the
+/// on-screen d-pad and O/X buttons touch devices get, and the keyboard
+/// hint beside them. Carts that take no input — animations, demos,
+/// visualizations — are better off without either.
+pub fn export_html(cart: &Cart, out: &Path, web_crate_dir: &Path, controls: bool) -> Result<()> {
     let player_wasm = build_player(web_crate_dir)?;
     let cart_png = cart::encode(cart)?;
     let title = if cart.assets.meta.name.is_empty() {
@@ -22,11 +27,7 @@ pub fn export_html(cart: &Cart, out: &Path, web_crate_dir: &Path) -> Result<()> 
     } else {
         cart.assets.meta.name.clone()
     };
-    let html = TEMPLATE
-        .replace("{{TITLE}}", &escape_html(&title))
-        .replace("{{PLAYER_B64}}", &base64(&player_wasm))
-        .replace("{{CART_B64}}", &base64(&cart_png));
-    std::fs::write(out, html)?;
+    std::fs::write(out, render_page(&title, &player_wasm, &cart_png, controls))?;
     Ok(())
 }
 
@@ -70,6 +71,22 @@ fn build_player(web_crate_dir: &Path) -> Result<Vec<u8>> {
         .with_context(|| format!("reading web player at {}", artifact.display()))
 }
 
+/// Fill the wrapper page in: the two base64 payloads and, when
+/// `controls` is on, the control CSS, markup, script and keyboard hint
+/// (each an empty string otherwise, so the page ships none of it).
+/// The title goes in last — it is the one piece that comes from the
+/// cart, and so the one piece that must not name a placeholder.
+fn render_page(title: &str, player_wasm: &[u8], cart_png: &[u8], controls: bool) -> String {
+    TEMPLATE
+        .replace("{{PLAYER_B64}}", &base64(player_wasm))
+        .replace("{{CART_B64}}", &base64(cart_png))
+        .replace("{{TOUCH_CSS}}", if controls { TOUCH_CSS } else { "" })
+        .replace("{{TOUCH_HTML}}", if controls { TOUCH_HTML } else { "" })
+        .replace("{{TOUCH_JS}}", if controls { TOUCH_JS } else { "" })
+        .replace("{{HINT_KEYS}}", if controls { HINT_KEYS } else { "" })
+        .replace("{{TITLE}}", &escape_html(title))
+}
+
 fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -105,7 +122,8 @@ fn base64(data: &[u8]) -> String {
 
 /// The wrapper page. Deliberately spartan: black page, cartridge art,
 /// click to boot, pixel-perfect canvas, pause/stop controls underneath.
-/// No frameworks, no fetches.
+/// No frameworks, no fetches. The `{{TOUCH_*}}` and `{{HINT_KEYS}}`
+/// holes take the player controls, which an input-less cart drops.
 const TEMPLATE: &str = r#"<!doctype html>
 <html lang="en">
 <head>
@@ -139,38 +157,15 @@ const TEMPLATE: &str = r#"<!doctype html>
   #hint { font-size: 11px; }
   a { color: #5f574f; }
 
-  /* Touch controls: hidden unless the device has a coarse pointer. */
-  #touch { display: none; width: 100%; max-width: 560px;
-           justify-content: space-between; align-items: center;
-           padding: 8px 18px; box-sizing: border-box;
-           user-select: none; -webkit-user-select: none; }
+  /* Touch devices have no keyboard to hint at, no page to rubber-band, and
+     nothing but the screen to spend their width on (the touch controls, if
+     the page has them, claim some of it back below). */
   @media (pointer: coarse) {
-    body { justify-content: flex-start; padding-top: 10px;
-           overscroll-behavior: none; }
-    #stage { width: min(92vmin, 56vh); }
-    #touch { display: flex; touch-action: none; }
+    body { overscroll-behavior: none; }
+    #stage { width: min(96vmin, 90vh); }
     #hint { display: none; }
   }
-  #dpad { position: relative; width: 34vmin; height: 34vmin;
-          max-width: 180px; max-height: 180px; }
-  #dpad::before, #dpad::after { content: ""; position: absolute;
-          background: #1d2b53; border: 2px solid #5f574f;
-          box-sizing: border-box; border-radius: 6px; }
-  #dpad::before { left: 33%; top: 0; width: 34%; height: 100%; }
-  #dpad::after { left: 0; top: 33%; width: 100%; height: 34%; }
-  #dpad .dir { position: absolute; color: #5f574f; font-size: 18px;
-          z-index: 1; transform: translate(-50%, -50%); }
-  #dpad .dir.on { color: #ffec27; }
-  #d-l { left: 16%; top: 50%; } #d-r { left: 84%; top: 50%; }
-  #d-u { left: 50%; top: 16%; } #d-d { left: 50%; top: 84%; }
-  #abtns { display: flex; gap: 14px; align-items: flex-end; }
-  .ab { width: 17vmin; height: 17vmin; max-width: 90px; max-height: 90px;
-        border-radius: 50%; border: 2px solid #5f574f;
-        background: #1d2b53; color: #c2c3c7; font-family: monospace;
-        font-size: 24px; padding: 0; }
-  #btn-o { margin-bottom: 26px; }
-  .ab.on { background: #7e2553; color: #fff1e8; border-color: #ff77a8; }
-</style>
+{{TOUCH_CSS}}</style>
 </head>
 <body>
 <div id="stage">
@@ -178,22 +173,12 @@ const TEMPLATE: &str = r#"<!doctype html>
   <button id="boot"><img alt="cartridge" id="cartimg"><span>click to play</span></button>
   <div id="paused"><span>paused &mdash; click to resume</span></div>
 </div>
-<div id="touch">
-  <div id="dpad">
-    <span class="dir" id="d-l">&#9664;</span><span class="dir" id="d-r">&#9654;</span>
-    <span class="dir" id="d-u">&#9650;</span><span class="dir" id="d-d">&#9660;</span>
-  </div>
-  <div id="abtns">
-    <button class="ab" id="btn-o">o</button>
-    <button class="ab" id="btn-x">x</button>
-  </div>
-</div>
-<div id="controls">
+{{TOUCH_HTML}}<div id="controls">
   <button id="btn-pause">pause</button>
   <button id="btn-stop">stop</button>
 </div>
 <div id="title">{{TITLE}}</div>
-<div id="hint">arrows + z/x &middot; esc pauses &middot; made with <a href="https://github.com/zeenix/pixel8">pixel8</a></div>
+<div id="hint">{{HINT_KEYS}}esc pauses &middot; made with <a href="https://github.com/zeenix/pixel8">pixel8</a></div>
 <script>
 "use strict";
 const PLAYER_B64 = "{{PLAYER_B64}}";
@@ -221,6 +206,8 @@ const KEYMAP = {
 };
 
 let wasm = null;
+// Replaced by the touch-control block, when the page carries one.
+let resetTouch = () => {};
 let audioCtx = null;
 let audioTime = 0;
 let last = 0, acc = 0;
@@ -280,11 +267,7 @@ function stop() {
   if (audioCtx) audioCtx.close();
   audioCtx = null;
   audioTime = 0;
-  const vis = ["d-l", "d-r", "d-u", "d-d", "btn-o", "btn-x"];
-  for (let b = 0; b < 6; b++) {
-    touchState[b] = 0;
-    el(vis[b]).classList.remove("on");
-  }
+  resetTouch();
   document.getElementById("paused").style.display = "none";
   document.getElementById("btn-pause").textContent = "pause";
   document.getElementById("controls").style.display = "none";
@@ -313,50 +296,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden && wasm && !paused) togglePause();
 });
 
-// --- Touch controls: d-pad + O/X, multi-touch, 8-way diagonals. ---
-const touchState = [0, 0, 0, 0, 0, 0];
-const el = (id) => document.getElementById(id);
-
-function inRect(r, t, slop) {
-  return t.clientX >= r.left - slop && t.clientX <= r.right + slop &&
-         t.clientY >= r.top - slop && t.clientY <= r.bottom + slop;
-}
-
-function readTouches(e) {
-  e.preventDefault();
-  if (!wasm) return;
-  const next = [0, 0, 0, 0, 0, 0];
-  const pad = el("dpad").getBoundingClientRect();
-  const ro = el("btn-o").getBoundingClientRect();
-  const rx = el("btn-x").getBoundingClientRect();
-  for (const t of e.touches) {
-    if (inRect(ro, t, 12)) { next[4] = 1; continue; }
-    if (inRect(rx, t, 12)) { next[5] = 1; continue; }
-    if (!inRect(pad, t, pad.width * 0.3)) continue;
-    const dx = t.clientX - (pad.left + pad.width / 2);
-    const dy = t.clientY - (pad.top + pad.height / 2);
-    if (Math.hypot(dx, dy) < pad.width * 0.1) continue; // dead zone
-    // 8-way: overlapping 135-degree sectors make 45-degree diagonals.
-    const a = Math.atan2(dy, dx) * 180 / Math.PI;
-    if (Math.abs(a) < 67.5) next[1] = 1;          // right
-    if (Math.abs(a) > 112.5) next[0] = 1;         // left
-    if (a < -22.5 && a > -157.5) next[2] = 1;     // up
-    if (a > 22.5 && a < 157.5) next[3] = 1;       // down
-  }
-  const vis = ["d-l", "d-r", "d-u", "d-d", "btn-o", "btn-x"];
-  for (let b = 0; b < 6; b++) {
-    if (next[b] !== touchState[b]) {
-      touchState[b] = next[b];
-      wasm.pixel8_web_set_button(b, next[b]);
-      el(vis[b]).classList.toggle("on", next[b] === 1);
-    }
-  }
-}
-
-for (const ev of ["touchstart", "touchmove", "touchend", "touchcancel"]) {
-  el("touch").addEventListener(ev, readTouches, { passive: false });
-}
-
+{{TOUCH_JS}}
 // Keep a short queue of scheduled audio buffers ahead of the clock.
 function pumpAudio() {
   if (!audioCtx) return;
@@ -392,7 +332,9 @@ function frame(now) {
     ctx2d.putImageData(image, 0, 0);
   }
   pumpAudio();
-  requestAnimationFrame(frame);
+  // Keep rafId on the *pending* frame: pause and stop cancel by id, and a
+  // stale one leaves the cart ticking (and, after stop, ticking on nothing).
+  rafId = requestAnimationFrame(frame);
 }
 
 document.getElementById("boot").addEventListener("click", () => {
@@ -415,6 +357,109 @@ document.getElementById("btn-stop").addEventListener("click", (e) => {
 </html>
 "#;
 
+/// The touch controls' styling. Hidden unless the device has a coarse
+/// pointer, and on such a device the canvas gives up the room the pad
+/// and buttons need.
+const TOUCH_CSS: &str = r#"
+  #touch { display: none; width: 100%; max-width: 560px;
+           justify-content: space-between; align-items: center;
+           padding: 8px 18px; box-sizing: border-box;
+           user-select: none; -webkit-user-select: none; }
+  @media (pointer: coarse) {
+    body { justify-content: flex-start; padding-top: 10px; }
+    #stage { width: min(92vmin, 56vh); }
+    #touch { display: flex; touch-action: none; }
+  }
+  #dpad { position: relative; width: 34vmin; height: 34vmin;
+          max-width: 180px; max-height: 180px; }
+  #dpad::before, #dpad::after { content: ""; position: absolute;
+          background: #1d2b53; border: 2px solid #5f574f;
+          box-sizing: border-box; border-radius: 6px; }
+  #dpad::before { left: 33%; top: 0; width: 34%; height: 100%; }
+  #dpad::after { left: 0; top: 33%; width: 100%; height: 34%; }
+  #dpad .dir { position: absolute; color: #5f574f; font-size: 18px;
+          z-index: 1; transform: translate(-50%, -50%); }
+  #dpad .dir.on { color: #ffec27; }
+  #d-l { left: 16%; top: 50%; } #d-r { left: 84%; top: 50%; }
+  #d-u { left: 50%; top: 16%; } #d-d { left: 50%; top: 84%; }
+  #abtns { display: flex; gap: 14px; align-items: flex-end; }
+  .ab { width: 17vmin; height: 17vmin; max-width: 90px; max-height: 90px;
+        border-radius: 50%; border: 2px solid #5f574f;
+        background: #1d2b53; color: #c2c3c7; font-family: monospace;
+        font-size: 24px; padding: 0; }
+  #btn-o { margin-bottom: 26px; }
+  .ab.on { background: #7e2553; color: #fff1e8; border-color: #ff77a8; }
+"#;
+
+/// The touch controls' markup: d-pad on the left, O/X on the right.
+const TOUCH_HTML: &str = r#"<div id="touch">
+  <div id="dpad">
+    <span class="dir" id="d-l">&#9664;</span><span class="dir" id="d-r">&#9654;</span>
+    <span class="dir" id="d-u">&#9650;</span><span class="dir" id="d-d">&#9660;</span>
+  </div>
+  <div id="abtns">
+    <button class="ab" id="btn-o">o</button>
+    <button class="ab" id="btn-x">x</button>
+  </div>
+</div>
+"#;
+
+/// The touch controls' script: multi-touch, 8-way diagonals.
+const TOUCH_JS: &str = r#"
+const touchState = [0, 0, 0, 0, 0, 0];
+const TOUCH_VIS = ["d-l", "d-r", "d-u", "d-d", "btn-o", "btn-x"];
+const el = (id) => document.getElementById(id);
+
+resetTouch = () => {
+  for (let b = 0; b < 6; b++) {
+    touchState[b] = 0;
+    el(TOUCH_VIS[b]).classList.remove("on");
+  }
+};
+
+function inRect(r, t, slop) {
+  return t.clientX >= r.left - slop && t.clientX <= r.right + slop &&
+         t.clientY >= r.top - slop && t.clientY <= r.bottom + slop;
+}
+
+function readTouches(e) {
+  e.preventDefault();
+  if (!wasm) return;
+  const next = [0, 0, 0, 0, 0, 0];
+  const pad = el("dpad").getBoundingClientRect();
+  const ro = el("btn-o").getBoundingClientRect();
+  const rx = el("btn-x").getBoundingClientRect();
+  for (const t of e.touches) {
+    if (inRect(ro, t, 12)) { next[4] = 1; continue; }
+    if (inRect(rx, t, 12)) { next[5] = 1; continue; }
+    if (!inRect(pad, t, pad.width * 0.3)) continue;
+    const dx = t.clientX - (pad.left + pad.width / 2);
+    const dy = t.clientY - (pad.top + pad.height / 2);
+    if (Math.hypot(dx, dy) < pad.width * 0.1) continue; // dead zone
+    // 8-way: overlapping 135-degree sectors make 45-degree diagonals.
+    const a = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (Math.abs(a) < 67.5) next[1] = 1;          // right
+    if (Math.abs(a) > 112.5) next[0] = 1;         // left
+    if (a < -22.5 && a > -157.5) next[2] = 1;     // up
+    if (a > 22.5 && a < 157.5) next[3] = 1;       // down
+  }
+  for (let b = 0; b < 6; b++) {
+    if (next[b] !== touchState[b]) {
+      touchState[b] = next[b];
+      wasm.pixel8_web_set_button(b, next[b]);
+      el(TOUCH_VIS[b]).classList.toggle("on", next[b] === 1);
+    }
+  }
+}
+
+for (const ev of ["touchstart", "touchmove", "touchend", "touchcancel"]) {
+  el("touch").addEventListener(ev, readTouches, { passive: false });
+}
+"#;
+
+/// The keys half of the hint line; the rest of it holds either way.
+const HINT_KEYS: &str = "arrows + z/x &middot; ";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -432,5 +477,33 @@ mod tests {
     #[test]
     fn html_is_escaped() {
         assert_eq!(escape_html("a<b>&c"), "a&lt;b&gt;&amp;c");
+    }
+
+    #[test]
+    fn page_leaves_no_holes_unfilled() {
+        for controls in [true, false] {
+            let page = render_page("t", b"player", b"cart", controls);
+            assert!(
+                !page.contains("{{"),
+                "unfilled hole with controls={controls}"
+            );
+        }
+    }
+
+    #[test]
+    fn controls_are_all_or_nothing() {
+        let with = render_page("t", b"player", b"cart", true);
+        assert!(with.contains(r#"id="dpad""#));
+        assert!(with.contains("readTouches"));
+        assert!(with.contains("arrows + z/x"));
+
+        let without = render_page("t", b"player", b"cart", false);
+        assert!(!without.contains("dpad"));
+        assert!(!without.contains(r#"id="touch""#));
+        assert!(!without.contains("touchstart"));
+        assert!(!without.contains("arrows"));
+        // Pause and stop are the page's own controls, not the cart's.
+        assert!(without.contains(r#"id="btn-pause""#));
+        assert!(without.contains("esc pauses"));
     }
 }
