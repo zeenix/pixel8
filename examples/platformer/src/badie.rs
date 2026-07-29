@@ -1,7 +1,10 @@
-use pixel8::{Body, Context, Graphics};
+use pixel8::{physics::Bounds, Body, Context, Graphics};
 
 use crate::{
-    constants::{BADIE_ALT_SPRITE, BADIE_END_X, BADIE_SPEED, BADIE_SPRITE, BADIE_START_X, BADIE_Y},
+    constants::{
+        BADIE_ALT_SPRITE, BADIE_END_X, BADIE_HEIGHT, BADIE_SPEED, BADIE_SPRITE, BADIE_START_X,
+        BADIE_WIDTH, BADIE_Y,
+    },
     GameMode,
 };
 
@@ -51,11 +54,9 @@ impl Badie {
         .unwrap();
     }
 
-    pub fn draw_x(&self) -> i16 {
-        self.body.draw_x()
-    }
-
-    pub fn draw_y(&self) -> i16 {
-        self.body.draw_y()
+    /// The box the hero is judged against. The badie answers to nothing else — it patrols
+    /// between two points and no wall is ever in its way — so it has no need of a `Kinetic`.
+    pub fn bounds(&self) -> Bounds {
+        Bounds::of(&self.body, BADIE_WIDTH, BADIE_HEIGHT)
     }
 }

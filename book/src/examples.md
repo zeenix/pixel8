@@ -36,10 +36,10 @@ here, in a few hundred lines split into small modules:
 - a **camera** that follows the hero, with the HUD drawn in screen space;
 - a **[`Body`](input.md#smooth-sub-pixel-movement-body)** for the hero, so
   running jumps climb clean staircases;
-- the falling *and* the walls from the `physics` feature: the hero says what
-  **[`Collider`]** it meets tiles with, and one **[`step`]** an update —
-  handed the level's **[`Gravity`]** — pulls it down, stops it at the solid
-  tiles and reports whether it landed;
+- the falling *and* the walls from the `physics` feature: the hero says which
+  **[`Bounds`]** it covers and which sprite flag is a wall to it, and one
+  **[`step`]** an update — handed the level's **[`Gravity`]** — pulls it down,
+  stops it at the solid tiles and reports whether it landed;
 - coins collected by **rewriting the map** in RAM and put back on restart;
 - the best score kept in **[storage](storage.md)** across runs;
 - win/lose **music held inside the game-state enum** — leaving the state
@@ -105,7 +105,7 @@ candle, point it another way for an exhaust trail.
 [`plume`]: https://docs.rs/pixel8/latest/pixel8/plume/index.html
 [`Wind`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Wind.html
 [`Gravity`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Gravity.html
-[`Collider`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Collider.html
+[`Bounds`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Bounds.html
 [`step`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html#method.step
 
 ## stress

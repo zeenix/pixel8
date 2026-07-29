@@ -3,6 +3,10 @@ use pixel8::{MusicId, SfxId, SpriteFlag, SpriteId, SCREEN_HEIGHT, SCREEN_WIDTH};
 pub const MAX_TAKEN: usize = 8;
 
 pub const SOLID: SpriteFlag = SpriteFlag::Flag0;
+// The level, in pixels: 32 tiles across and 16 down. There is nothing outside it — no floor
+// past the last tile — so it is also as far as the hero is allowed to go.
+pub const LEVEL_WIDTH: u16 = 32 * 8;
+pub const LEVEL_HEIGHT: u16 = 16 * 8;
 // Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
 // Body keeps coherent. At a whole pixel per frame there would be no zigzag.
 pub const HERO_SPEED: f32 = 0.7;
@@ -12,8 +16,8 @@ pub const BADIE_SPEED: f32 = 0.5;
 pub const HERO_SPRITE: SpriteId = SpriteId(1);
 pub const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
 pub const HERO_HAPPY_SPRITE: SpriteId = SpriteId(5);
-// One sprite's worth, which is the only rectangle the hero has: the walls stop it and
-// the badie is judged against it.
+// One sprite's worth, which is the only rectangle the hero has: the walls stop it, the
+// badie is judged against it, and the level's edges hold it.
 pub const HERO_WIDTH: u16 = 8;
 pub const HERO_HEIGHT: u16 = 8;
 
