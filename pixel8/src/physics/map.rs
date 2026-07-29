@@ -104,9 +104,11 @@ impl MapCollider {
     /// Whether the box, placed with its top-left at the pixel (`x`, `y`), covers a tile `solid`
     /// calls a wall.
     ///
-    /// The float position is truncated to a pixel first, and the pixel to the tile it falls in.
+    /// The float position is floored to a pixel first, and the pixel to the tile it falls in —
+    /// floored, and not truncated, so that the pixel a box is on is the one it would draw at on
+    /// both sides of the origin.
     fn covers_solid(&self, x: f32, y: f32, solid: &impl Fn(i16, i16) -> bool) -> bool {
-        let (x, y) = (x as i16, y as i16);
+        let (x, y) = (crate::motion::floor_i16(x), crate::motion::floor_i16(y));
         let (width, height) = self.size;
         for py in edge(y, height) {
             for px in edge(x, width) {
@@ -128,7 +130,11 @@ impl MapCollider {
 /// boxes get the middles as well, because a tile is eight pixels and anything wider could
 /// otherwise straddle one without either corner landing in it.
 fn edge(start: i16, size: u16) -> impl Iterator<Item = i16> {
-    let last = size.saturating_sub(1) as i16;
+    // Held inside the coordinate space the samples are taken in: a side longer than an `i16` can
+    // count would otherwise put its far edge to the *left* of its near one, and a box that big
+    // would sample somewhere it does not cover and be stopped by nothing at all.
+    let last = size.saturating_sub(1).min(i16::MAX as u16) as i16;
+
     (0..last)
         .step_by(TILE as usize)
         .chain(iter::once(last))
@@ -228,6 +234,44 @@ mod tests {
         for empty in [Bounds::new(0, 0, 0, 8), Bounds::new(0, 0, 8, 0)] {
             assert!(MapCollider::new(&body, empty, solid).is_none(), "{empty:?}");
         }
+    }
+
+    #[test]
+    fn a_box_too_long_to_measure_still_samples_inside_itself() {
+        // A side longer than an `i16` can count. Left alone, its far edge wraps round to the
+        // left of its near one and the box is stopped by nothing at all; held inside the
+        // coordinate space, it is still a box with a wall to its right.
+        for size in [32768u16, 32769, 40000, u16::MAX] {
+            let samples: Vec<i16> = edge(0, size).collect();
+            assert_eq!(samples.first(), Some(&0), "{size} lost its near edge");
+            assert!(
+                samples.windows(2).all(|p| p[1] > p[0]),
+                "{size} sampled backwards: {:?}..",
+                &samples[..samples.len().min(4)]
+            );
+        }
+
+        let wall = map(&[".#"]);
+        let (moved, contacts) = sized(0.0, 0.0, 40000, 8).resolve(Velocity::new(1.0, 0.0), wall);
+        assert_eq!(moved, Velocity::default(), "it walked through the wall");
+        assert!(contacts.right());
+    }
+
+    #[test]
+    fn a_box_over_the_origin_is_sampled_at_the_pixel_it_draws_on() {
+        // Half a pixel to the left of zero covers pixel -1, which floors to -1 and truncates to
+        // 0. Truncating puts the box a pixel to the right of where it is, and it is stopped by
+        // a wall it has not reached.
+        let wall = map(&["..#"]);
+        let body = Body::new(-0.5, 0.0);
+        let collider = MapCollider::new(&body, Bounds::of(&body, 9, 8), SpriteFlag::Flag0.into());
+        let (moved, contacts) = collider.unwrap().resolve(Velocity::default(), wall);
+        assert_eq!(moved, Velocity::default());
+        assert_eq!(
+            contacts,
+            Contacts::empty(),
+            "stopped by a wall two tiles off"
+        );
     }
 
     #[test]

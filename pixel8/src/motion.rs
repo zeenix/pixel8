@@ -59,7 +59,7 @@ fn fabs(v: f32) -> f32 {
 /// `floor(v)` as an `i16`, matching what the console does at draw time, without
 /// the `std`-only `f32::floor`. Positions on a 128x128 screen are tiny, so the
 /// saturating float-to-int cast never bites.
-fn floor_i16(v: f32) -> i16 {
+pub(crate) fn floor_i16(v: f32) -> i16 {
     let t = v as i16;
     if (t as f32) > v {
         t - 1
