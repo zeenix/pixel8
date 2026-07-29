@@ -733,6 +733,10 @@ fn write_guest_bytes(caller: &mut Caller<'_, HostState>, ptr: u32, bytes: &[u8])
     }
 }
 
+/// What the frame budget buys, pinned against the figures `docs/LIMITS.md` quotes.
+#[cfg(test)]
+mod fuel_costs;
+
 #[cfg(test)]
 mod tests {
     use super::*;
