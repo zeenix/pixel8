@@ -392,7 +392,9 @@ function frame(now) {
     ctx2d.putImageData(image, 0, 0);
   }
   pumpAudio();
-  requestAnimationFrame(frame);
+  // Keep rafId on the *pending* frame: pause and stop cancel by id, and a
+  // stale one leaves the cart ticking (and, after stop, ticking on nothing).
+  rafId = requestAnimationFrame(frame);
 }
 
 document.getElementById("boot").addEventListener("click", () => {
