@@ -30,9 +30,12 @@ ctx.fps()          // measured frames per second
 The two CPU meters count the cart's own work, not the console's: a screenful
 of `circle_fill` reads the same as a single pixel, because only the call is
 charged and not what it paints. That is usually what you want — it measures
-the thing you can actually optimize — but it does mean a cart that leans on
-the expensive draw calls can miss frames while the meters look relaxed.
-`fps()` is the honest number when that happens.
+the thing you can actually optimize — and the console keeps its own side in
+check by clipping each primitive to the screen before it draws, so a sprite
+blown up to 4096x4096 costs only the part you can see. Sheer volume is what
+the meters miss: a cart issuing tens of thousands of draw calls a frame can
+still drop below 60 while they look relaxed, and `fps()` is the honest number
+when that happens.
 
 If a frame genuinely can't fit the budget at 60 fps, a cart can opt into 30:
 
