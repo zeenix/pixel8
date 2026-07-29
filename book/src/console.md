@@ -133,9 +133,12 @@ are authored. `Space` plays the pattern.
 
 ## Running carts and the stats overlay
 
-While a game runs, `F1` toggles a live overlay of the resource meters: CPU
-budget used by `update` and `draw`, memory high-water, and measured fps. When
-your game grows, this is the first place to look — more on the budgets in
+While a game runs, `F1` toggles an overlay of the resource meters: CPU budget
+used by `update` and `draw`, memory high-water, and measured fps. The two CPU
+rows and the memory row refresh once a second, each showing that second's
+*peak* — the worst frame, not an average that would hide it — so the digits
+stay readable instead of churning sixty times a second. When your game grows,
+this is the first place to look — more on the budgets in
 [Living within the limits](limits.md).
 
 ## The headless CLI

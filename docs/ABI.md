@@ -56,7 +56,7 @@ cannot hang the console.
 | export             | signature   | called                                       |
 | ------------------ | ----------- | -------------------------------------------- |
 | `pixel8_fps`        | `() -> u32` | once, after `pixel8_init`                     |
-| `pixel8_mem_used`   | `() -> u32` | each frame, for the stats overlay            |
+| `pixel8_mem_used`   | `() -> u32` | once a second, for the stats overlay         |
 
 `pixel8_fps` reports the cart's logical frame rate. The SDK emits it from
 every cart; `30` and `60` are honored, and `60` is the default. A missing
@@ -65,11 +65,12 @@ omits it still runs.
 
 `pixel8_mem_used` reports the cart's committed-memory high-water in bytes — the
 highest its footprint (shadow-stack reserve + statics + heap) has ever reached.
-The host reads it for the F2 stats overlay. It never decreases (wasm never
-returns pages) and counts freed-but-stranded memory, so it tracks real pressure
-closely; it is still not an exact OOM line, since the allocator keeps a small
-reserve above the last allocation. Carts without the export (hand-written WAT
-or allocation-free) report 0.
+It never decreases (wasm never returns pages) and counts freed-but-stranded
+memory, so it tracks real pressure closely; it is still not an exact OOM line,
+since the allocator keeps a small reserve above the last allocation. The host
+reads it once a second for the F1 stats overlay — since the figure only ever
+ratchets up, that one reading is already the peak of the second it closes.
+Carts without the export (hand-written WAT or allocation-free) report 0.
 
 ## Host imports
 

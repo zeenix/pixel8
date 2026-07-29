@@ -17,8 +17,9 @@ a Pixel8 cart *a Pixel8 cart*.
 
 ## Watching the meters
 
-Press `F1` while a game runs to overlay live resource stats. The same
-numbers are available to the cart itself:
+Press `F1` while a game runs to overlay the resource stats. Its CPU and memory
+rows refresh once a second, each holding that second's peak; the cart can read
+the same numbers itself, live, per frame:
 
 ```rust
 ctx.cpu_update()   // 0.0..1.0 of last frame's update budget used
