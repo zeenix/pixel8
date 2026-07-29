@@ -67,6 +67,17 @@ impl Bounds {
         Self::new(x, y, width, height)
     }
 
+    /// The screen, as a rectangle.
+    ///
+    /// The limit most carts hold their entities inside — see
+    /// [`Kinetic::keep_within`](super::Kinetic::keep_within) — and what
+    /// [`on_screen`](Self::on_screen) is measured against. A cart with a level bigger than the
+    /// screen writes down the level instead; this knows nothing of a
+    /// [`camera`](crate::Graphics::camera).
+    pub const fn screen() -> Self {
+        Self::new(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT)
+    }
+
     /// The left edge: the first pixel column the rectangle covers.
     pub const fn x(&self) -> i16 {
         self.x
@@ -135,15 +146,11 @@ impl Bounds {
     /// gone. One that should not be allowed to leave is held there instead, by
     /// [`Kinetic::keep_within`](super::Kinetic::keep_within).
     ///
-    /// It means the first screenful of the world. A cart that scrolls with a
-    /// [`camera`](crate::Graphics::camera) is asking about somewhere else and should say so, with
-    /// [`overlaps`](Self::overlaps) against a rectangle of its own.
+    /// Measured against [`screen`](Self::screen), so it means the first screenful of the world.
+    /// A cart that scrolls with a [`camera`](crate::Graphics::camera) is asking about somewhere
+    /// else and should say so, with [`overlaps`](Self::overlaps) against a rectangle of its own.
     pub const fn on_screen(&self) -> bool {
-        !self.is_empty()
-            && self.right() > 0
-            && self.x < SCREEN_WIDTH as i16
-            && self.bottom() > 0
-            && self.y < SCREEN_HEIGHT as i16
+        self.overlaps(Self::screen())
     }
 }
 
@@ -274,6 +281,17 @@ mod tests {
         assert_eq!(Bounds::of(&body, 8, 8), sprite(11, 20));
     }
 
+    #[test]
+    fn the_screen_is_the_rectangle_everything_is_drawn_in() {
+        const PLAY_AREA: Bounds = Bounds::screen();
+        assert_eq!((PLAY_AREA.x(), PLAY_AREA.y()), (0, 0));
+        assert_eq!(
+            (PLAY_AREA.right(), PLAY_AREA.bottom()),
+            (SCREEN_WIDTH as i16, SCREEN_HEIGHT as i16)
+        );
+        assert!(PLAY_AREA.on_screen());
+    }
+
     /// Corners and sizes worth being suspicious of: both ends of the coordinate space, both
     /// sides of the origin and of the screen, nothing, everything, and the point where a size
     /// stops fitting in the signed coordinate it is added to.
@@ -317,11 +335,7 @@ mod tests {
                         }
 
                         // And two of them always agree about each other.
-                        for other in [
-                            sprite(0, 0),
-                            Bounds::new(y, x, 4, 4),
-                            Bounds::new(0, 0, 128, 128),
-                        ] {
+                        for other in [Bounds::screen(), sprite(0, 0), Bounds::new(y, x, 4, 4)] {
                             assert_eq!(
                                 bounds.overlaps(other),
                                 other.overlaps(bounds),

@@ -248,6 +248,12 @@
 //! hit it. An entity nothing on the map was ever going to stop — a bullet, a pickup — names no
 //! flag at all, and never troubles the map for it.
 //!
+//! The edge of the world is the last thing an entity runs into, and it is not a wall: nothing
+//! stops an entity walking straight off the map and falling for ever. [`Kinetic::keep_within`]
+//! holds one inside a rectangle — [`Bounds::screen`], or the level itself where that is the
+//! bigger of the two — putting it back against the edge and spending the speed that took it
+//! there, which is what a wall would have done.
+//!
 //! # Forces of your own
 //!
 //! A [`Force`] is one method, so a cart's own force fields — a current, a magnet, the drag of deep
