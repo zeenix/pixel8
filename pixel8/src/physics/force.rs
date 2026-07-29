@@ -168,6 +168,10 @@ impl Kinetic for Mob {
         &mut self.velocity
     }
 
+    fn bounds(&self) -> super::Bounds {
+        super::Bounds::of(&self.body, 8, 8)
+    }
+
     fn mass(&self) -> f32 {
         self.mass
     }

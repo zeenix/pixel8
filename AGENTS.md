@@ -59,8 +59,9 @@ The workspace excludes `examples/` (those are standalone wasm crates). Six membe
   allocation-free carts with `heapless`. Ready-made effects sit behind off-by-default
   features, one per family (`plume-effects` — `plume/`, particle fire, smoke
   and explosions, two of which are the campfire of `examples/campfire`;
-  `physics` — `physics/`, gravity, atmosphere, wind, map
-  collision and the `Force` trait carts write their own force fields against), and
+  `physics` — `physics/`, gravity, atmosphere, wind, collision
+  against the map and between entities, and the `Force` trait carts write their
+  own force fields against), and
   `plume-effects` is the only one
   that pulls a dependency (`heapless`) into a cart. Each family stays in its own
   module rather than being re-exported at the root, so a cart's `use pixel8::*` never

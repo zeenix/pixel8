@@ -12,19 +12,18 @@ pub const BADIE_SPEED: f32 = 0.5;
 pub const HERO_SPRITE: SpriteId = SpriteId(1);
 pub const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
 pub const HERO_HAPPY_SPRITE: SpriteId = SpriteId(5);
-pub const HERO_WIDTH: i16 = 8;
-pub const HERO_HEIGHT: i16 = 7;
-// The square the hero hits walls with: one sprite's worth, unlike the height above,
-// which is the slightly forgiving box the badie is judged against.
-pub const HERO_HITBOX: u16 = 8;
+// One sprite's worth, which is the only rectangle the hero has: the walls stop it and
+// the badie is judged against it.
+pub const HERO_WIDTH: u16 = 8;
+pub const HERO_HEIGHT: u16 = 8;
 
 pub const BADIE_SPRITE: SpriteId = SpriteId(6);
 pub const BADIE_ALT_SPRITE: SpriteId = SpriteId(7);
 pub const BADIE_START_X: f32 = (SCREEN_WIDTH * 2 - 16) as f32;
 pub const BADIE_END_X: f32 = (SCREEN_WIDTH * 2 - 8 * 8) as f32;
 pub const BADIE_Y: f32 = (SCREEN_HEIGHT - 3 * 8) as f32;
-pub const BADIE_WIDTH: i16 = 8;
-pub const BADIE_HEIGHT: i16 = 7;
+pub const BADIE_WIDTH: u16 = 8;
+pub const BADIE_HEIGHT: u16 = 7;
 
 pub const COIN_SPRITE: SpriteId = SpriteId(3);
 pub const TROPHY_SPRITE: SpriteId = SpriteId(4);

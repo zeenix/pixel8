@@ -1,19 +1,19 @@
 //! The entity forces act on, and the one call that moves it.
 
-use super::{collide::Contacts, Collider, Force, Velocity};
-use crate::{Body, Context};
+use super::{map::MapCollider, Bounds, Contacts, Force, Velocity};
+use crate::{BitFlags, Body, Context, SpriteFlag};
 
 /// An entity a [`Force`] can push: a [`Body`] and the [`Velocity`] it travels at.
 ///
-/// Implementing it is three accessors, and it is what lets one gravity or wind be applied to a
-/// whole cast of entities that otherwise have nothing in common. Everything past those three is
-/// optional and describes the entity: what it weighs, and what shape it is when it hits a wall.
+/// Implementing it is three accessors and a rectangle, and it is what lets one gravity or wind be
+/// applied to a whole cast of entities that otherwise have nothing in common. Everything past
+/// those is optional and describes the entity: what it weighs, and what stops it on the map.
 ///
 /// [`step`](Self::step) is what a cart calls each update, handing over the forces of the moment;
 /// it is the only thing here that moves anything.
 ///
 /// ```no_run
-/// # use pixel8::{physics::{Gravity, Kinetic, Velocity}, *};
+/// # use pixel8::{physics::{Bounds, Gravity, Kinetic, Velocity}, *};
 /// struct Crate {
 ///     body: Body,
 ///     velocity: Velocity,
@@ -32,6 +32,10 @@ use crate::{Body, Context};
 ///         &mut self.velocity
 ///     }
 ///
+///     fn bounds(&self) -> Bounds {
+///         Bounds::of(&self.body, 8, 8)
+///     }
+///
 ///     // A crate is heavy: the wind hardly shifts it, and it still falls like everything else.
 ///     fn mass(&self) -> f32 {
 ///         6.0
@@ -48,7 +52,7 @@ pub trait Kinetic: dynamic::AsKinetic {
     /// Where the entity is: the body it is drawn from and collides with.
     ///
     /// [`Game::draw`](crate::Game::draw) is handed a `&self`, so this is the one a cart reads
-    /// there, and the one an entity is measured by when it is asked what it covers.
+    /// there.
     fn body(&self) -> &Body;
 
     /// The same body, for the one thing that moves it.
@@ -56,6 +60,26 @@ pub trait Kinetic: dynamic::AsKinetic {
 
     /// The velocity forces act on.
     fn velocity_mut(&mut self) -> &mut Velocity;
+
+    /// The rectangle the entity covers, in the coordinates its [`Body`] is in.
+    ///
+    /// The one rectangle an entity has, and everything about where it *is* rather than what is
+    /// pushing it goes through it: [`overlaps`](Self::overlaps) against another rectangle,
+    /// [`Bounds::on_screen`] for the one that has left the screen altogether, and the tiles
+    /// [`step`](Self::step) stops it at. [`Bounds::of`] is the whole of the usual answer, and a
+    /// rectangle offset from the body — a hurtbox narrower than the sprite — is stopped where
+    /// the entity put it.
+    ///
+    /// ```no_run
+    /// # use pixel8::{physics::{Bounds, Kinetic}, Body};
+    /// # struct Hero { body: Body }
+    /// # impl Hero {
+    /// fn bounds(&self) -> Bounds {
+    ///     Bounds::of(&self.body, 8, 8)
+    /// }
+    /// # }
+    /// ```
+    fn bounds(&self) -> Bounds;
 
     /// How hard the entity is to push, relative to everything else in the scene.
     ///
@@ -72,31 +96,52 @@ pub trait Kinetic: dynamic::AsKinetic {
         1.0
     }
 
-    /// The solid rectangle the entity occupies, if it collides with the map at all.
+    /// Which sprite flags mean *wall* to this entity.
     ///
-    /// `None` — the default — is an entity that goes wherever its velocity takes it: a particle, a
-    /// bird, a bullet the cart checks itself. Anything that has to stop at walls returns a
-    /// [`Collider`], and [`step`](Self::step) resolves the map for it.
+    /// Empty — the default — is an entity no tile is ever in the way of: a bullet, a bird,
+    /// anything a cart checks against other entities and not against the level. Name a flag and
+    /// [`step`](Self::step) stops the entity at every tile carrying it, over the rectangle
+    /// [`bounds`](Self::bounds) gives. It is the same flag the cart already marks its walls with
+    /// for [`Graphics::map`](crate::Graphics::map).
+    ///
+    /// Any flag in common is enough, so one map can carry a cart's walls, its water and its
+    /// ladders on flags of their own and each entity stop at the ones that concern it.
     ///
     /// ```no_run
-    /// # use pixel8::{physics::Collider, SpriteFlag};
+    /// # use pixel8::{BitFlags, SpriteFlag};
     /// # const SOLID: SpriteFlag = SpriteFlag::Flag0;
     /// # struct Hero;
     /// # impl Hero {
-    /// fn collider(&self) -> Option<Collider> {
-    ///     Collider::new(8, 8, SOLID).ok()
+    /// fn solid(&self) -> BitFlags<SpriteFlag> {
+    ///     SOLID.into()
     /// }
     /// # }
     /// ```
-    fn collider(&self) -> Option<Collider> {
-        None
+    fn solid(&self) -> BitFlags<SpriteFlag> {
+        BitFlags::empty()
+    }
+
+    /// Whether the entity is on any of the same pixels as `other`.
+    ///
+    /// A rectangle rather than another entity, so the thing collided with does not have to be one:
+    /// a patrolling sprite nothing pushes, a door, a trigger the level puts down once and never
+    /// moves. See the [module docs](super#collision).
+    ///
+    /// ```no_run
+    /// # use pixel8::physics::{Bounds, Kinetic};
+    /// # fn f(bullet: &dyn Kinetic, enemies: &[Bounds]) -> bool {
+    /// enemies.iter().any(|enemy| bullet.overlaps(*enemy))
+    /// # }
+    /// ```
+    fn overlaps(&self, other: Bounds) -> bool {
+        self.bounds().overlaps(other)
     }
 
     /// Moves the entity one update: the `forces` acting on it, then the map, then the body.
     ///
-    /// In order: every force in `forces` bends the velocity, in slice order; a
-    /// [`collider`](Self::collider) — if there is one — has whatever ran into a wall taken out of
-    /// it, on each axis separately; the velocity that survives is stored back on the entity and
+    /// In order: every force in `forces` bends the velocity, in slice order; whatever ran the
+    /// entity's [`bounds`](Self::bounds) into a tile it calls [`solid`](Self::solid) is taken out
+    /// of it, on each axis separately; the velocity that survives is stored back on the entity and
     /// the [`Body`] is moved by it. What comes back is the sides that were touched, which is where
     /// a platformer reads its *grounded* from:
     ///
@@ -127,18 +172,16 @@ pub trait Kinetic: dynamic::AsKinetic {
         // `Velocity` is `Copy`, so this reads out what the forces left behind without holding a
         // borrow of the entity over the resolution below.
         let mut velocity = *self.velocity_mut();
-        let contacts = match self.collider() {
-            Some(collider) => {
-                let position = self.body_mut().pos();
-                let (survived, contacts) = collider.resolve(position, velocity, |x, y| {
-                    ctx.map_tile(x, y)
-                        .is_some_and(|tile| collider.stops_at(ctx.sprite_flags(tile)))
-                });
-                velocity = survived;
-                contacts
-            }
-            None => Contacts::empty(),
-        };
+        let mut contacts = Contacts::empty();
+        // Nothing is built for an entity that named no walls, so the map is never asked about it.
+        if let Some(collider) = MapCollider::new(self.body(), self.bounds(), self.solid()) {
+            let (survived, touched) = collider.resolve(velocity, |x, y| {
+                ctx.map_tile(x, y)
+                    .is_some_and(|tile| collider.stops_at(ctx.sprite_flags(tile)))
+            });
+            velocity = survived;
+            contacts = touched;
+        }
 
         *self.velocity_mut() = velocity;
         self.body_mut().move_by(velocity.dx, velocity.dy);
@@ -181,8 +224,8 @@ mod tests {
 
     #[test]
     fn an_entity_weighs_one_and_collides_with_nothing_unless_it_says_otherwise() {
-        /// A [`Kinetic`] that implements only the three accessors it has to — the shape of every
-        /// entity in a cart that has never heard of mass.
+        /// A [`Kinetic`] that implements only what it has to — the shape of every entity in a
+        /// cart that has never heard of mass.
         struct Pebble {
             body: Body,
             velocity: Velocity,
@@ -200,6 +243,10 @@ mod tests {
             fn velocity_mut(&mut self) -> &mut Velocity {
                 &mut self.velocity
             }
+
+            fn bounds(&self) -> Bounds {
+                Bounds::of(&self.body, 1, 1)
+            }
         }
 
         let ctx = Context { _private: () };
@@ -208,7 +255,7 @@ mod tests {
             velocity: Velocity::new(1.0, 0.5),
         };
         assert_eq!(pebble.mass(), 1.0);
-        assert_eq!(pebble.collider(), None);
+        assert!(pebble.solid().is_empty());
 
         // Handed nothing and with nothing in its way, a step is exactly its velocity.
         assert_eq!(pebble.step(&ctx, &[]), Contacts::empty());
@@ -320,50 +367,50 @@ mod tests {
     }
 
     #[test]
-    fn a_collider_less_entity_steps_straight_through_everything() {
-        // With no collider there is no map lookup at all, which is what keeps a particle cheap.
+    fn an_entity_stopped_by_nothing_steps_straight_through_everything() {
+        // Naming no solid flag is the default, and it is what keeps a particle cheap: there is no
+        // map lookup at all.
         let ctx = Context { _private: () };
         let mut mob = Mob::moving(-4.0, 4.0);
+        assert!(mob.solid().is_empty());
         assert_eq!(mob.step(&ctx, &[]), Contacts::empty());
         assert_eq!(mob.body.pos(), (-4.0, 4.0));
     }
 
     #[test]
-    fn an_entity_with_a_collider_asks_the_map() {
-        /// One that does have walls to answer to. The native map is empty — every tile reads as
-        /// sprite 0 with no flags — so nothing stops it here; what the resolution does when
-        /// something *is* in the way is tested against a written-down map in `collide`.
-        struct Walker {
-            body: Body,
-            velocity: Velocity,
-        }
-
-        impl Kinetic for Walker {
-            fn body(&self) -> &Body {
-                &self.body
-            }
-
-            fn body_mut(&mut self) -> &mut Body {
-                &mut self.body
-            }
-
-            fn velocity_mut(&mut self) -> &mut Velocity {
-                &mut self.velocity
-            }
-
-            fn collider(&self) -> Option<Collider> {
-                Collider::new(8, 8, SpriteFlag::Flag0).ok()
-            }
-        }
-
+    fn an_entity_with_walls_to_answer_to_asks_the_map() {
         let ctx = Context { _private: () };
-        let mut walker = Walker {
-            body: Body::new(16.0, 16.0),
-            velocity: Velocity::new(0.5, 1.0),
-        };
-        assert_eq!(walker.collider().unwrap().width(), 8);
+        let mut walker = Walker::at(16.0, 16.0);
+        walker.velocity = Velocity::new(0.5, 1.0);
+        assert!(walker.solid().contains(SpriteFlag::Flag0));
+        // Nothing is in the way on the empty native map, so the step is exactly the velocity.
         assert_eq!(walker.step(&ctx, &[]), Contacts::empty());
         assert_eq!(walker.body.pos(), (16.5, 17.0));
+    }
+
+    #[test]
+    fn an_entity_covers_the_rectangle_it_says_it_does() {
+        let walker = Walker::at(16.0, 16.0);
+        let bounds = walker.bounds();
+        assert_eq!((bounds.x(), bounds.y()), (16, 16));
+        assert_eq!((bounds.width(), bounds.height()), (8, 8));
+    }
+
+    #[test]
+    fn an_entity_overlaps_the_rectangles_it_shares_a_pixel_with() {
+        let walker = Walker::at(16.0, 16.0);
+        assert!(walker.overlaps(Walker::at(20.0, 20.0).bounds()));
+        assert!(walker.overlaps(Walker::at(16.0, 23.0).bounds()));
+
+        // A shared edge is not an overlap, on either axis.
+        assert!(!walker.overlaps(Walker::at(24.0, 16.0).bounds()));
+        assert!(!walker.overlaps(Walker::at(16.0, 24.0).bounds()));
+
+        // The other party is a rectangle and need not be an entity at all — a door, a trigger,
+        // a patrolling sprite nothing pushes. A tall one catches the walker its own width away.
+        let door = Bounds::new(20, 0, 4, 64);
+        assert!(walker.overlaps(door));
+        assert!(!Walker::at(0.0, 16.0).overlaps(door));
     }
 
     #[test]
@@ -380,5 +427,45 @@ mod tests {
         // And read back through a shared one, which is all a cart's `draw` is handed.
         let entity: &dyn Kinetic = &mob;
         assert_eq!(entity.body().pos(), (1.0, Gravity::DEFAULT_STRENGTH));
+    }
+
+    /// An entity that does have walls to answer to. The native map is empty — every tile reads as
+    /// sprite 0 with no flags — so nothing stops it here; what the resolution does when something
+    /// *is* in the way is tested against a written-down map in `map`.
+    struct Walker {
+        body: Body,
+        velocity: Velocity,
+    }
+
+    impl Walker {
+        /// One standing still at a pixel position.
+        fn at(x: f32, y: f32) -> Self {
+            Self {
+                body: Body::new(x, y),
+                velocity: Velocity::default(),
+            }
+        }
+    }
+
+    impl Kinetic for Walker {
+        fn body(&self) -> &Body {
+            &self.body
+        }
+
+        fn body_mut(&mut self) -> &mut Body {
+            &mut self.body
+        }
+
+        fn velocity_mut(&mut self) -> &mut Velocity {
+            &mut self.velocity
+        }
+
+        fn bounds(&self) -> Bounds {
+            Bounds::of(&self.body, 8, 8)
+        }
+
+        fn solid(&self) -> BitFlags<SpriteFlag> {
+            SpriteFlag::Flag0.into()
+        }
     }
 }

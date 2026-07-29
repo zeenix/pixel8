@@ -26,7 +26,7 @@
 //!
 //! ```no_run
 //! use pixel8::{
-//!     physics::{Atmosphere, Gravity, Kinetic, Velocity, Wind},
+//!     physics::{Atmosphere, Bounds, Gravity, Kinetic, Velocity, Wind},
 //!     *,
 //! };
 //!
@@ -46,6 +46,10 @@
 //!
 //!     fn velocity_mut(&mut self) -> &mut Velocity {
 //!         &mut self.velocity
+//!     }
+//!
+//!     fn bounds(&self) -> Bounds {
+//!         Bounds::of(&self.body, 4, 4)
 //!     }
 //!
 //!     // A leaf weighs next to nothing, so the wind has three times the grip on it — and the
@@ -155,17 +159,38 @@
 //!
 //! # Collision
 //!
-//! An entity that gives itself a [`Collider`] stops at the map instead of drifting through it.
-//! The collider is the rectangle it occupies — anchored where its sprite draws, at the body's
-//! top-left — and the sprite flags that mean *solid* to it, which is the same flag a cart already
-//! marks its walls with for [`Graphics::map`](crate::Graphics::map).
+//! Every entity says what rectangle it covers — [`Kinetic::bounds`] — and that is what the cart's
+//! own collisions are judged against: [`Kinetic::overlaps`] for one entity against another, and
+//! [`Bounds::on_screen`] for one that has left the screen altogether.
+//!
+//! ```no_run
+//! # use pixel8::physics::{Bounds, Kinetic};
+//! /// A bullet against everything it might have hit — and nothing at all once it is off screen.
+//! fn hit(bullet: &dyn Kinetic, enemies: &[Bounds]) -> bool {
+//!     if !bullet.bounds().on_screen() {
+//!         return false;
+//!     }
+//!
+//!     enemies.iter().any(|enemy| bullet.overlaps(*enemy))
+//! }
+//! ```
+//!
+//! A rectangle is all [`Kinetic::overlaps`] wants of the other party, so the thing collided with
+//! need not be an entity at all: a door, a trigger, a patrolling sprite nothing ever pushes.
+//! Which pairs are worth asking about is the cart's: it is the one that knows a bullet has no
+//! quarrel with another bullet, and what a hit costs each of the two.
+//!
+//! The map is the other thing an entity can run into, and that one is opt-in. An entity that names
+//! a sprite flag in [`Kinetic::solid`] stops at the level instead of drifting through it: every
+//! tile carrying that flag is a wall to it, over the same rectangle it covers everywhere else. It
+//! is the flag a cart already marks its walls with for [`Graphics::map`](crate::Graphics::map).
 //!
 //! [`Kinetic::step`] then resolves one axis at a time and hands back a [`Contacts`]: which sides
 //! ran into something this update. [`below`](Contacts::below) is what a platformer calls
 //! *grounded*.
 //!
 //! ```no_run
-//! # use pixel8::{physics::{Collider, Gravity, Kinetic, Velocity}, *};
+//! # use pixel8::{physics::{Bounds, Gravity, Kinetic, Velocity}, *};
 //! /// Walls and floors are whatever the cart flagged as such in the sprite editor.
 //! const SOLID: SpriteFlag = SpriteFlag::Flag0;
 //! /// The level's pull. Nothing gusts here, so it is a constant.
@@ -190,9 +215,14 @@
 //!         &mut self.velocity
 //!     }
 //!
-//!     // One sprite's worth of hitbox, stopping at anything flagged solid.
-//!     fn collider(&self) -> Option<Collider> {
-//!         Collider::new(8, 8, SOLID).ok()
+//!     // One sprite's worth: what a wall stops, and what everything else judges it by.
+//!     fn bounds(&self) -> Bounds {
+//!         Bounds::of(&self.body, 8, 8)
+//!     }
+//!
+//!     // And the tiles that are walls to it.
+//!     fn solid(&self) -> BitFlags<SpriteFlag> {
+//!         SOLID.into()
 //!     }
 //! }
 //!
@@ -213,6 +243,10 @@
 //!     }
 //! }
 //! ```
+//!
+//! One rectangle does both jobs, so a wall stops an entity exactly where another entity would have
+//! hit it. An entity nothing on the map was ever going to stop — a bullet, a pickup — names no
+//! flag at all, and never troubles the map for it.
 //!
 //! # Forces of your own
 //!
@@ -253,15 +287,18 @@
 //! not in how it looks.
 
 mod atmosphere;
-mod collide;
+mod bounds;
+mod contact;
 mod force;
 mod gravity;
 mod kinetic;
+mod map;
 mod velocity;
 mod wind;
 
 pub use atmosphere::Atmosphere;
-pub use collide::{Collider, Contact, Contacts};
+pub use bounds::Bounds;
+pub use contact::{Contact, Contacts};
 pub use force::Force;
 pub use gravity::Gravity;
 pub use kinetic::Kinetic;

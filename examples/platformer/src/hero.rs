@@ -1,12 +1,12 @@
 use pixel8::{
-    physics::{Collider, Gravity, Kinetic, Velocity},
-    Body, Button, Context, Graphics, SpriteId, SCREEN_WIDTH,
+    physics::{Bounds, Gravity, Kinetic, Velocity},
+    BitFlags, Body, Button, Context, Graphics, SpriteFlag, SpriteId, SCREEN_WIDTH,
 };
 
 use crate::{
     constants::{
-        COIN_SFX, COIN_SPRITE, HERO_HAPPY_SPRITE, HERO_HITBOX, HERO_LEGS_EXTEND_SPRITE, HERO_SPEED,
-        HERO_SPRITE, JUMP_SFX, SOLID, TROPHY_SPRITE,
+        COIN_SFX, COIN_SPRITE, HERO_HAPPY_SPRITE, HERO_HEIGHT, HERO_LEGS_EXTEND_SPRITE, HERO_SPEED,
+        HERO_SPRITE, HERO_WIDTH, JUMP_SFX, SOLID, TROPHY_SPRITE,
     },
     GameMode, Taken,
 };
@@ -60,8 +60,8 @@ impl Hero {
             self.jump(ctx);
         }
 
-        // One call moves the hero: the pull it is handed, the tiles its collider stops
-        // at, and the body moved by what survives — diagonals included, so a running
+        // One call moves the hero: the pull it is handed, the tiles it calls solid,
+        // and the body moved by what survives — diagonals included, so a running
         // jump climbs a clean staircase. The fall the pull builds up is capped by the
         // gravity's terminal velocity, without which a long drop would clear a whole
         // tile in one update and land inside the floor.
@@ -154,8 +154,12 @@ impl Kinetic for Hero {
         &mut self.velocity
     }
 
-    fn collider(&self) -> Option<Collider> {
-        // One sprite's worth of hitbox, stopping at the tiles the level flags solid.
-        Collider::new(HERO_HITBOX, HERO_HITBOX, SOLID).ok()
+    // One sprite's worth: what the walls stop, and what the badie is judged against.
+    fn bounds(&self) -> Bounds {
+        Bounds::of(&self.body, HERO_WIDTH, HERO_HEIGHT)
+    }
+
+    fn solid(&self) -> BitFlags<SpriteFlag> {
+        SOLID.into()
     }
 }

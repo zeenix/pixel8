@@ -110,8 +110,8 @@ impl Platformer {
 
         // Check for collision between our hero and the badie, and decide who dies if there is one.
         if let Some(badie) = &mut self.badie {
-            if self.hero.draw_x() + HERO_WIDTH >= badie.draw_x()
-                && self.hero.draw_x() < badie.draw_x() + BADIE_WIDTH
+            if self.hero.draw_x() + HERO_WIDTH as i16 >= badie.draw_x()
+                && self.hero.draw_x() < badie.draw_x() + BADIE_WIDTH as i16
             {
                 if self.hero.draw_y() == badie.draw_y() {
                     // Hero ramming into badie horizontally is a suicide.
@@ -119,8 +119,8 @@ impl Platformer {
                     self.game_over(ctx);
 
                     return;
-                } else if self.hero.draw_y() + HERO_HEIGHT >= badie.draw_y()
-                    && self.hero.draw_y() < badie.draw_y() + BADIE_HEIGHT
+                } else if self.hero.draw_y() + HERO_HEIGHT as i16 >= badie.draw_y()
+                    && self.hero.draw_y() < badie.draw_y() + BADIE_HEIGHT as i16
                 {
                     // Hero hitting the badie from the top, kills the badie and gives hero a boost.
                     self.badie = None;
