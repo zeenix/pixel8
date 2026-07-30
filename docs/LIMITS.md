@@ -56,17 +56,26 @@ not carefully written games.
 What the budget counts is the cart's own work. The console's side of a draw
 call is not charged: `circle_fill` costs the same whether it paints one pixel
 or twelve thousand, and drawing the whole tilemap costs the same as drawing
-one tile. Only the call itself is billed, at roughly a tenth of a percent of
-the budget — a price set by the number of arguments, not the pixels touched —
-so a single `draw` gets on the order of a thousand draw calls however much
-each one paints.
+one tile. Only the call itself is billed, and at a flat one unit of the
+128 K — the same price whether it takes ten arguments or none. What actually
+sets the ceiling is the cart-side code around each call, so a `draw` written
+in normal Rust fits something like ten thousand of them, and a tight loop
+that does nothing else roughly thirty thousand.
 
-The meter is therefore not a measure of how hard the console is working. That
-rarely matters, because most draw calls are cheap enough that a thousand of
-them still fit a frame comfortably. The exception is `sprite_stretch` scaling
-a sprite up, which is expensive per call: a cart leaning on it can cost the
-console a frame's worth of real time while `cpu_draw` still reads relaxed.
-Watch `fps` rather than `cpu_draw` when a cart draws that heavily.
+The meter is therefore not a measure of how hard the console is working. It
+measures the thing you can do something about — your own code — while the
+console keeps its own side in check by clipping each primitive's sweep to the
+screen before it starts. Asking `sprite_stretch` to blow an 8x8 sprite up to
+4096x4096, or `map` for a hundred thousand cels, costs no more than the
+128x128 that can actually be seen, and a line or a circle is walked across the
+part of it the screen can show rather than end to end.
+
+There are two things the meter still cannot see. One is sheer call volume: a
+cart issuing draw calls by the tens of thousands can miss frames while
+`cpu_draw` reads relaxed. The other is a circle whose radius runs to the
+billions — the arc is walked near the screen rather than all the way round,
+but the walk is still long enough that a handful of such calls costs a frame.
+Watch `fps` rather than `cpu_draw` when a cart does either.
 
 ## Save data — 128 KiB
 

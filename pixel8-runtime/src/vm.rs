@@ -77,6 +77,18 @@ impl GameVm {
 
         let mut config = Config::default();
         config.consume_fuel(true);
+        // Translate every function body up front. wasmi's default lazy mode defers
+        // translation to a function's first call and bills it to whatever fuel budget
+        // happens to be armed then — so the cart pays for the console's compiler out of
+        // its frame budget, frame 0 spikes, and a function body over ~18 KiB can never
+        // be entered at all (it exhausts the budget before executing an instruction, and
+        // surfaces as the bogus "ran too long (infinite loop?)" screen). Eager
+        // translation happens in `Module::new` below, which has no store and so is not
+        // fuel-metered. That moves the cost to load time, where it is bounded by the
+        // 128 K cart-size cap: a module filling that cap translates in about a
+        // millisecond in a release build, well inside one frame, so there is nothing
+        // here for a hostile cart to stretch.
+        config.compilation_mode(wasmi::CompilationMode::Eager);
         let engine = Engine::new(&config);
         let module = Module::new(&engine, wasm).map_err(|e| anyhow!("Invalid cart wasm: {e}"))?;
 
@@ -721,6 +733,10 @@ fn write_guest_bytes(caller: &mut Caller<'_, HostState>, ptr: u32, bytes: &[u8])
     }
 }
 
+/// What the frame budget buys, pinned against the figures `docs/LIMITS.md` quotes.
+#[cfg(test)]
+mod fuel_costs;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -874,6 +890,22 @@ mod tests {
             (drop (call $fps))))
     "#;
 
+    /// A cart whose `pixel8_update` body is `reps` copies of a counter bump: a knob
+    /// for the size of a function body in BYTES, which is what the lazy translator
+    /// bills for. The bump survives translation — a folded-away no-op would leave
+    /// the body costing nothing to run and the tests below measuring nothing — while
+    /// staying far cheaper per byte than the 7 fuel translating it would cost.
+    fn bulky_update_cart(reps: usize) -> String {
+        let body = "(global.set $n (i32.add (global.get $n) (i32.const 1)))".repeat(reps);
+        format!(
+            r#"(module
+                 (global $n (mut i32) (i32.const 0))
+                 (func (export "pixel8_init"))
+                 (func (export "pixel8_update") {body})
+                 (func (export "pixel8_draw")))"#
+        )
+    }
+
     fn load_test_vm(wat_src: &str) -> Result<GameVm> {
         let wasm = wat::parse_str(wat_src).unwrap();
         GameVm::load(
@@ -995,6 +1027,102 @@ mod tests {
         let mut vm = load_test_vm(BUDGET_OVER_CART).unwrap();
         let err = vm.call_update().unwrap_err();
         assert!(err.message.contains("ran too long"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn oversized_function_body_still_runs() {
+        // Lazy translation bills 7 fuel per byte of a function body the first time
+        // it is entered, so any body over 131_072 / 7 = 18_724 bytes could never be
+        // called: it burned the whole budget before executing an instruction and
+        // surfaced as "ran too long". This body is ~84 KB — 588 K fuel to translate,
+        // four and a half frame budgets — but only 36 K fuel to run, so with
+        // translation off the meter it fits with room to spare.
+        let mut vm = load_test_vm(&bulky_update_cart(12_000)).unwrap();
+        assert!(
+            vm.call_update().is_ok(),
+            "an 84 KB function body must be callable, not billed as a runaway loop"
+        );
+        // Three fuel a repetition, so this also says the body was entered and run
+        // rather than merely not trapping.
+        let spent = vm.cpu_update() * FUEL_PER_CALL as f32;
+        assert!(
+            spent > 12_000.0,
+            "all 12 K repetitions should have run, but the frame cost {spent} fuel"
+        );
+    }
+
+    #[test]
+    fn first_frame_costs_the_same_as_later_frames() {
+        // A ~10 KB update body costs 4.2 K fuel to run but 69 K — over half the frame
+        // budget — to translate at the lazy 7 fuel a byte, and lazily that charge
+        // landed on whichever frame called it first. Translation now happens in
+        // `Module::new`, off the meter, so frame 0 costs what every frame after it
+        // does.
+        let mut vm = load_test_vm(&bulky_update_cart(1_400)).unwrap();
+        vm.call_update().unwrap();
+        let first = vm.cpu_update();
+        vm.call_update().unwrap();
+        let steady = vm.cpu_update();
+        assert!(steady > 0.0, "the frame has to cost something to compare");
+        assert!(
+            (first - steady).abs() < 1e-6,
+            "frame 0 used {first} of the budget against a steady state of {steady}"
+        );
+    }
+
+    #[test]
+    fn eager_translation_of_a_cart_sized_module_is_quick() {
+        // Eager translation moves the compiler off the frame budget and onto load,
+        // which is only a good trade if load stays quick. A cart's wasm is capped at
+        // 128 KiB, and translating a body that size measures in the low milliseconds
+        // — the deadline here is three orders of magnitude above that, so it catches
+        // a pathological translator without flaking on a loaded machine.
+        let wasm = wat::parse_str(bulky_update_cart(128 * 1024 / 7).as_str()).unwrap();
+        assert!(wasm.len() >= 128 * 1024, "the probe fills the cart cap");
+        let started = std::time::Instant::now();
+        let vm = GameVm::load(
+            &wasm,
+            &Assets::default(),
+            AudioHandle::dummy(),
+            Storage::default(),
+        );
+        let elapsed = started.elapsed();
+        assert!(vm.is_ok(), "a cart-sized module must load");
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "translating a cart-sized module took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn bad_cart_bytes_are_a_friendly_load_error() {
+        // `Module::new` is where a cart's wasm is checked and, now that translation
+        // is eager, where its function bodies are compiled as well. Whichever stage
+        // rejects the bytes, the user gets one sentence rather than wasmi internals.
+        let valid = wat::parse_str(TEST_CART).unwrap();
+        let cases = [
+            ("not wasm at all", b"definitely not a wasm module".to_vec()),
+            ("a module cut in half", valid[..valid.len() / 2].to_vec()),
+            (
+                "a module missing its last byte",
+                valid[..valid.len() - 1].to_vec(),
+            ),
+        ];
+        for (name, bytes) in cases {
+            let err = match GameVm::load(
+                &bytes,
+                &Assets::default(),
+                AudioHandle::dummy(),
+                Storage::default(),
+            ) {
+                Err(e) => e,
+                Ok(_) => panic!("{name} should not load"),
+            };
+            assert!(
+                err.to_string().contains("Invalid cart wasm"),
+                "{name}: got {err}"
+            );
+        }
     }
 
     #[test]

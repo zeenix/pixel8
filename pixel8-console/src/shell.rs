@@ -210,14 +210,14 @@ fn fps_color(measured: f32, target: u32) -> u8 {
     }
 }
 
-/// Draw the resource-usage overlay in the top-right: CPU (update and draw),
-/// memory and measured fps, color-coded by how close each is to its budget.
-/// `used` is the cart's committed-memory high-water in bytes; it shows as KB
-/// and as a fraction of the 128 K cap (see `GameVm::mem_used_bytes`). Columns
-/// are aligned: the memory KB sits under the per-call CPU labels and every
-/// percentage lines up. A solid black panel keeps it legible over any cart
-/// output; it draws in screen space and accepts whatever camera the cart left
-/// active (carts reset it each draw).
+/// Draw the resource-usage overlay in the top-right: CPU (update and draw), memory and measured
+/// fps, color-coded by how close each is to its budget. The CPU fractions and `used` are the
+/// once-a-second peaks `StatsMeter` publishes rather than this frame's readings, so the digits
+/// hold still long enough to read. `used` is the cart's committed-memory high-water in bytes; it
+/// shows as KB and as a fraction of the 128 K cap (see `GameVm::mem_used_bytes`). Columns are
+/// aligned: the memory KB sits under the per-call CPU labels and every percentage lines up. A
+/// solid black panel keeps it legible over any cart output; it draws in screen space and accepts
+/// whatever camera the cart left active (carts reset it each draw).
 fn stats_overlay(fb: &mut Framebuffer, cpu_u: f32, cpu_d: f32, used: u32, fps: f32, target: u32) {
     let used_frac = used as f32 / 131_072.0;
     let lines = [
@@ -241,6 +241,108 @@ fn stats_overlay(fb: &mut Framebuffer, cpu_u: f32, cpu_d: f32, used: u32, fps: f
     fb.rectfill(x0, 0, 127, 4 * 7, col::BLACK);
     for (i, (line, &color)) in lines.iter().zip(colors.iter()).enumerate() {
         fb.print(line, x0 + 1, 1 + i as i32 * 7, color);
+    }
+}
+
+/// How long a reading stays on screen before the next window's peak replaces it.
+const STATS_WINDOW: Duration = Duration::from_secs(1);
+
+/// A one-second tumbling peak of the cart's CPU and memory usage, feeding the F1 overlay.
+///
+/// `GameVm::cpu_update`/`cpu_draw` report the fuel spent by the *last completed* call, which is
+/// exactly what a cart wants but changes every single frame: fed straight into the overlay it
+/// churns so hard that the digit left of the decimal point is unreadable. So the meter keeps the
+/// worst sample of the window it is accumulating and publishes that when the window closes,
+/// leaving the displayed numbers still for the whole second in between. The peak and not the mean
+/// because the frame an author is hunting for is the one that blows the budget, and a mean buries
+/// it among its well-behaved neighbours.
+///
+/// Memory rides the same beat but is deliberately *not* sampled per frame. `GameVm::mem_used_bytes`
+/// is a call into the cart's `pixel8_mem_used` export under its own fuel budget, and the figure it
+/// returns is a high-water mark that only ever ratchets up. The reading taken as the window closes
+/// is therefore already that window's peak, and polling it every frame would spend a wasm call per
+/// frame to learn nothing. So `sample` takes a closure over the VM instead of a figure, and calls
+/// it only on the frame that closes a window — the once-a-second read is then impossible to forget
+/// and impossible to do twice.
+///
+/// The first sample after a reset publishes immediately, so the overlay reads true the moment F1
+/// turns it on rather than showing zeros until the first window closes; that sample stands for
+/// itself alone and the window it opens starts empty.
+#[derive(Debug)]
+struct StatsMeter {
+    /// When the window being accumulated started.
+    t0: Instant,
+    /// The worst fuel fractions seen so far in that window.
+    peak_update: f32,
+    peak_draw: f32,
+    /// The peaks published by the last closed window, held until the next one closes. `None` until
+    /// the first sample arrives, which publishes itself.
+    published: Option<(f32, f32)>,
+    /// The memory high-water read as the last window closed, in bytes.
+    mem_used: u32,
+}
+
+impl StatsMeter {
+    /// The worst fraction of `update`'s fuel budget the cart reached over the window.
+    fn cpu_update(&self) -> f32 {
+        self.published.map_or(0.0, |(u, _)| u)
+    }
+
+    /// The same, for `draw`.
+    fn cpu_draw(&self) -> f32 {
+        self.published.map_or(0.0, |(_, d)| d)
+    }
+
+    /// The cart's committed-memory high-water as of the last window boundary, in bytes.
+    fn mem_used(&self) -> u32 {
+        self.mem_used
+    }
+
+    /// Record one logical frame's fuel fractions, closing the window if this frame ends it. `mem`
+    /// reads the cart's memory high-water and runs only on the frame that closes one; see the type
+    /// docs for why that reading is worth exactly one wasm call a second. `now` is a parameter
+    /// rather than an `Instant::now()` inside so tests can drive the boundaries without sleeping.
+    fn sample<F>(&mut self, now: Instant, cpu_update: f32, cpu_draw: f32, mem: F)
+    where
+        F: FnOnce() -> u32,
+    {
+        self.peak_update = self.peak_update.max(cpu_update);
+        self.peak_draw = self.peak_draw.max(cpu_draw);
+        if self.published.is_none() || now.duration_since(self.t0) >= STATS_WINDOW {
+            self.publish(now, mem);
+        }
+    }
+
+    /// Forget everything measured so far. Called when the VM is replaced, so a freshly started or
+    /// hot-reloaded cart never shows the numbers of the one before it.
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Close the current window: publish its peaks alongside one fresh memory reading, and start an
+    /// empty window at `now`.
+    fn publish<F>(&mut self, now: Instant, mem: F)
+    where
+        F: FnOnce() -> u32,
+    {
+        self.published = Some((self.peak_update, self.peak_draw));
+        self.mem_used = mem();
+        self.peak_update = 0.0;
+        self.peak_draw = 0.0;
+        self.t0 = now;
+    }
+}
+
+impl Default for StatsMeter {
+    fn default() -> Self {
+        Self {
+            // Overwritten by the first sample, which publishes on the spot.
+            t0: Instant::now(),
+            peak_update: 0.0,
+            peak_draw: 0.0,
+            published: None,
+            mem_used: 0,
+        }
     }
 }
 
@@ -323,6 +425,8 @@ pub struct Shell {
     fps_frames: u32,
     fps_t0: Instant,
     fps_val: f32,
+    /// The overlay's CPU and memory rows, peaked over one second so they stay readable.
+    stats_meter: StatsMeter,
 
     /// Frames remaining of the camera-flash overlay shown after an F6 capture.
     capture_flash: u32,
@@ -375,6 +479,7 @@ impl Shell {
             fps_frames: 0,
             fps_t0: Instant::now(),
             fps_val: 0.0,
+            stats_meter: StatsMeter::default(),
             capture_flash: 0,
             hide_cursor: false,
         };
@@ -1324,6 +1429,9 @@ impl Shell {
         };
         let vm = GameVm::load(&wasm, &assets, self.audio.clone(), storage)?;
         self.vm = Some(vm);
+        // Every VM swap lands here — `run` and hot reload alike — so this is the one place the
+        // meter must forget the previous cart's peaks and memory figure.
+        self.stats_meter.reset();
         self.mode = Mode::Run;
         Ok(())
     }
@@ -1646,13 +1754,18 @@ impl Shell {
             Mode::Run => {
                 if self.vm.is_some() {
                     let fps_val = self.fps_val;
-                    let (logs, result) = {
-                        let vm = self.vm.as_mut().unwrap();
-                        vm.state_mut().set_measured_fps(fps_val);
-                        let logs = std::mem::take(&mut vm.state_mut().logs);
-                        let r = vm.call_update().and_then(|()| vm.call_draw());
-                        (logs, r)
-                    };
+                    let vm = self.vm.as_mut().unwrap();
+                    vm.state_mut().set_measured_fps(fps_val);
+                    let logs = std::mem::take(&mut vm.state_mut().logs);
+                    let result = vm.call_update().and_then(|()| vm.call_draw());
+                    let (cpu_u, cpu_d) = (vm.cpu_update(), vm.cpu_draw());
+                    // Sample per *logical* frame, not per presented one: the presenter runs at its
+                    // own cadence, so sampling in `draw` would count a 30 fps cart's frames twice
+                    // on a 60 Hz window. Sample whether or not the overlay is showing, so F1
+                    // reveals a settled reading straight away. The closure is the once-a-second
+                    // memory read, and the meter calls it only when a window closes.
+                    self.stats_meter
+                        .sample(Instant::now(), cpu_u, cpu_d, || vm.mem_used_bytes());
                     for l in logs {
                         self.say(&l, col::LIGHT_GREY);
                     }
@@ -1923,11 +2036,13 @@ impl Shell {
             Mode::Run => {
                 if self.show_stats {
                     let fps = self.fps_val;
+                    // Everything but the fps comes from the one-second meter `tick` feeds, so the
+                    // presenter's own cadence cannot make the rows churn.
+                    let cpu_u = self.stats_meter.cpu_update();
+                    let cpu_d = self.stats_meter.cpu_draw();
+                    let used = self.stats_meter.mem_used();
                     if let Some(vm) = self.vm.as_mut() {
                         let target = vm.fps();
-                        let cpu_u = vm.cpu_update();
-                        let cpu_d = vm.cpu_draw();
-                        let used = vm.mem_used_bytes();
                         stats_overlay(&mut vm.state_mut().fb, cpu_u, cpu_d, used, fps, target);
                     }
                 }
@@ -2129,6 +2244,175 @@ mod tests {
         );
     }
 
+    /// A blank meter plus the instant its first window starts from. Tests step that instant by
+    /// hand so nothing has to sleep.
+    fn stats_meter() -> (StatsMeter, Instant) {
+        (StatsMeter::default(), Instant::now())
+    }
+
+    /// Drive one logical frame the way `tick` does, with `mem` standing in for the wasm call.
+    /// `reads` collects every reading the meter asks for, so a test can see both how often the VM
+    /// would have been called and what it answered.
+    fn stats_frame(
+        m: &mut StatsMeter,
+        now: Instant,
+        cpu: (f32, f32),
+        mem: u32,
+        reads: &mut Vec<u32>,
+    ) {
+        m.sample(now, cpu.0, cpu.1, || {
+            reads.push(mem);
+            mem
+        });
+    }
+
+    #[test]
+    fn stats_meter_publishes_its_first_sample_at_once() {
+        let (mut m, t) = stats_meter();
+        let mut reads = Vec::new();
+        assert_eq!((m.cpu_update(), m.mem_used()), (0.0, 0));
+        stats_frame(&mut m, t, (0.4, 0.2), 4096, &mut reads);
+        assert_eq!((m.cpu_update(), m.cpu_draw()), (0.4, 0.2));
+        // Without this the overlay would read 0K for the cart's first second.
+        assert_eq!(m.mem_used(), 4096);
+    }
+
+    /// The bug this meter exists for: within one window the reading must not move, however wildly
+    /// the per-frame fuel fractions swing.
+    #[test]
+    fn stats_meter_holds_its_reading_within_the_window() {
+        let (mut m, t) = stats_meter();
+        m.sample(t, 0.4, 0.2, || 0);
+        for (i, cpu) in [0.9_f32, 0.05, 0.7, 0.01, 0.99].iter().enumerate() {
+            m.sample(
+                t + Duration::from_millis(100 * (i as u64 + 1)),
+                *cpu,
+                *cpu,
+                || 0,
+            );
+            let held = (m.cpu_update(), m.cpu_draw());
+            assert_eq!(held, (0.4, 0.2), "ratcheted mid-window");
+        }
+    }
+
+    #[test]
+    fn stats_meter_publishes_the_window_peak_at_the_boundary() {
+        let (mut m, t) = stats_meter();
+        // The first sample publishes on the spot, opening an empty window at `t`; of the three
+        // that follow, only the worst of each column survives to the boundary.
+        m.sample(t, 0.9, 0.9, || 0);
+        m.sample(t + Duration::from_millis(200), 0.2, 0.5, || 0);
+        m.sample(t + Duration::from_millis(500), 0.6, 0.3, || 0);
+        m.sample(t + Duration::from_millis(1000), 0.4, 0.1, || 0);
+        assert_eq!((m.cpu_update(), m.cpu_draw()), (0.6, 0.5));
+    }
+
+    #[test]
+    fn stats_meter_starts_a_fresh_window_after_publishing() {
+        let (mut m, t) = stats_meter();
+        m.sample(t, 1.0, 1.0, || 0);
+        m.sample(t + Duration::from_millis(1000), 1.0, 1.0, || 0);
+        // A second window of nothing but 0.1 must read 0.1: the 1.0s of the window before it are
+        // gone, not carried forward as a high-water mark.
+        m.sample(t + Duration::from_millis(1500), 0.1, 0.1, || 0);
+        m.sample(t + Duration::from_millis(2000), 0.1, 0.1, || 0);
+        assert_eq!((m.cpu_update(), m.cpu_draw()), (0.1, 0.1));
+    }
+
+    /// A cart that goes idle after a busy spell must fall back to 0.0 rather than keep showing the
+    /// 0.5 of the window before it: the published peak is that window's own, not a high-water mark
+    /// over the whole session.
+    #[test]
+    fn stats_meter_publishes_a_window_of_zeros_as_zero() {
+        let (mut m, t) = stats_meter();
+        m.sample(t, 0.5, 0.5, || 0);
+        assert_eq!((m.cpu_update(), m.cpu_draw()), (0.5, 0.5));
+        for i in 1..=10 {
+            m.sample(t + Duration::from_millis(100 * i), 0.0, 0.0, || 0);
+        }
+        assert_eq!((m.cpu_update(), m.cpu_draw()), (0.0, 0.0));
+    }
+
+    /// A cart stalling for longer than the whole window leaves that window a single sample, which
+    /// must still publish rather than wait for company.
+    #[test]
+    fn stats_meter_publishes_a_frame_longer_than_the_window() {
+        let (mut m, t) = stats_meter();
+        let mut reads = Vec::new();
+        stats_frame(&mut m, t, (0.1, 0.1), 1024, &mut reads);
+        stats_frame(
+            &mut m,
+            t + Duration::from_secs(4),
+            (0.8, 0.7),
+            2048,
+            &mut reads,
+        );
+        assert_eq!((m.cpu_update(), m.cpu_draw()), (0.8, 0.7));
+        assert_eq!(reads, [1024, 2048]);
+    }
+
+    #[test]
+    fn stats_meter_publishes_memory_on_the_window_beat() {
+        let (mut m, t) = stats_meter();
+        let mut reads = Vec::new();
+        stats_frame(&mut m, t, (0.1, 0.1), 1024, &mut reads);
+        stats_frame(
+            &mut m,
+            t + Duration::from_millis(500),
+            (0.1, 0.1),
+            8192,
+            &mut reads,
+        );
+        assert_eq!(m.mem_used(), 1024, "mid-window memory must not move");
+        stats_frame(
+            &mut m,
+            t + Duration::from_millis(1000),
+            (0.1, 0.1),
+            8192,
+            &mut reads,
+        );
+        assert_eq!(m.mem_used(), 8192);
+    }
+
+    /// Memory costs a wasm call into `pixel8_mem_used`, and the figure it returns only ratchets
+    /// up, so the boundary reading is already the window's peak: one call a second, not one a
+    /// frame.
+    #[test]
+    fn stats_meter_reads_memory_once_per_window() {
+        let (mut m, t) = stats_meter();
+        let mut reads = Vec::new();
+        // Three seconds of 60 fps frames, the last landing exactly on the third boundary.
+        for i in 0..=180 {
+            let now = t + Duration::from_millis(1000 * i / 60);
+            stats_frame(&mut m, now, (0.1, 0.1), 1024 * (i as u32 + 1), &mut reads);
+        }
+        // The immediate first publish, then one per second closed — not one per frame.
+        assert_eq!(reads.len(), 4, "read memory {} times, not 4", reads.len());
+    }
+
+    #[test]
+    fn stats_meter_reset_clears_the_reading() {
+        let (mut m, t) = stats_meter();
+        let mut reads = Vec::new();
+        stats_frame(&mut m, t, (0.5, 0.5), 4096, &mut reads);
+        m.reset();
+        assert_eq!((m.cpu_update(), m.cpu_draw()), (0.0, 0.0));
+        assert_eq!(m.mem_used(), 0, "kept the old cart's memory figure");
+        // Reset re-arms the publish-at-once path, so the new cart's very first frame shows
+        // immediately instead of waiting out a window.
+        stats_frame(
+            &mut m,
+            t + Duration::from_millis(10),
+            (0.3, 0.7),
+            512,
+            &mut reads,
+        );
+        assert_eq!(
+            (m.cpu_update(), m.cpu_draw(), m.mem_used()),
+            (0.3, 0.7, 512)
+        );
+    }
+
     fn test_shell() -> Shell {
         let sdk = Path::new(env!("CARGO_MANIFEST_DIR")).join("../pixel8");
         let mut shell = Shell::new(AudioHandle::dummy(), sdk);
@@ -2184,6 +2468,58 @@ mod tests {
             "the restart must persist the first run's write before the second reads"
         );
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The once-a-second memory read is a decision about the *call sites*: `tick` asks the VM only
+    /// on the frame that closes a window, and `draw` no longer asks it at all. Neither is visible
+    /// to `StatsMeter`'s own tests, so drive a real `Shell` over a cart that counts the calls.
+    #[test]
+    fn running_a_cart_reads_its_memory_once_a_second() {
+        use pixel8_runtime::{assets::Assets, cart::Cart};
+        // `pixel8_mem_used` answers 1K times the number of times it has been called, so whatever
+        // figure the shell ends up holding names the call it came from.
+        const COUNTING_CART: &str = r#"
+            (module
+              (memory (export "memory") 1)
+              (global $calls (mut i32) (i32.const 0))
+              (func (export "pixel8_init"))
+              (func (export "pixel8_update"))
+              (func (export "pixel8_draw"))
+              (func (export "pixel8_mem_used") (result i32)
+                (global.set $calls (i32.add (global.get $calls) (i32.const 1)))
+                (i32.mul (global.get $calls) (i32.const 1024))))
+        "#;
+        let mut shell = test_shell();
+        shell.loaded = Loaded::Cart {
+            cart: Cart {
+                wasm: wat::parse_str(COUNTING_CART).unwrap(),
+                assets: Assets::default(),
+                source: None,
+            },
+            path: PathBuf::from("counting.png"),
+        };
+        shell.show_stats = true;
+        shell.start_vm_from_loaded().expect("start");
+        // Thirty logical frames all land inside the first window, each with a presented frame over
+        // the top of it.
+        for _ in 0..30 {
+            shell.tick();
+            shell.draw();
+        }
+        assert_eq!(
+            shell.stats_meter.mem_used(),
+            1024,
+            "the overlay is not holding the first frame's reading"
+        );
+        // The cart's counter is the ground truth: exactly one call so far makes this probe the
+        // second, whatever the meter chose to keep.
+        let probe = shell.vm.as_mut().unwrap().mem_used_bytes();
+        assert_eq!(
+            probe,
+            2048,
+            "pixel8_mem_used ran {} times over 30 frames, not once",
+            probe / 1024 - 1
+        );
     }
 
     /// Rewrite a freshly-scaffolded project's `pixel8` git dep to a path dep on the
