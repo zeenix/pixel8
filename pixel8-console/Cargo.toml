@@ -34,3 +34,8 @@ arboard = { version = "3.6", default-features = false, features = ["wayland-data
 [dev-dependencies]
 # Hand-written WAT carts for shell tests, as in pixel8-runtime's VM tests.
 wat = "1"
+
+# Audio and the windowed frontend are feature-gated, so docs.rs must build them
+# all to document the whole library.
+[package.metadata.docs.rs]
+all-features = true
