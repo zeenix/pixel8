@@ -1,6 +1,6 @@
 //! The entity forces act on, and the one call that moves it.
 
-use super::{map::MapCollider, Bounds, Contact, Contacts, Force, Velocity};
+use super::{collider::Collider, Bounds, Contact, Contacts, Force, Velocity};
 use crate::{BitFlags, Body, Context, SpriteFlag};
 
 /// An entity a [`Force`] can push: a [`Body`] and the [`Velocity`] it travels at.
@@ -259,7 +259,7 @@ pub trait Kinetic: dynamic::AsKinetic {
         let mut velocity = *self.velocity_mut();
         let mut contacts = Contacts::empty();
         // Nothing is built for an entity that named no walls, so the map is never asked about it.
-        if let Some(collider) = MapCollider::new(self.body(), self.bounds(), self.solid()) {
+        if let Some(collider) = Collider::new(self.body(), self.bounds(), self.solid()) {
             let (survived, touched) = collider.resolve(velocity, |x, y| {
                 ctx.map_tile(x, y)
                     .is_some_and(|tile| collider.stops_at(ctx.sprite_flags(tile)))
@@ -780,7 +780,7 @@ mod tests {
 
     /// An entity that does have walls to answer to. The native map is empty — every tile reads as
     /// sprite 0 with no flags — so nothing stops it here; what the resolution does when something
-    /// *is* in the way is tested against a written-down map in `map`.
+    /// *is* in the way is tested against a written-down map in `collider`.
     struct Walker {
         body: Body,
         velocity: Velocity,

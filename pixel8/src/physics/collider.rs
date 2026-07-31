@@ -11,7 +11,7 @@ use crate::{BitFlags, Body, SpriteFlag};
 /// says about itself — the [`bounds`](super::Kinetic::bounds) it covers and the
 /// [`solid`](super::Kinetic::solid) flags that stop it — and throws away again once the update is
 /// resolved. A cart never sees one: it describes the shape, and this is the shape doing the work.
-pub(super) struct MapCollider {
+pub(super) struct Collider {
     /// The top-left corner, in the exact sub-pixel coordinates the resolution keeps to.
     position: (f32, f32),
     /// How big the box is, in pixels.
@@ -21,7 +21,7 @@ pub(super) struct MapCollider {
     solid: BitFlags<SpriteFlag>,
 }
 
-impl MapCollider {
+impl Collider {
     /// The box `bounds` is stopped at on the map, or `None` when nothing on it does.
     ///
     /// Two ways of being stopped by nothing, told apart here once so the map is never asked
@@ -164,16 +164,16 @@ mod tests {
 
     /// One sprite's worth of box at a position, stopping at the first sprite flag — the ordinary
     /// entity.
-    fn hitbox(x: f32, y: f32) -> MapCollider {
+    fn hitbox(x: f32, y: f32) -> Collider {
         sized(x, y, 8, 8)
     }
 
     /// One of a size of its own, for the boxes that are not a sprite.
-    fn sized(x: f32, y: f32, width: u16, height: u16) -> MapCollider {
+    fn sized(x: f32, y: f32, width: u16, height: u16) -> Collider {
         let body = Body::new(x, y);
         let bounds = Bounds::of(&body, width, height);
 
-        MapCollider::new(&body, bounds, SpriteFlag::Flag0.into()).unwrap()
+        Collider::new(&body, bounds, SpriteFlag::Flag0.into()).unwrap()
     }
 
     #[test]
@@ -182,8 +182,8 @@ mod tests {
         // the map about it.
         let body = Body::new(0.0, 0.0);
         let bounds = Bounds::of(&body, 8, 8);
-        assert!(MapCollider::new(&body, bounds, BitFlags::empty()).is_none());
-        assert!(MapCollider::new(&body, bounds, SpriteFlag::Flag0.into()).is_some());
+        assert!(Collider::new(&body, bounds, BitFlags::empty()).is_none());
+        assert!(Collider::new(&body, bounds, SpriteFlag::Flag0.into()).is_some());
     }
 
     #[test]
@@ -213,7 +213,7 @@ mod tests {
         let wall = map(&[".#"]);
         let body = Body::new(0.5, 0.0);
         let bounds = Bounds::of(&body, 8, 8);
-        let collider = MapCollider::new(&body, bounds, SpriteFlag::Flag0.into()).unwrap();
+        let collider = Collider::new(&body, bounds, SpriteFlag::Flag0.into()).unwrap();
         assert_eq!(
             bounds.x(),
             0,
@@ -232,7 +232,7 @@ mod tests {
         let body = Body::new(0.0, 0.0);
         let solid = SpriteFlag::Flag0.into();
         for empty in [Bounds::new(0, 0, 0, 8), Bounds::new(0, 0, 8, 0)] {
-            assert!(MapCollider::new(&body, empty, solid).is_none(), "{empty:?}");
+            assert!(Collider::new(&body, empty, solid).is_none(), "{empty:?}");
         }
     }
 
@@ -264,7 +264,7 @@ mod tests {
         // a wall it has not reached.
         let wall = map(&["..#"]);
         let body = Body::new(-0.5, 0.0);
-        let collider = MapCollider::new(&body, Bounds::of(&body, 9, 8), SpriteFlag::Flag0.into());
+        let collider = Collider::new(&body, Bounds::of(&body, 9, 8), SpriteFlag::Flag0.into());
         let (moved, contacts) = collider.unwrap().resolve(Velocity::default(), wall);
         assert_eq!(moved, Velocity::default());
         assert_eq!(
@@ -282,7 +282,7 @@ mod tests {
         let wall = map(&[".#"]);
         let body = Body::new(0.0, 0.0);
         let inset = Bounds::new(body.draw_x() + 2, body.draw_y(), 4, 8);
-        let collider = MapCollider::new(&body, inset, SpriteFlag::Flag0.into()).unwrap();
+        let collider = Collider::new(&body, inset, SpriteFlag::Flag0.into()).unwrap();
         let (moved, contacts) = collider.resolve(Velocity::new(2.0, 0.0), wall);
         assert_eq!(
             moved,
@@ -292,14 +292,14 @@ mod tests {
         assert_eq!(contacts, Contacts::empty());
 
         // Two pixels further and the box itself reaches the wall, so it is stopped there.
-        let collider = MapCollider::new(&body, inset, SpriteFlag::Flag0.into()).unwrap();
+        let collider = Collider::new(&body, inset, SpriteFlag::Flag0.into()).unwrap();
         let (moved, contacts) = collider.resolve(Velocity::new(4.0, 0.0), map(&[".#"]));
         assert_eq!(moved, Velocity::default());
         assert!(contacts.right());
 
         // And the sprite-sized box at the same body, which reaches the wall two pixels sooner.
         let whole = Bounds::of(&body, 8, 8);
-        let collider = MapCollider::new(&body, whole, SpriteFlag::Flag0.into()).unwrap();
+        let collider = Collider::new(&body, whole, SpriteFlag::Flag0.into()).unwrap();
         let (moved, contacts) = collider.resolve(Velocity::new(2.0, 0.0), map(&[".#"]));
         assert_eq!(moved, Velocity::default());
         assert!(contacts.right());
@@ -414,7 +414,7 @@ mod tests {
         let body = Body::new(0.0, 0.0);
         let bounds = Bounds::of(&body, 8, 8);
         let solid = SpriteFlag::Flag0 | SpriteFlag::Flag1;
-        let walls = MapCollider::new(&body, bounds, solid).unwrap();
+        let walls = Collider::new(&body, bounds, solid).unwrap();
         assert!(walls.stops_at(SpriteFlag::Flag1.into()));
         assert!(walls.stops_at(SpriteFlag::Flag1 | SpriteFlag::Flag7));
         assert!(!walls.stops_at(SpriteFlag::Flag7.into()));

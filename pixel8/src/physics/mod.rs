@@ -294,11 +294,11 @@
 
 mod atmosphere;
 mod bounds;
+mod collider;
 mod contact;
 mod force;
 mod gravity;
 mod kinetic;
-mod map;
 mod velocity;
 mod wind;
 
