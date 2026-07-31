@@ -23,3 +23,7 @@ base64.workspace = true
 
 [dev-dependencies]
 wat = "1"
+
+# Audio is feature-gated, so docs.rs must build it to document the cpal layer.
+[package.metadata.docs.rs]
+all-features = true
