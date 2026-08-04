@@ -241,6 +241,13 @@ impl GameVm {
                 c.data_mut().map.set(x, y, v as u8)
             }
         );
+        link!(
+            linker,
+            "step_cast",
+            |mut c: Caller<'_, HostState>, ptr: u32, len: u32, config: u32| {
+                step_the_cast(&mut c, ptr, len, config)
+            }
+        );
         link!(linker, "sprite_flags", |c: Caller<'_, HostState>,
                                        n: u32|
          -> i32 {
@@ -698,6 +705,110 @@ impl std::fmt::Display for RuntimeError {
     }
 }
 
+/// The console's half of the SDK's `World::step` — the `step_cast` import.
+///
+/// The cast arrives as `pixel8::physics::wire` records in cart memory. The engine that steps them
+/// is the SDK's own — this crate depends on the SDK precisely so the two sides of the wire are one
+/// implementation — run here natively, with the console's map and sprite sheet bound in directly
+/// instead of through a host call apiece. The answers go back into the same records.
+///
+/// Anything malformed — a range off the end of cart memory, a length past the wire's capacity —
+/// steps nothing, exactly as the rest of the ABI shrugs off bad arguments rather than trapping.
+fn step_the_cast(caller: &mut Caller<'_, HostState>, ptr: u32, len: u32, config: u32) {
+    use pixel8::{
+        physics::{
+            wire::{Recast, Record, CAP, EMPTY, RECORD},
+            Kinetic, World,
+        },
+        BitFlags, SpriteFlag,
+    };
+
+    let members = len as usize;
+    if members > CAP {
+        return;
+    }
+    // The records out of cart memory first, so the memory borrow is over before the engine runs.
+    let mut records = [EMPTY; CAP];
+    {
+        let Some(memory) = caller
+            .get_export("memory")
+            .and_then(wasmi::Extern::into_memory)
+        else {
+            return;
+        };
+        let data = memory.data(&*caller);
+        let start = ptr as usize;
+        let Some(end) = start.checked_add(members * RECORD) else {
+            return;
+        };
+        if end > data.len() {
+            return;
+        }
+        for (slot, record) in records[..members].iter_mut().enumerate() {
+            let at = start + slot * RECORD;
+            *record = Record::read(data[at..at + RECORD].try_into().expect("sized just above"));
+        }
+    }
+
+    let mut cast: Vec<Recast> = records[..members].iter().map(Recast::of).collect();
+    {
+        let state = caller.data();
+        // Every one of the eight bits names a flag, so the sheet's byte always converts.
+        let flags = |sprite: u32| {
+            BitFlags::<SpriteFlag>::from_bits(state.sprites.flags(sprite))
+                .expect("all eight sprite-flag bits are flags")
+        };
+        // The SDK's own reading of the map, natively: off the map is nothing, and an on-map tile
+        // answers with its cell's flags — cell 0 included, exactly as `Context::map_tile` has it.
+        let tiles = |x: i16, y: i16| {
+            if x < 0
+                || y < 0
+                || x as usize >= crate::assets::MAP_W
+                || y as usize >= crate::assets::MAP_H
+            {
+                return BitFlags::empty();
+            }
+            flags(state.map.get(x as i32, y as i32) as u32)
+        };
+        // Any ceiling serves the host — its world carries no wire buffer — so the default one is
+        // spelled only to give inference an answer.
+        let world: World = if config & 1 != 0 {
+            World::new()
+        } else {
+            World::mapless()
+        };
+        let mut entities: Vec<&mut dyn Kinetic> = cast.iter_mut().map(|e| e.as_kinetic()).collect();
+        world.step_hosted(&mut entities, tiles, |sprite| flags(sprite.0 as u32));
+    }
+
+    for (recast, record) in cast.iter().zip(records.iter_mut()) {
+        recast.report(record);
+    }
+    // The answers go back into the very bytes each record arrived in, and only the answers:
+    // everything the cart wrote and the step never decides — bounds, confines, flags — must come
+    // back exactly as it went, for a raw ABI caller that reuses its buffer as much as for the
+    // SDK. `Record::write` touches nothing but the output fields.
+    let Some(memory) = caller
+        .get_export("memory")
+        .and_then(wasmi::Extern::into_memory)
+    else {
+        return;
+    };
+    let data = memory.data_mut(&mut *caller);
+    let start = ptr as usize;
+    if start + members * RECORD > data.len() {
+        return;
+    }
+    for (slot, record) in records[..members].iter().enumerate() {
+        let at = start + slot * RECORD;
+        record.write(
+            (&mut data[at..at + RECORD])
+                .try_into()
+                .expect("sized just above"),
+        );
+    }
+}
+
 fn read_guest_str(caller: &Caller<'_, HostState>, ptr: u32, len: u32) -> String {
     let Some(mem) = caller
         .get_export("memory")
@@ -770,6 +881,30 @@ mod tests {
           (func (export "pixel8_init"))
           (func (export "pixel8_update") (loop $l (br $l)))
           (func (export "pixel8_draw"))
+        )
+    "#;
+
+    /// A raw ABI client of `step_cast`: one record at address 64, a prop with distinctive bytes
+    /// in the input-only fields, stepped every update. `draw` copies four of those bytes into the
+    /// framebuffer's top row, which is how the test reads them back out.
+    ///
+    /// The record: 24 zero bytes (position, velocity, drawn pixel, bounds corner), then bw = 5 at
+    /// offset 24, zeros to sprite = 9 at 36, solid = 3 at 38, heeds = 0, meta = PROP at 40.
+    const STEP_CAST_CART: &str = r#"
+        (module
+          (import "pixel8" "step_cast" (func $step (param i32 i32 i32)))
+          (import "pixel8" "set_pixel" (func $pset (param i32 i32 i32)))
+          (memory (export "memory") 1)
+          (data (i32.const 64)
+            "\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\00\05\00\00\00\00\00\00\00\00\00\00\00\09\00\03\00\01\00\00\00")
+          (func (export "pixel8_init"))
+          (func (export "pixel8_update")
+            (call $step (i32.const 64) (i32.const 1) (i32.const 1)))
+          (func (export "pixel8_draw")
+            (call $pset (i32.const 0) (i32.const 0) (i32.load8_u (i32.const 88)))
+            (call $pset (i32.const 1) (i32.const 0) (i32.load8_u (i32.const 100)))
+            (call $pset (i32.const 2) (i32.const 0) (i32.load8_u (i32.const 102)))
+            (call $pset (i32.const 3) (i32.const 0) (i32.load8_u (i32.const 104))))
         )
     "#;
 
@@ -925,6 +1060,25 @@ mod tests {
         assert_eq!(vm.state().sprites.get(0, 0), 9);
         // ellipse_fill drew color 8 after reset_palette, so no remap applies.
         assert_eq!(vm.state().fb.pget(4, 4), 8, "oval filled the box center");
+    }
+
+    #[test]
+    fn step_cast_answers_in_place_and_leaves_the_cart_s_bytes_alone() {
+        // The wire contract: only the answers — body, velocity, contacts — are written back, and
+        // every input-only byte comes back exactly as the cart wrote it. A raw client that reuses
+        // its buffer across updates depends on that; zeroing the inputs would turn its entity
+        // into a zero-sized, unworn nothing on the second call.
+        let mut vm = load_test_vm(STEP_CAST_CART).unwrap();
+        for _ in 0..3 {
+            vm.call_update().unwrap();
+        }
+        vm.call_draw().unwrap();
+        let fb = &vm.state().fb;
+        // The bytes draw copied out: bw at offset 24, sprite at 36, solid at 38, meta at 40.
+        assert_eq!(fb.pget(0, 0), 5, "bw was not preserved");
+        assert_eq!(fb.pget(1, 0), 9, "sprite was not preserved");
+        assert_eq!(fb.pget(2, 0), 3, "solid was not preserved");
+        assert_eq!(fb.pget(3, 0), 1, "meta was not preserved");
     }
 
     #[test]

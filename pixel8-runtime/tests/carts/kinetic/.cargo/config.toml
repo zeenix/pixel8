@@ -1,0 +1,9 @@
+# Cart fixtures build under the same 32 KiB shadow-stack reserve as real
+# projects, so they load within the 128 K linear-memory cap. Target-scoped.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-z", "-C", "link-arg=stack-size=32768"]
+# Default to the wasm target so a plain `cargo build`/`check` in this directory
+# just works: a `#![no_std]` cart can't build for the host, and wasm32 is what
+# carts compile to anyway.
+[build]
+target = "wasm32-unknown-unknown"

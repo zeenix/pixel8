@@ -61,6 +61,7 @@ fn fabs(v: f32) -> f32 {
 /// saturating float-to-int cast never bites in practice, but a stray large
 /// delta (a teleport, a bad chase target) can still hand this an out-of-range
 /// `v`; the floor must saturate to `i16::MIN` rather than wrap past it.
+#[inline(always)]
 pub(crate) fn floor_i16(v: f32) -> i16 {
     let t = v as i16;
     if (t as f32) > v {
@@ -186,6 +187,28 @@ impl Body {
         self.y = y;
         self.rx = floor_i16(x);
         self.ry = floor_i16(y);
+    }
+
+    /// The body's whole state — exact position and coherent pixel — for the physics step's
+    /// crossing of the ABI, where the console must continue a body exactly as the cart left it.
+    /// Not a cart's business.
+    #[doc(hidden)]
+    pub fn wire(&self) -> (f32, f32, i16, i16) {
+        (self.x, self.y, self.rx, self.ry)
+    }
+
+    /// A body continued from [`wire`](Self::wire) state, coherent pixel and all. Not a cart's
+    /// business.
+    #[doc(hidden)]
+    pub fn from_wire((x, y, rx, ry): (f32, f32, i16, i16)) -> Self {
+        Self { x, y, rx, ry }
+    }
+
+    /// This body set to [`wire`](Self::wire) state, coherent pixel and all — a continuation, not
+    /// the jump [`set_pos`](Self::set_pos) is. Not a cart's business.
+    #[doc(hidden)]
+    pub fn set_wire(&mut self, state: (f32, f32, i16, i16)) {
+        *self = Self::from_wire(state);
     }
 }
 

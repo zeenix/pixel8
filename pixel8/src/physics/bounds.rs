@@ -70,7 +70,7 @@ impl Bounds {
     /// The screen, as a rectangle.
     ///
     /// The limit most carts hold their entities inside — see
-    /// [`Kinetic::keep_within`](super::Kinetic::keep_within) — and what
+    /// [`Kinetic::confines`](super::Kinetic::confines) — and what
     /// [`on_screen`](Self::on_screen) is measured against. A cart with a level bigger than the
     /// screen writes down the level instead; this knows nothing of a
     /// [`camera`](crate::Graphics::camera).
@@ -143,8 +143,8 @@ impl Bounds {
     ///
     /// This is what a cart drops a stray bullet or a spent enemy on: nothing here keeps an entity
     /// on the screen — it is free to travel right off it — and this is how the cart notices it has
-    /// gone. One that should not be allowed to leave is held there instead, by
-    /// [`Kinetic::keep_within`](super::Kinetic::keep_within).
+    /// gone. One that should not be allowed to leave says so instead, in
+    /// [`Kinetic::confines`](super::Kinetic::confines).
     ///
     /// Measured against [`screen`](Self::screen), so it means the first screenful of the world.
     /// A cart that scrolls with a [`camera`](crate::Graphics::camera) is asking about somewhere

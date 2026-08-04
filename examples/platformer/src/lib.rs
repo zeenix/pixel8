@@ -13,19 +13,29 @@
 //! body owns the position, the physics below hands it the movement worked out
 //! for the frame, and the cart draws at `draw_x`/`draw_y`.
 //!
-//! The falling and the walls both come from the SDK's `physics` module (the
-//! `physics` feature). The hero is a [`Kinetic`](pixel8::physics::Kinetic): it
-//! says which rectangle it covers — its
-//! [`Bounds`](pixel8::physics::Bounds) — and which sprite flag is a wall to
-//! it, and one [`step`](pixel8::physics::Kinetic::step) an update, handed the
-//! level's pull (a [`Gravity`](pixel8::physics::Gravity) constant), applies
-//! it, stops whatever ran into a solid tile, moves the body with what survives
-//! and reports the sides it touched; `below()` is the hero's *grounded*.
+//! The falling, the walls and the badie all come from the SDK's `physics` module
+//! (the `physics` feature). The walls are declared once, on the
+//! [`World`](pixel8::physics::World) — flag 0, the same one the map editor marks the
+//! tiles with — and the hero and the badie are
+//! [`Kinetic`](pixel8::physics::Kinetic)s, which is only a description apiece: one
+//! sprite's worth of [`Bounds`](pixel8::physics::Bounds), the level itself as the
+//! rectangle the hero may never leave, and — for the badie — the sprite it
+//! [wears](pixel8::physics::Kinetic::sprite). Neither of them detects anything. The
+//! world owns the level's pull — a [`Gravity`](pixel8::physics::Gravity), handed over
+//! once at the start — and handed the pair once an update it does the moving, the
+//! stopping and the reporting for both; the `below()` of what it leaves in the hero's
+//! [`contacts`](pixel8::physics::Kinetic::contacts) is what this cart calls
+//! *grounded*.
 //!
-//! The level's own edges are not tiles and there is no floor past the last
-//! one, so [`keep_within`](pixel8::physics::Kinetic::keep_within) holds the
-//! hero inside them. The hero's own rectangle is also what the badie is judged
-//! against, so there is only ever one hero-shaped box to reason about.
+//! The level's edges are not tiles and there is no floor past the last one, so the
+//! hero hands the level to [`confines`](pixel8::physics::Kinetic::confines) once
+//! rather than fencing itself in every update.
+//!
+//! The badie is met through that same step: both of its sprites carry the `BADIE`
+//! flag in the sprite editor, so [`touches`](pixel8::physics::Contacts::touches)
+//! answers for it and nothing here walks a pair of casts. Whether the touch was a
+//! ram or a stomp — and what it costs — is settled in this file, where the badie
+//! lives.
 //!
 //! The code is split into small modules: `hero` and `badie` (the two moving
 //! actors), `taken` (a collected coin or trophy, so it can be scored and put
@@ -41,14 +51,19 @@ mod hero;
 mod taken;
 
 use heapless::Vec;
-// `Kinetic` for the hero's own rectangle, which is what the badie is judged against.
-use pixel8::{physics::Kinetic, *};
+// `Kinetic` for the cast handed to the world, and for the two rectangles compared below: the
+// world has already said *that* the hero met the badie, and the rectangles are what tell a stomp
+// from a ram.
+use pixel8::{
+    physics::{Gravity, Kinetic, World},
+    *,
+};
 
 use crate::{
     badie::Badie,
     constants::{
         BADIE_DEAD_SFX, BADIE_KILL_POINTS, COMPLETION_MUSIC, GAME_OVER_MUSIC, GAME_OVER_TIMEOUT,
-        GAME_TIMEOUT, MAX_TAKEN,
+        GAME_TIMEOUT, GRAVITY, MAX_CAST, MAX_TAKEN, SOLID,
     },
     game_mode::GameMode,
     hero::Hero,
@@ -56,6 +71,9 @@ use crate::{
 };
 
 game!(Platformer {
+    // The walls are the scene's to declare: one flag, said once, and everything the world moves
+    // stops at the tiles carrying it.
+    world: World::new().with_solid(SOLID).with_forces(GRAVITY),
     hero: Hero::new(),
     badie: Some(Badie::new()),
     taken: Vec::new(),
@@ -66,6 +84,9 @@ game!(Platformer {
 });
 
 struct Platformer {
+    /// The one thing that moves anything in this cart, sized for exactly the cast it steps and
+    /// owning the level's pull.
+    world: World<MAX_CAST, Gravity>,
     hero: Hero,
     badie: Option<Badie>,
     taken: Vec<Taken, MAX_TAKEN>,
@@ -95,7 +116,17 @@ impl Platformer {
         let elapsed = (ctx.time() - *start_time).max(0.0) as u8;
         *time_left = GAME_TIMEOUT - elapsed;
 
-        if let Some(taken) = self.hero.update(ctx) {
+        // What each of the two means to do this update, written into its own velocity.
+        self.hero.steer(ctx);
+        if let Some(badie) = &mut self.badie {
+            badie.patrol();
+        }
+
+        // The pull, the walls, the level's edges and the hero-meets-badie, all settled by the
+        // time this returns.
+        self.step_cast(ctx);
+
+        if let Some(taken) = self.hero.pick_up(ctx) {
             let took_trophy = taken.is_trophy();
             self.taken.push(taken).unwrap();
             if took_trophy {
@@ -114,30 +145,53 @@ impl Platformer {
             }
         }
 
-        // Check for collision between our hero and the badie, and decide who dies if there is one.
-        // The badie is no `Kinetic` — nothing pushes it — so it comes into this as a rectangle.
-        if let Some(badie) = &self.badie {
-            if self.hero.overlaps(badie.bounds()) {
-                let (hero, badie) = (self.hero.bounds(), badie.bounds());
-                if hero.y() == badie.y() {
-                    // Hero ramming into badie horizontally is a suicide.
-                    self.hero.die();
-                    self.game_over(ctx);
-
-                    return;
-                }
-
-                // Hero hitting the badie from the top, kills the badie and gives hero a boost.
-                self.badie = None;
-                self.badies_killed += 1;
-                self.hero.jump(ctx);
-                ctx.sfx(BADIE_DEAD_SFX);
+        // The hero against the badie, off what the world left in the hero's contacts: nothing
+        // here walks a pair, and what the meeting costs is settled here, which is where the badie
+        // actually lives.
+        //
+        // The badie walked its patrol and the hero was stepped against it there, so both
+        // rectangles compared here are exactly the ones that met.
+        let (mut rammed, mut stomped) = (false, false);
+        if let (true, Some(badie)) = (self.hero.met_badie(), &self.badie) {
+            // Level with the badie is a ram; anything else is the hero coming down on it.
+            if self.hero.bounds().y() == badie.bounds().y() {
+                rammed = true;
+            } else {
+                stomped = true;
             }
         }
+        if rammed {
+            // Hero ramming into badie horizontally is a suicide.
+            self.hero.die();
+            self.game_over(ctx);
 
-        if let Some(badie) = &mut self.badie {
-            badie.update(ctx);
+            return;
         }
+        if stomped {
+            // Hero hitting the badie from the top, kills the badie and gives hero a boost. It can
+            // be dropped here and now: the world steps the cast where it stands, so the meeting
+            // has already happened and nothing is waiting on a picture of it.
+            self.badie = None;
+            self.badies_killed += 1;
+            self.hero.jump(ctx);
+            ctx.sfx(BADIE_DEAD_SFX);
+        }
+    }
+
+    /// The whole cast, gathered fresh out of the fields it lives in and handed to the world.
+    ///
+    /// A function of its own so that the borrows the cast holds end with it: the update above
+    /// goes on to kill the badie and bounce the hero, and cannot do either while a cast is still
+    /// pointing at them.
+    fn step_cast(&mut self, ctx: &mut Context) {
+        let mut cast: Vec<&mut dyn Kinetic, MAX_CAST> = Vec::new();
+        // The badie before the hero, so the hero meets it where it has just walked to. Neither
+        // push can fail: the cast is the hero and at most one badie.
+        if let Some(badie) = &mut self.badie {
+            let _ = cast.push(badie.as_kinetic());
+        }
+        let _ = cast.push(self.hero.as_kinetic());
+        self.world.step(ctx, &mut cast);
     }
 
     fn restart_game(&mut self, ctx: &mut Context) {

@@ -1844,6 +1844,7 @@ dependencies = [
  "cpal",
  "crc32fast",
  "miniz_oxide 0.9.1",
+ "pixel8",
  "serde",
  "serde_json",
  "wasmi",

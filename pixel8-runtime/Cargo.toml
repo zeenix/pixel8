@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 description = "Pixel8 fantasy console runtime: VM, framebuffer, input, audio, assets, carts"
 readme = "README.md"
+# The kinetic cart fixture is a nested crate, which packaging leaves out — so the test that
+# builds and runs it stays out of the package too, or the published crate would carry a test
+# pointing at a fixture that is not there.
+exclude = ["tests/kinetic_cart.rs", "tests/carts"]
 
 [features]
 default = ["audio"]
@@ -13,6 +17,9 @@ audio = ["dep:cpal"]
 
 [dependencies]
 anyhow.workspace = true
+# The SDK itself, for the physics engine behind the `step_cast` import: the console runs the very
+# code carts and tests do, so the two sides of that wire can never drift.
+pixel8 = { path = "../pixel8", version = "0.1.0", default-features = false, features = ["std", "physics"] }
 serde.workspace = true
 wasmi.workspace = true
 crc32fast.workspace = true

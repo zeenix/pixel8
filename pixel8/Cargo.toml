@@ -19,9 +19,10 @@ std = []
 # fixed-capacity buffers the effects hold their particles in. Future effect
 # families get their own feature, so a cart only ever links the ones it asks for.
 plume-effects = ["dep:heapless"]
-# Gravity, wind and the force fields carts write themselves (`physics`). Off by
-# default like every other family, though this one pulls in nothing at all: it
-# is plain arithmetic over the SDK's own types.
+# Gravity, wind, collision (against the map's tiles, against the scene's other
+# moving matter, and between entities) and the force fields carts write
+# themselves (`physics`). Off by default like every other family, though this
+# one pulls in nothing at all: it is plain arithmetic over the SDK's own types.
 physics = []
 
 # Dependency-free unless an effect feature asks for something: a cart building
