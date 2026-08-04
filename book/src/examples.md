@@ -32,14 +32,24 @@ The capstone: run, jump, collect coins, stomp (or dodge) the badie, grab the
 trophy before the clock runs out. Almost every chapter of this book is in
 here, in a few hundred lines split into small modules:
 
-- **map + sprite flags** as the collision system (solid tiles carry flag 0);
+- **map + sprite flags** as the collision system (solid tiles carry flag 0, the
+  badie's sprites flag 1);
 - a **camera** that follows the hero, with the HUD drawn in screen space;
 - a **[`Body`](input.md#smooth-sub-pixel-movement-body)** for the hero, so
   running jumps climb clean staircases;
-- the falling *and* the walls from the `physics` feature: the hero says which
-  **[`Bounds`]** it covers and which sprite flag is a wall to it, and one
-  **[`step`]** an update — handed the level's **[`Gravity`]** — pulls it down,
-  stops it at the solid tiles and reports whether it landed;
+- the falling, the walls *and* the edge of the level from the `physics` feature:
+  the walls are declared once, on the **[`World`]** (the same flag the map marks
+  its solid tiles with), and the hero and the badie are **[`Kinetic`]**s, which
+  means they only *describe* themselves — the **[`Bounds`]** each covers, which
+  rectangle the hero may never leave (**[`confines`]**), and which **[`sprite`]**
+  the badie wears — while the world does all the moving.
+  A single **[`step`]** an update, handed the pair and the level's
+  **[`Gravity`]**, pulls the hero down, stops it at the solid tiles, holds it
+  inside the level, patrols the badie and tells each of them what it met;
+- nothing walks a pair of casts: the badie's sprites are flagged, so the hero's
+  **[`contacts`]** report having met one in **[`touches`]** and the cart only
+  decides whether that was a ram or a stomp — same frame, so a stomped badie is
+  dropped on the spot;
 - coins collected by **rewriting the map** in RAM and put back on restart;
 - the best score kept in **[storage](storage.md)** across runs;
 - win/lose **music held inside the game-state enum** — leaving the state
@@ -106,7 +116,13 @@ candle, point it another way for an exhaust trail.
 [`Wind`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Wind.html
 [`Gravity`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Gravity.html
 [`Bounds`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Bounds.html
-[`step`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html#method.step
+[`step`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.step
+[`World`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html
+[`Kinetic`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html
+[`confines`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html#method.confines
+[`sprite`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html#method.sprite
+[`contacts`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html#method.contacts
+[`touches`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Contacts.html#method.touches
 
 ## stress
 
