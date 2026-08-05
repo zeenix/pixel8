@@ -811,18 +811,22 @@ impl<const N: usize, F: Force> World<N, F> {
     /// A handle to somebody who has left the cast is a cart still holding on to them, and there is
     /// no honest answer to give it: the seat is empty, or it has been let to somebody else who is
     /// nobody's hero. Loud, and exactly where it happened.
+    ///
+    /// The check is on every accessor a cart calls in an update, so its hot half is spelled to
+    /// inline there — a compare and a taken seat — and the panic lives in [`stale`], cold and out
+    /// of line, where it costs nothing until it fires.
+    #[inline(always)]
     fn seat(&self, member: Member) -> usize {
-        assert!(
-            self.holds(member),
-            "seat {} was retired: a member that has left the cast is still being asked about",
-            member.slot
-        );
+        if !self.holds(member) {
+            stale(member.slot);
+        }
 
         member.slot as usize
     }
 
     /// Whether `member` names somebody actually in the cast: a seat of this world's, taken, and
     /// taken by the very member the handle was made for.
+    #[inline(always)]
     fn holds(&self, member: Member) -> bool {
         let slot = member.slot as usize;
 
@@ -1550,6 +1554,14 @@ fn corner((rx, ry): (i16, i16), (dx, dy): (i16, i16)) -> (i16, i16) {
     }
 
     (along(rx, dx), along(ry, dy))
+}
+
+/// The cold half of [`World::seat`]'s check: the panic a stale handle is answered with, out of
+/// every hot path so the check itself is a compare and nothing more.
+#[cold]
+#[inline(never)]
+fn stale(slot: u8) -> ! {
+    panic!("seat {slot} was retired: a member that has left the cast is still being asked about")
 }
 
 #[cfg(test)]
