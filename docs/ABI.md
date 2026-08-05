@@ -51,6 +51,17 @@ Each call runs under a fuel budget (~128K instructions; see LIMITS.md).
 Exhausting it traps with a "ran too long" error screen — infinite loops
 cannot hang the console.
 
+`pixel8_init` need not be where a cart's state comes from. Under the SDK's
+preset `game!` forms the state is placed by instantiation — the game lives in a
+`static` written into the module's data segment, already there by the time
+anything is called — and `pixel8_init` runs only what cannot be spelled as
+data: reading the store, asking the clock, handing a physics cast its seats
+(the SDK puts that in `Game::boot`, which `pixel8_init` calls). A cart built
+with the SDK's `defer` form, or a hand-written one, is equally free to construct
+its whole state inside `pixel8_init` instead; the ABI's contract is only that
+the call runs once, before the first update. It is fuel-metered like any other,
+so an init that never returns is an error screen rather than a hang.
+
 ## Guest exports (optional)
 
 | export             | signature   | called                                       |
@@ -61,7 +72,10 @@ cannot hang the console.
 `pixel8_fps` reports the cart's logical frame rate. The SDK emits it from
 every cart; `30` and `60` are honored, and `60` is the default. A missing
 export, or any other value, also means 60, so a hand-written cart that
-omits it still runs.
+omits it still runs. It is queried after `pixel8_init`, so it may depend on
+state init builds; until then the `fps` import answers the host default,
+which is why the SDK answers `Game::boot`'s `Context::fps` itself, from the
+cart's own declared rate.
 
 `pixel8_mem_used` reports the cart's committed-memory high-water in bytes — the
 highest its footprint (shadow-stack reserve + statics + heap) has ever reached.

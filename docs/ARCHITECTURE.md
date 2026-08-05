@@ -47,7 +47,13 @@ pulls a dependency in — `heapless`, for its fixed-capacity particle buffers;
 logging) and `Graphics` (draw-time), both zero-sized. The `game!`
 macro exports `pixel8_init/update/draw` and installs a panic hook that
 forwards panic messages to the host before the trap, which is how a
-cart panic becomes a readable error screen.
+cart panic becomes a readable error screen. The game itself lives in a
+`static` the macro declares. In the preset `game!` forms it is initialized
+by the constant the cart hands over — the opening state placed by
+instantiation rather than built on the stack — while the `defer` and
+`Default` forms build it inside `pixel8_init`. Either way `pixel8_init`
+then runs the cart's `Game::boot`, where whatever needed a `Context` to
+be settled is settled.
 
 ## The VM (`pixel8-runtime/src/vm.rs`)
 

@@ -6,13 +6,14 @@
 //! [`StorageValue`] (integers, floats, bools):
 //!
 //! ```ignore
+//! fn boot(&mut self, ctx: &mut Context) {
+//!     // Once, before the first update: pick up the previous best score (if any).
+//!     self.best = ctx.storage_get("best").and_then(|v| v.as_i64()).unwrap_or(0);
+//! }
+//!
 //! fn update(&mut self, ctx: &mut Context) {
-//!     if self.best.is_none() {
-//!         // First frame: read the previous best score (if any).
-//!         self.best = Some(ctx.storage_get("best").and_then(|v| v.as_i64()).unwrap_or(0));
-//!     }
-//!     if self.score > self.best.unwrap_or(0) {
-//!         self.best = Some(self.score);
+//!     if self.score > self.best {
+//!         self.best = self.score;
 //!         let _ = ctx.storage_set("best", self.score);
 //!     }
 //! }

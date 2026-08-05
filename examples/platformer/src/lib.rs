@@ -4,9 +4,17 @@
 //! coins (tile 3) and the trophy (tile 4) are collected by rewriting the map,
 //! and put back when the game restarts.
 //!
+//! The cart ships in its opening state rather than building one: the `game!`
+//! initializer is a constant, so the empty scene, the hero waiting for a seat
+//! and the fresh clock are all part of the module's memory image and nothing
+//! runs to assemble them. What a constant cannot say is said once in
+//! [`Game::boot`] — the level's word for a wall, the best score out of the
+//! store, the two seats, the clock a run starts on — against the state where it
+//! already lives. There is no *first update is secretly the setup* mode.
+//!
 //! The best score is kept between runs with [`Context::storage_get`] /
-//! [`Context::storage_set`] — loaded once at startup, saved whenever a run
-//! beats it — so the high score survives closing the console.
+//! [`Context::storage_set`] — loaded in `boot`, saved whenever a run beats it —
+//! so the high score survives closing the console.
 //!
 //! The falling, the walls and the badie all come from the SDK's `physics` module
 //! (the `physics` feature), and so does everything about where the hero and the
@@ -37,8 +45,7 @@
 //!
 //! The code is split into small modules: `hero` and `badie` (the two moving
 //! actors), `taken` (a collected coin or trophy, so it can be scored and put
-//! back), `game_mode` (the `Init` → `InGame` → `Ended` state machine), and
-//! `constants`.
+//! back), `game_mode` (the `InGame` → `Ended` state machine), and `constants`.
 
 #![no_std]
 
@@ -80,22 +87,19 @@ struct Platformer {
 }
 
 impl Platformer {
-    fn new() -> Self {
-        // The walls are the scene's to declare: one flag, said once, and everything the world
-        // moves stops at the tiles carrying it.
-        let mut scene = World::new().with_solid(SOLID).with_forces(GRAVITY);
-
+    /// The state the cart ships in, every bit of it a constant: an empty scene under the
+    /// level's pull, a hero with no seat yet, no badie, nothing taken and no score. `boot` below
+    /// opens a game in it rather than making one.
+    const fn new() -> Self {
         Self {
-            // The badie takes the first seat and the hero the second, because seat order is
-            // stepping order: the hero meets the badie where it has just walked to.
-            badie: Some(Badie::new(&mut scene)),
-            hero: Hero::new(&mut scene),
-            scene,
+            scene: World::new().with_forces(GRAVITY),
+            hero: Hero::waiting(),
+            badie: None,
             taken: Vec::new(),
             badies_killed: 0,
             best_score: 0,
             frame: 0,
-            mode: GameMode::Init,
+            mode: GameMode::fresh(),
         }
     }
 
@@ -227,18 +231,30 @@ impl Platformer {
 }
 
 impl Game for Platformer {
+    fn boot(&mut self, ctx: &mut Context) {
+        // Everything the constant above could not say, said once into the state it already lives
+        // in — and every one of these is a call: the flags are worked out through `Into`, the best
+        // score comes from the store, the seats are the world's to hand out and the clock is the
+        // host's.
+        //
+        // The walls are the scene's to declare: one flag, said once, and everything the world
+        // moves stops at the tiles carrying it.
+        self.scene.declare_solid(SOLID);
+        self.best_score = ctx
+            .storage_get("best")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as u16;
+        // The badie takes the first seat and the hero the second, because seat order is stepping
+        // order: the hero meets the badie where it has just walked to.
+        self.badie = Some(Badie::new(&mut self.scene));
+        self.hero = Hero::new(&mut self.scene);
+        self.mode.start(ctx);
+    }
+
     fn update(&mut self, ctx: &mut Context) {
         self.frame += 1;
 
         match &mut self.mode {
-            GameMode::Init => {
-                // First frame: pick up the best score from a previous session.
-                self.best_score = ctx
-                    .storage_get("best")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0) as u16;
-                self.mode.start(ctx);
-            }
             GameMode::InGame { .. } => self.in_game_update(ctx),
             GameMode::Ended { time, .. } if ctx.time() - *time > GAME_OVER_TIMEOUT => {
                 self.restart_game(ctx)

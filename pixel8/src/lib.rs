@@ -495,9 +495,14 @@ impl Context {
     }
 
     /// Actual measured frames per second. Equals the target rate (see
-    /// [`Game::FRAME_RATE`]) until the host has measured a real one.
+    /// [`Game::FRAME_RATE`]) until the host has measured a real one — inside
+    /// [`Game::boot`] too, where the SDK answers with the cart's own declared
+    /// rate: the host does not ask `pixel8_fps` until `pixel8_init` returns.
     pub fn fps(&self) -> f32 {
-        unsafe { ffi::fps() }
+        match crate::glue::boot_rate() {
+            0 => unsafe { ffi::fps() },
+            rate => rate as f32,
+        }
     }
 }
 
@@ -958,6 +963,41 @@ pub trait Game {
     /// The logical frame rate. Set this to [`FrameRate::Fps30`] to run
     /// `update` and `draw` at 30 fps instead of the default 60.
     const FRAME_RATE: FrameRate = FrameRate::Fps60;
+    /// Called once, before the first update, on the state the cart shipped
+    /// with. Everything that could not be said as a constant is said here.
+    ///
+    /// The state a preset [`game!`] declares is placed rather than built: it
+    /// is part of the cart's memory image, so by the time anything runs it is
+    /// already there (the `defer` and [`Default`] forms build theirs here in
+    /// `pixel8_init` instead). What a constant cannot spell is a non-const
+    /// operation — enlisting a cast in a physics world, reading the store,
+    /// asking the clock, seeding the dice — and this is where those go, made
+    /// against the state where it already lives. It is also the first moment
+    /// a [`Context`] exists, which is the other half of why it is here.
+    ///
+    /// The default does nothing, and a cart whose opening state is entirely a
+    /// constant leaves it alone. Nothing else runs before it, and nothing runs
+    /// it twice, so an `update` need never keep a *first frame is secretly the
+    /// setup* mode of its own.
+    ///
+    /// ```ignore
+    /// impl Game for MyGame {
+    ///     fn boot(&mut self, ctx: &mut Context) {
+    ///         self.best = ctx.storage_get("best").and_then(|v| v.as_i64()).unwrap_or(0) as u16;
+    ///         self.hero = self
+    ///             .world
+    ///             .enlist(16.0, 80.0, 8, 8)
+    ///             .expect("a seat for the hero")
+    ///             .member();
+    ///     }
+    ///
+    ///     fn update(&mut self, ctx: &mut Context) { /* ... */ }
+    ///     fn draw(&self, gfx: &mut Graphics) { /* ... */ }
+    /// }
+    /// ```
+    fn boot(&mut self, ctx: &mut Context) {
+        let _ = ctx;
+    }
     /// Called [`FRAME_RATE`](Game::FRAME_RATE) times per second. Read
     /// input, move the world.
     fn update(&mut self, ctx: &mut Context);
@@ -965,24 +1005,65 @@ pub trait Game {
     fn draw(&self, gfx: &mut Graphics);
 }
 
-/// Declare your game's entry point.
+/// Declare your game's entry point — and the state it starts in.
 ///
-/// The common form takes a struct literal that builds the initial state:
+/// The common form takes a struct literal:
 ///
 /// ```ignore
 /// pixel8::game!(MyGame { x: 64, y: 64 });
 /// ```
 ///
 /// Any other constructor works with the `Type = expr` form, and a type
-/// implementing [`Default`] needs no initializer:
+/// implementing [`Default`] needs no initializer at all:
 ///
 /// ```ignore
 /// pixel8::game!(MyGame = MyGame::new());
 /// pixel8::game!(MyGame);
 /// ```
+///
+/// # The opening state is data, not code
+///
+/// What the first two forms are handed must be a **constant expression**: it
+/// initializes the `static` the game lives in, so the state a cart starts in
+/// is written into the module's memory image and placed there by the loader.
+/// Nothing builds it, nothing copies it, and `pixel8_init` runs none of it —
+/// where the same state built at start-up would be assembled on the stack and
+/// then moved into the very `static` that already reserved room for it. The
+/// RAM is the same either way (the `static` is the game's size regardless);
+/// what a cart saves is the stack it would have taken to build a big state
+/// once, which is stack it must then reserve for ever.
+///
+/// A `const fn` constructor is all it takes:
+///
+/// ```ignore
+/// impl MyGame {
+///     const fn new() -> Self { Self { x: 64, y: 64, world: World::new() } }
+/// }
+/// pixel8::game!(MyGame = MyGame::new());
+/// ```
+///
+/// Everything a constant cannot say — enlisting a cast, reading the store,
+/// asking the clock — belongs in [`Game::boot`], which runs once against the
+/// state where it already lives, before the first update.
+///
+/// # When the state cannot be a constant
+///
+/// A constructor that must run — one that allocates, or reads the world before
+/// it can say what the state is — says so with `defer`, and the state is built
+/// at start-up and moved into the slot as it always was:
+///
+/// ```ignore
+/// pixel8::game!(MyGame = defer MyGame::new());
+/// ```
+///
+/// It costs what it always cost: the whole game exists twice for a moment, once
+/// on the stack and once in the `static`, so the cart's stack reserve
+/// (`-C link-arg=-zstack-size`) must cover a copy of the largest state it has.
+/// `game!(MyGame)` — the [`Default`] form — is deferred for the same reason:
+/// [`Default::default`] is not a `const fn`.
 #[macro_export]
 macro_rules! game {
-    ($game:ty = $init:expr) => {
+    ($game:ty = defer $init:expr) => {
         static GAME: $crate::__internal::Slot<$game> = $crate::__internal::Slot::new();
 
         #[no_mangle]
@@ -990,6 +1071,32 @@ macro_rules! game {
             GAME.init(|| $init);
         }
 
+        $crate::__game_exports!();
+    };
+    ($game:ty = $init:expr) => {
+        static GAME: $crate::__internal::Slot<$game> = $crate::__internal::Slot::preset($init);
+
+        #[no_mangle]
+        pub extern "C" fn pixel8_init() {
+            GAME.start();
+        }
+
+        $crate::__game_exports!();
+    };
+    ($game:ident { $($field:tt)* }) => {
+        $crate::game!($game = $game { $($field)* });
+    };
+    ($game:ident) => {
+        $crate::game!($game = defer <$game as ::core::default::Default>::default());
+    };
+}
+
+/// The exports every [`game!`] form shares, whichever way its state is made.
+/// Not part of the public API; do not call directly.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __game_exports {
+    () => {
         #[no_mangle]
         pub extern "C" fn pixel8_fps() -> u32 {
             GAME.fps()
@@ -1009,12 +1116,6 @@ macro_rules! game {
         pub extern "C" fn pixel8_draw() {
             GAME.draw();
         }
-    };
-    ($game:ident { $($field:tt)* }) => {
-        $crate::game!($game = $game { $($field)* });
-    };
-    ($game:ident) => {
-        $crate::game!($game = <$game as ::core::default::Default>::default());
     };
 }
 

@@ -33,6 +33,17 @@ pub struct Hero {
 }
 
 impl Hero {
+    /// The hero as the cart ships: everything about it settled except where it stands, which
+    /// needs a seat. A constant, so the cart's whole opening state is one.
+    pub const fn waiting() -> Self {
+        Self {
+            member: Member::NOBODY,
+            walking: false,
+            flip: false,
+            dead: false,
+        }
+    }
+
     /// Seats the hero in `scene` at the start of a run, listening for the badie and nothing
     /// else.
     ///
@@ -151,7 +162,6 @@ impl Hero {
             match mode {
                 GameMode::Ended { won, .. } if *won => HERO_HAPPY_SPRITE,
                 GameMode::InGame { .. } | GameMode::Ended { .. } => HERO_LEGS_EXTEND_SPRITE,
-                GameMode::Init => unreachable!(),
             }
         } else {
             HERO_SPRITE

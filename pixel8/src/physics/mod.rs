@@ -349,6 +349,14 @@
 //! }
 //! ```
 //!
+//! Where that setting-up goes is the cart's business, and a cart that ships its state placed —
+//! [`game!`](crate::game) with a constant initializer — has an obvious place for it. A world is a
+//! constant: [`World::new`], [`World::mapless`] and [`with_forces`](World::with_forces) are all
+//! `const`, so the scene itself is part of the cart's memory image. Seating the cast is not — it is
+//! the world handing out seats — so it happens in [`Game::boot`](crate::Game::boot), where
+//! [`with_solid`](World::with_solid)'s in-place twin [`declare_solid`](World::declare_solid) says
+//! the scene's word for a wall too. `examples/platformer` is written that way.
+//!
 //! One rectangle does both jobs, so a wall stops a member exactly where another member would have
 //! hit it.
 //!

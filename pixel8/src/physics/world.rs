@@ -209,9 +209,7 @@ impl<const N: usize> World<N> {
             ..Self::new()
         }
     }
-}
 
-impl<const N: usize, F: Force> World<N, F> {
     /// The same world, owning `forces` as the scene's weather.
     ///
     /// One force, a tuple of them applied left to right — a tuple of [`Force`]s is itself a
@@ -223,11 +221,24 @@ impl<const N: usize, F: Force> World<N, F> {
     /// The cast comes along: a world already seated may be given its weather afterwards, and
     /// everybody in it keeps their seat.
     ///
+    /// `const`, like the two constructors above and for the same reason — a cart's whole opening
+    /// world, weather and all, is a constant its [`game!`](crate::game) initializer can be:
+    ///
+    /// ```
+    /// # use pixel8::physics::{Gravity, World};
+    /// const LEVEL: World<8, Gravity> = World::new().with_forces(Gravity::new());
+    /// ```
+    ///
+    /// The weather is given to a world that has none, which is every world as it is made. One that
+    /// already has weather keeps it and drives it through [`forces_mut`](Self::forces_mut) — the
+    /// forces a scene is played under are a fact about the scene, and a `World<N, F>` says which in
+    /// its own type.
+    ///
     /// ```no_run
     /// # use pixel8::physics::{Atmosphere, Gravity, World};
     /// let world: World<8, _> = World::new().with_forces((Gravity::new(), Atmosphere::new()));
     /// ```
-    pub fn with_forces<G: Force>(self, forces: G) -> World<N, G> {
+    pub const fn with_forces<G: Force>(self, forces: G) -> World<N, G> {
         World {
             reads_map: self.reads_map,
             solid: self.solid,
@@ -240,7 +251,9 @@ impl<const N: usize, F: Force> World<N, F> {
             own_solid: self.own_solid,
         }
     }
+}
 
+impl<const N: usize, F: Force> World<N, F> {
     /// The weather the world owns — see [`with_forces`](Self::with_forces).
     pub fn forces(&self) -> &F {
         &self.forces
@@ -268,7 +281,32 @@ impl<const N: usize, F: Force> World<N, F> {
     /// # const SOLID: SpriteFlag = SpriteFlag::Flag0;
     /// let world: World<8> = World::new().with_solid(SOLID);
     /// ```
+    ///
+    /// This is the builder, for a world being made. A world that already exists — the one a cart
+    /// keeps in a `static`, which is where a scene lives — is told the same thing by
+    /// [`declare_solid`](Self::declare_solid).
     pub fn with_solid(mut self, solid: impl Into<BitFlags<SpriteFlag>>) -> Self {
+        self.declare_solid(solid);
+
+        self
+    }
+
+    /// The scene's word for *wall*, said to a world that is already there.
+    ///
+    /// What [`with_solid`](Self::with_solid) says, said in place instead of on the way in: the two
+    /// are one thing, and a cart uses whichever fits where it is standing. A world spelled out as a
+    /// constant cannot take the builder — flags are worked out through [`Into`], and that is not
+    /// something a constant may call — so a scene that ships placed declares its walls in
+    /// [`Game::boot`](crate::Game::boot), in one line, before anybody is enlisted.
+    ///
+    /// ```no_run
+    /// # use pixel8::{physics::World, SpriteFlag};
+    /// # const SOLID: SpriteFlag = SpriteFlag::Flag0;
+    /// # fn f(world: &mut World<8>) {
+    /// world.declare_solid(SOLID);
+    /// # }
+    /// ```
+    pub fn declare_solid(&mut self, solid: impl Into<BitFlags<SpriteFlag>>) {
         self.solid = solid.into();
         // Each seat carries the word already settled between the member's own rule and the
         // scene's, so that the step never has to ask whose it was — which leaves the members who
@@ -280,8 +318,6 @@ impl<const N: usize, F: Force> World<N, F> {
             theirs &= theirs - 1;
             self.records[slot].solid = word;
         }
-
-        self
     }
 
     /// Takes somebody into the cast at (`x`, `y`), covering `width` x `height` pixels from the
@@ -808,9 +844,10 @@ impl<const N: usize, F: Force> World<N, F> {
 
     /// `member`'s seat, or a panic naming it.
     ///
-    /// A handle to somebody who has left the cast is a cart still holding on to them, and there is
-    /// no honest answer to give it: the seat is empty, or it has been let to somebody else who is
-    /// nobody's hero. Loud, and exactly where it happened.
+    /// A handle to somebody who has left the cast — or to somebody who was never enlisted, which is
+    /// what [`Member::NOBODY`] is — is a cart holding on to nobody, and there is no honest answer
+    /// to give it: the seat is empty, or it has been let to somebody else who is nobody's hero.
+    /// Loud, and exactly where it happened.
     ///
     /// The check is on every accessor a cart calls in an update, so its hot half is spelled to
     /// inline there — a compare and a taken seat — and the panic lives in [`stale`], cold and out
@@ -818,7 +855,7 @@ impl<const N: usize, F: Force> World<N, F> {
     #[inline(always)]
     fn seat(&self, member: Member) -> usize {
         if !self.holds(member) {
-            stale(member.slot);
+            stale(member.slot, N);
         }
 
         member.slot as usize
@@ -1560,7 +1597,11 @@ fn corner((rx, ry): (i16, i16), (dx, dy): (i16, i16)) -> (i16, i16) {
 /// every hot path so the check itself is a compare and nothing more.
 #[cold]
 #[inline(never)]
-fn stale(slot: u8) -> ! {
+fn stale(slot: u8, seats: usize) -> ! {
+    assert!(
+        (slot as usize) < seats,
+        "seat {slot} is no seat of this world: a member that was never enlisted is being asked about"
+    );
     panic!("seat {slot} was retired: a member that has left the cast is still being asked about")
 }
 
@@ -2193,12 +2234,53 @@ mod tests {
             .unwrap()
             .stopped_by(BitFlags::empty())
             .member();
-        let world = world.with_solid(WALL);
+        let mut world = world.with_solid(WALL);
         assert_eq!(
             world.records[walker.seat()].solid,
             BitFlags::from(WALL).bits()
         );
         assert_eq!(world.records[ghost.seat()].solid, 0);
+
+        // And said in place, which is how a world that was placed rather than built says it: the
+        // same word reaching the same seats.
+        world.declare_solid(CRATE);
+        assert_eq!(
+            world.records[walker.seat()].solid,
+            BitFlags::from(CRATE).bits()
+        );
+        assert_eq!(world.records[ghost.seat()].solid, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "seat 255 is no seat of this world")]
+    fn a_handle_to_nobody_is_nobody_in_any_world() {
+        // What a cart's placed state holds for an actor it has not enlisted yet: a seat no world
+        // has. Asking is the same bug as asking about somebody who left, and says which it was.
+        let mut world: World<2> = World::new();
+        assert!(!world.seated(Member::NOBODY));
+        let _ = pebble(&mut world, 0.0, 0.0);
+        assert!(!world.seated(Member::NOBODY));
+
+        world.pos(Member::NOBODY);
+    }
+
+    #[test]
+    fn a_whole_world_can_be_spelled_out_as_a_constant() {
+        // What the `game!` preset needs of this module: a world, weather and all, placed by the
+        // loader rather than built by anything that runs. A cast is seated in `Game::boot`, and
+        // the scene's word for a wall is said there too — the one thing the builder cannot be.
+        const LEVEL: World<2, Gravity> = World::new().with_forces(Gravity::new());
+        // And it really does initialize a `static`, which is where a cart's scene lives.
+        static SCENE: World<2, Gravity> = LEVEL;
+        assert_eq!(SCENE.high_water(), 0);
+
+        let mut world = LEVEL;
+        world.declare_solid(WALL);
+        let member = pebble(&mut world, 0.0, 0.0);
+        assert_eq!(
+            world.records[member.seat()].solid,
+            BitFlags::from(WALL).bits()
+        );
     }
 
     #[test]

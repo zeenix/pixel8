@@ -81,7 +81,11 @@ this path, deliberately allocating until it hits the cap (worth running once
 just to see the error screen).
 
 The stack reserve itself is tunable: the scaffolded `.cargo/config.toml`
-carries a `stack-size=32768` rustflag you can raise or lower.
+carries a `stack-size=32768` rustflag you can raise or lower. What usually
+decides how big it has to be is start-up: a `game!` initializer that is a
+constant is *placed* — the state ships as part of the cart and nothing builds
+it — while a `defer`red one is assembled on the stack and then moved into the
+static that holds it, so for a moment a big game exists twice.
 
 The full story — including exact accounting of the memory and fuel budgets —
 is in [docs/LIMITS.md](https://github.com/zeenix/pixel8/blob/main/docs/LIMITS.md).

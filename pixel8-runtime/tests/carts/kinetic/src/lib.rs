@@ -7,9 +7,9 @@
 //! between them. An import renamed, a flag word packed one way and unpacked the other, and both
 //! halves stay green while every cart in the world goes dark.
 //!
-//! One [`World`] of four seats and no forces at all: what moves the cast is a velocity written
-//! afresh every update, so a member stopped by something goes on leaning into it instead of
-//! settling down and reporting nothing.
+//! One [`World`] of four seats and no forces at all, shipped as a constant and seated in
+//! [`Game::boot`]: what moves the cast is a velocity written afresh every update, so a member
+//! stopped by something goes on leaning into it instead of settling down and reporting nothing.
 //!
 //! * the two *crates* are of one kind: one sprite, one flag, and that flag is what the world calls
 //!   solid — said once, on the world, and neither crate says anything of its own. They walk into
@@ -86,7 +86,7 @@ struct Probe {
     /// one a cart actually configures — and the crossing carries all four.
     world: World<4>,
     /// The two of one kind, walking into each other. Seat order is stepping order, and this is
-    /// the order they are enlisted in.
+    /// the order `boot` enlists them in.
     left: Member,
     right: Member,
     /// And the one that is stopped by nothing, walking into the one that stops nobody.
@@ -99,8 +99,30 @@ struct Probe {
 }
 
 impl Probe {
-    fn new() -> Self {
-        let mut world = World::new().with_solid(CRATE);
+    /// The state the cart ships in: an empty world and four actors with no seats yet. All of it a
+    /// constant, so the module's memory image *is* the opening state and nothing runs to build it.
+    const fn new() -> Self {
+        Self {
+            world: World::new(),
+            left: Member::NOBODY,
+            right: Member::NOBODY,
+            sensor: Member::NOBODY,
+            hazard: Member::NOBODY,
+            pushes: [
+                Velocity::new(CRATE_SPEED, 0.0),
+                Velocity::new(-CRATE_SPEED, 0.0),
+                Velocity::new(SENSOR_SPEED, 0.0),
+                Velocity::new(0.0, 0.0),
+            ],
+        }
+    }
+}
+
+impl Game for Probe {
+    fn boot(&mut self, _ctx: &mut Context) {
+        // What a constant cannot say: the scene's word for a wall, worked out through `Into`, and
+        // the four seats, which only the world can hand out.
+        self.world.declare_solid(CRATE);
         // A crate: wearing the crate cell, and stopped by whatever the world calls solid —
         // anything wearing that same cell, its own kind, which is only safe because the world
         // knows which crate this is.
@@ -111,40 +133,26 @@ impl Probe {
                 .wearing(CRATE_SPRITE)
                 .member()
         };
-        let left = crated(&mut world, LEFT_CRATE_AT);
-        let right = crated(&mut world, RIGHT_CRATE_AT);
+        self.left = crated(&mut self.world, LEFT_CRATE_AT);
+        self.right = crated(&mut self.world, RIGHT_CRATE_AT);
         // The sensor: wearing nothing, told everything, and stopped by nothing — a rule of its
         // own, held against a world that declares otherwise.
-        let sensor = world
+        self.sensor = self
+            .world
             .enlist(SENSOR_AT, SENSOR_ROW, SIDE, SIDE)
             .unwrap()
             .stopped_by(BitFlags::<SpriteFlag>::empty())
             .member();
         // And the hazard: standing still, wearing a flagged cell, stopped by nothing.
-        let hazard = world
+        self.hazard = self
+            .world
             .enlist(HAZARD_AT, SENSOR_ROW, SIDE, SIDE)
             .unwrap()
             .wearing(HAZARD_SPRITE)
             .stopped_by(BitFlags::<SpriteFlag>::empty())
             .member();
-
-        Self {
-            world,
-            left,
-            right,
-            sensor,
-            hazard,
-            pushes: [
-                Velocity::new(CRATE_SPEED, 0.0),
-                Velocity::new(-CRATE_SPEED, 0.0),
-                Velocity::new(SENSOR_SPEED, 0.0),
-                Velocity::default(),
-            ],
-        }
     }
-}
 
-impl Game for Probe {
     fn update(&mut self, ctx: &mut Context) {
         // The cast in the order it was seated, every push renewed.
         let cast = [self.left, self.right, self.sensor, self.hazard];

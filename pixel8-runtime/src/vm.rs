@@ -1436,6 +1436,26 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
     }
 
+    /// A hand-written cart that only works out its rate while `pixel8_init` runs: what the
+    /// documented query order — `pixel8_fps` once, after init — exists for.
+    const FPS_FROM_INIT_CART: &str = r#"
+        (module
+          (global $rate (mut i32) (i32.const 0))
+          (func (export "pixel8_init") (global.set $rate (i32.const 30)))
+          (func (export "pixel8_fps") (result i32) (global.get $rate))
+          (func (export "pixel8_update"))
+          (func (export "pixel8_draw")))
+    "#;
+
+    #[test]
+    fn a_carts_rate_may_be_worked_out_by_its_init() {
+        // The raw-ABI contract: `pixel8_fps` is asked once, after `pixel8_init`, so a cart is
+        // free to compute its rate from state init builds. (The SDK's `boot` is answered the
+        // target cart-side, from the game's own constant, precisely so this order can stand.)
+        let vm = load_test_vm(FPS_FROM_INIT_CART).unwrap();
+        assert_eq!(vm.state().measured_fps_or_target(), 30.0);
+    }
+
     #[test]
     fn fps_falls_back_to_target_until_measured() {
         // No frontend measurement yet: report the cart's target rate (30).

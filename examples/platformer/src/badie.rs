@@ -62,7 +62,6 @@ impl Badie {
         let sprite = match mode {
             GameMode::InGame { .. } if (frame / 4).is_multiple_of(2) => BADIE_ALT_SPRITE,
             GameMode::Ended { .. } | GameMode::InGame { .. } => BADIE_SPRITE,
-            GameMode::Init => unreachable!(),
         };
         let (x, y) = scene.draw_pos(self.member);
         gfx.sprite_ext(sprite, x, y, 8, 8, self.flip, false)

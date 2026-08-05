@@ -5,19 +5,24 @@ scores, unlocked levels, settings: anything that should survive closing the
 console.
 
 ```rust
+fn boot(&mut self, ctx: &mut Context) {
+    // Once, before the first update: the previous best score, if any.
+    self.best = ctx.storage_get("best").and_then(|v| v.as_i64()).unwrap_or(0);
+}
+
 fn update(&mut self, ctx: &mut Context) {
-    if self.best.is_none() {
-        // First frame: read the previous best score (if any).
-        self.best = Some(
-            ctx.storage_get("best").and_then(|v| v.as_i64()).unwrap_or(0),
-        );
-    }
-    if self.score > self.best.unwrap_or(0) {
-        self.best = Some(self.score);
+    if self.score > self.best {
+        self.best = self.score;
         let _ = ctx.storage_set("best", self.score);
     }
 }
 ```
+
+Reading saved data is exactly the kind of thing [`boot`](first-cart.md) is for:
+a cart's opening state is usually a constant, and no constant can ask the store
+what happened last time. Whichever `game!` form made the state, `boot` runs
+once on it, before anything is drawn — so there is no *"is this the first
+frame?"* branch to write and none to pay for on every frame after it.
 
 Keys are `&str`; values are primitives — integers, floats, bools — anything
 that converts into a [`StorageValue`]. Reads come back as a `StorageValue`
@@ -44,7 +49,7 @@ save data; if you hit this limit, what you're storing probably isn't save
 data.
 
 You can see the full pattern in action in the
-[platformer](examples.md#platformer): the best score is loaded once in the
-first `update`, and written back only when a run beats it.
+[platformer](examples.md#platformer): the best score is loaded once in `boot`,
+and written back only when a run beats it.
 
 [`StorageValue`]: https://docs.rs/pixel8/latest/pixel8/enum.StorageValue.html

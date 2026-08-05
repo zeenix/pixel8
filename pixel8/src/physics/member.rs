@@ -51,6 +51,36 @@ pub struct Member {
 }
 
 impl Member {
+    /// A handle to nobody: what a cart's state holds for somebody not yet enlisted.
+    ///
+    /// The seat it names is past the sixty-four the wire carries, so no world has it and no
+    /// [`enlist`](super::World::enlist) can ever hand it out. It is a `const`, which is the whole
+    /// point of it: a cart whose state is [placed rather than built](crate::game) writes its actors
+    /// down as constants and gives them their seats in [`Game::boot`](crate::Game::boot), and this
+    /// is what they hold until it does.
+    ///
+    /// Asking the world anything with it is the same bug as asking with a retired handle, and
+    /// panics the same way — an actor that was never seated is not standing anywhere.
+    ///
+    /// ```no_run
+    /// # use pixel8::physics::Member;
+    /// struct Hero {
+    ///     member: Member,
+    ///     coins: u16,
+    /// }
+    ///
+    /// impl Hero {
+    ///     /// The hero as the cart ships: everything about it but a seat.
+    ///     const fn waiting() -> Self {
+    ///         Self { member: Member::NOBODY, coins: 0 }
+    ///     }
+    /// }
+    /// ```
+    pub const NOBODY: Self = Self {
+        slot: u8::MAX,
+        generation: 0,
+    };
+
     /// Which seat of the cast this is, counting from zero.
     ///
     /// The stepping order is seat order — see [`World::enlist`](super::World::enlist) — so this is

@@ -36,6 +36,12 @@ impl Game for MyGame {
 pixel8::game!(MyGame { x: 64, y: 64 });
 ```
 
+The state the preset `game!` forms name is a constant: it ships placed in the cart's memory image
+rather than built at start-up, so nothing runs to make it and no stack is spent on a copy of it
+(a constructor that must run says so with `defer`, and it — like the `Default` form — is built at
+start-up as ever). Whatever needs the console to answer first — saved data, the clock, seats in a
+physics world — goes in `Game::boot`, which runs once, on that state, before the first update.
+
 ## The console
 
 The console is the `pixel8-console` crate; installing it gives you a `pixel8` command:
