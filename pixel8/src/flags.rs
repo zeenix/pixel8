@@ -5,7 +5,10 @@
 //! [`Button`](crate::Button) and [`SpriteFlag`](crate::SpriteFlag) — fit in a `u8`, so the
 //! backing integer is fixed at `u8` by design.
 
-use core::{marker::PhantomData, ops::BitOr};
+use core::{
+    marker::PhantomData,
+    ops::{BitAnd, BitOr},
+};
 
 /// A single bit flag backed by a `u8` mask.
 pub trait BitFlag: Copy {
@@ -34,6 +37,23 @@ where
     pub const fn empty() -> Self {
         Self {
             bits: 0,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Every flag there is.
+    ///
+    /// The set that contains everything, which is what a question about flags answers with when it
+    /// has no reason to leave any of them out.
+    #[cfg_attr(
+        feature = "physics",
+        doc = "[`Kinetic::heeds`](crate::physics::Kinetic::heeds) is such a question."
+    )]
+    pub const fn all() -> Self {
+        Self {
+            // Every bit of `ALL_BITS` is a flag of `T` by that constant's own definition, which is
+            // the invariant the unchecked constructor asks for.
+            bits: T::ALL_BITS,
             _marker: PhantomData,
         }
     }
@@ -152,6 +172,33 @@ where
 
     fn bitor(self, rhs: T) -> Self {
         self | BitFlags::from(rhs)
+    }
+}
+
+impl<T> BitAnd for BitFlags<T>
+where
+    T: BitFlag,
+{
+    type Output = Self;
+
+    /// The flags the two sets have in common — what [`intersects`](BitFlags::intersects) asks
+    /// about, kept rather than counted.
+    fn bitand(self, rhs: Self) -> Self {
+        Self {
+            bits: self.bits & rhs.bits,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T> BitAnd<T> for BitFlags<T>
+where
+    T: BitFlag,
+{
+    type Output = Self;
+
+    fn bitand(self, rhs: T) -> Self {
+        self & BitFlags::from(rhs)
     }
 }
 

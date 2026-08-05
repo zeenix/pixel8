@@ -102,6 +102,11 @@ jobs:
       - run: cargo test -p pixel8 --all-features
       - run: cargo test -p pixel8 --features plume-effects
       - run: cargo test -p pixel8 --features physics
+      # The two published library crates must stay packageable — and buildable
+      # from their packages, which is what verification proves. Together, so the
+      # runtime's dependency on the SDK resolves against the packaged copy
+      # rather than whatever version crates.io last saw.
+      - run: cargo package -p pixel8 -p pixel8-runtime
 
   book:
     runs-on: ubuntu-latest

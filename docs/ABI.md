@@ -122,6 +122,50 @@ camera), so set them in `pixel8_init` or each frame as needed.
 | `sprite_flags`     | `(n: u32) -> i32`                                                  | sprite flag bitmask                                                                                                 |
 | `set_sprite_flags` | `(n: u32, flags: u32)`                                             | overwrite sprite flags                                                                                              |
 
+### Physics
+
+| function    | signature                             | notes                                                             |
+| ----------- | ------------------------------------- | ----------------------------------------------------------------- |
+| `step_cast` | `(cast: *mut u8, len: u32, cfg: u32)` | step a whole physics cast in place; see the record layout below   |
+
+The one import behind the SDK's `physics::World::step` (the `physics` cargo feature): the cart
+writes its whole cast into a buffer — one 44-byte record per entity, up to 64 of them — and the
+console steps it natively in one call: forces excepted (they are cart code and run before the
+call), the whole of the resolution — walls on the map and in the cast, expulsion, confines, the
+contacts — happens host-side, over the console's own map and sprite-flag state, and costs the
+cart no fuel. `cfg` bit 0 is whether the map's tiles take part at all (`World::mapless` clears
+it); `len` past 64 or a range outside cart memory steps nothing.
+
+Each record, little-endian, offsets in bytes:
+
+| off | type  | field         | direction | meaning                                                       |
+| --- | ----- | ------------- | --------- | ------------------------------------------------------------- |
+| 0   | `f32` | `x`, `y` (8)  | in + out  | the body's exact sub-pixel position                           |
+| 8   | `f32` | `dx`, `dy` (8)| in + out  | velocity in; what survived the step, out                      |
+| 16  | `i16` | `rx`, `ry` (4)| in + out  | the body's coherent drawn pixel                               |
+| 20  | `i16` | `bx`, `by` (4)| in        | the covered rectangle's corner                                |
+| 24  | `u16` | `bw`, `bh` (4)| in        | and its size                                                  |
+| 28  | `i16` | `cx`, `cy` (4)| in        | the confines rectangle's corner (meaningful under `meta` & 2) |
+| 32  | `u16` | `cw`, `ch` (4)| in        | and its size                                                  |
+| 36  | `u16` | `sprite`      | in        | the cell the entity wears; `0xFFFF` = nothing                 |
+| 38  | `u8`  | `solid`       | in        | the flags that stop it, already settled with the world's      |
+| 39  | `u8`  | `heeds`       | in        | the flags it cares to be told about                           |
+| 40  | `u8`  | `meta`        | in        | bit 0: a prop (met, never moved); bit 1: confines are set     |
+| 41  | `u8`  | `sides`       | out       | the contact sides (left/right/above/below)                    |
+| 42  | `u8`  | `touched`     | out       | the flags of everything met                                   |
+| 43  | `u8`  | —             |           | padding                                                       |
+
+The engine that answers is the SDK's own `physics` code, compiled into the console, so the
+resolution itself cannot drift between the wire and the SDK's native path; what each side adds is
+marshalling — a snapshot of the cast in, the answers written back — and
+`pixel8/src/physics/wire.rs` is the layout's single source of truth for it.
+
+The host's work per call is bounded by what a cast can name, not by what a coordinate can: each
+member's step sweeps at most two map's-worths of tiles (the sweep is cut to the 128×64 map before
+a tile of it is visited) and walks the rest of the cast a handful of times, so a full cast of
+worst-case rectangles costs on the order of a million native array lookups — microseconds — and
+no record a cart writes can make it more.
+
 ### Input
 
 | function            | signature         | notes                                                                  |

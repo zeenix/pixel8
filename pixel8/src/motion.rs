@@ -58,11 +58,17 @@ fn fabs(v: f32) -> f32 {
 
 /// `floor(v)` as an `i16`, matching what the console does at draw time, without
 /// the `std`-only `f32::floor`. Positions on a 128x128 screen are tiny, so the
-/// saturating float-to-int cast never bites.
+/// saturating float-to-int cast never bites in practice, but a stray large
+/// delta (a teleport, a bad chase target) can still hand this an out-of-range
+/// `v`; the floor must saturate to `i16::MIN` rather than wrap past it.
+#[inline(always)]
 pub(crate) fn floor_i16(v: f32) -> i16 {
     let t = v as i16;
     if (t as f32) > v {
-        t - 1
+        // `t` is already `i16::MIN` for any `v <= i16::MIN as f32`, so a plain
+        // `t - 1` would underflow; saturate there instead of stepping further
+        // down than the type can hold.
+        t.saturating_sub(1)
     } else {
         t
     }
@@ -181,6 +187,28 @@ impl Body {
         self.y = y;
         self.rx = floor_i16(x);
         self.ry = floor_i16(y);
+    }
+
+    /// The body's whole state — exact position and coherent pixel — for the physics step's
+    /// crossing of the ABI, where the console must continue a body exactly as the cart left it.
+    /// Not a cart's business.
+    #[doc(hidden)]
+    pub fn wire(&self) -> (f32, f32, i16, i16) {
+        (self.x, self.y, self.rx, self.ry)
+    }
+
+    /// A body continued from [`wire`](Self::wire) state, coherent pixel and all. Not a cart's
+    /// business.
+    #[doc(hidden)]
+    pub fn from_wire((x, y, rx, ry): (f32, f32, i16, i16)) -> Self {
+        Self { x, y, rx, ry }
+    }
+
+    /// This body set to [`wire`](Self::wire) state, coherent pixel and all — a continuation, not
+    /// the jump [`set_pos`](Self::set_pos) is. Not a cart's business.
+    #[doc(hidden)]
+    pub fn set_wire(&mut self, state: (f32, f32, i16, i16)) {
+        *self = Self::from_wire(state);
     }
 }
 
@@ -362,5 +390,33 @@ mod tests {
     fn negative_positions_floor_correctly() {
         let b = Body::new(-0.5, -2.0);
         assert_eq!(b.draw_pos(), (-1, -2));
+    }
+
+    #[test]
+    fn floor_i16_saturates_instead_of_underflowing() {
+        // Anything at or below i16::MIN as f32 must floor to i16::MIN, not
+        // wrap past it — the bug this guards against panicked in debug and
+        // silently teleported to i16::MAX in release.
+        assert_eq!(floor_i16(-32768.5), i16::MIN);
+        assert_eq!(floor_i16(-1e9), i16::MIN);
+        assert_eq!(floor_i16(f32::NEG_INFINITY), i16::MIN);
+        // Exactly i16::MIN is already covered above, but spell it out: no
+        // spurious off-by-one at the boundary itself.
+        assert_eq!(floor_i16(i16::MIN as f32), i16::MIN);
+    }
+
+    #[test]
+    fn floor_i16_ordinary_values_unchanged() {
+        assert_eq!(floor_i16(-0.5), -1);
+        assert_eq!(floor_i16(3.9), 3);
+        assert_eq!(floor_i16(i16::MAX as f32), i16::MAX);
+    }
+
+    #[test]
+    fn floor_i16_nan_is_unchanged() {
+        // Not a claim that this is "correct" — just pinning today's behavior
+        // (the `as i16` cast maps NaN to 0) so this fix doesn't accidentally
+        // change it.
+        assert_eq!(floor_i16(f32::NAN), 0);
     }
 }

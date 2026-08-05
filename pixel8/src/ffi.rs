@@ -36,6 +36,7 @@ extern "C" {
     pub fn map(cel_x: i32, cel_y: i32, sx: i32, sy: i32, cel_w: i32, cel_h: i32, layers: u32);
     pub fn map_tile(x: i32, y: i32) -> i32;
     pub fn set_map_tile(x: i32, y: i32, v: u32);
+    pub fn step_cast(cast: *mut u8, len: u32, config: u32);
     pub fn sprite_flags(n: u32) -> i32;
     pub fn set_sprite_flags(n: u32, flags: u32);
     pub fn sfx(n: i32, channel: i32);
@@ -130,6 +131,7 @@ mod stubs {
         0
     }
     pub unsafe fn set_sprite_flags(_n: u32, _flags: u32) {}
+    pub unsafe fn step_cast(_cast: *mut u8, _len: u32, _config: u32) {}
     pub unsafe fn sfx(_n: i32, _channel: i32) {}
     // Pretend a start always succeeds (nonzero token) so cart logic type-checks
     // and unit-tests on native targets, with no real audio.

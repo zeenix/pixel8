@@ -1,8 +1,18 @@
-use pixel8::{MusicId, SfxId, SpriteFlag, SpriteId, SCREEN_HEIGHT, SCREEN_WIDTH};
+use pixel8::{physics::Gravity, MusicId, SfxId, SpriteFlag, SpriteId, SCREEN_HEIGHT, SCREEN_WIDTH};
 
 pub const MAX_TAKEN: usize = 8;
+// The hero and, while it lives, the badie: everything the world is handed each update.
+pub const MAX_CAST: usize = 2;
+
+// The level's pull, and the whole of the weather anything here walks around in — a constant, so
+// nothing holds a copy of it and no level has to pass one around.
+pub const GRAVITY: Gravity = Gravity::new();
 
 pub const SOLID: SpriteFlag = SpriteFlag::Flag0;
+// The badie, on both of its walk-cycle sprites — it is the badie whichever frame it is drawn
+// on. A flag of its own rather than `SOLID`, so the hero walks into the badie instead of being
+// stopped by it.
+pub const BADIE: SpriteFlag = SpriteFlag::Flag1;
 // The level, in pixels: 32 tiles across and 16 down. There is nothing outside it — no floor
 // past the last tile — so it is also as far as the hero is allowed to go.
 pub const LEVEL_WIDTH: u16 = 32 * 8;
@@ -27,7 +37,7 @@ pub const BADIE_START_X: f32 = (SCREEN_WIDTH * 2 - 16) as f32;
 pub const BADIE_END_X: f32 = (SCREEN_WIDTH * 2 - 8 * 8) as f32;
 pub const BADIE_Y: f32 = (SCREEN_HEIGHT - 3 * 8) as f32;
 pub const BADIE_WIDTH: u16 = 8;
-pub const BADIE_HEIGHT: u16 = 7;
+pub const BADIE_HEIGHT: u16 = 8;
 
 pub const COIN_SPRITE: SpriteId = SpriteId(3);
 pub const TROPHY_SPRITE: SpriteId = SpriteId(4);

@@ -1,0 +1,24 @@
+[package]
+name = "kinetic-cart"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The SDK as it stands in this working tree, so the cart is built against the
+# very ABI the runtime beside it links — which is the whole point of the test.
+pixel8 = { path = "../../../../pixel8", default-features = false, features = [
+    "physics",
+] }
+
+# Standalone workspace: a fixture cart builds independently of the pixel8
+# workspace, exactly like an example or a project created with `new`.
+[workspace]
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"

@@ -14,20 +14,19 @@ use crate::Direction;
 /// A force reaches an entity through what [`Kinetic`] grants and nothing else: it reads whatever
 /// it cares about — the [`mass`](Kinetic::mass), usually — and bends the
 /// [`velocity_mut`](Kinetic::velocity_mut). Position is never touched, which is what leaves the
-/// cart in charge of movement: [`Kinetic::step`] applies the forces, stops whatever ran into the
-/// map, and moves the body with what survives, in that order.
+/// cart in charge of movement: [`World::step`](super::World::step) applies the forces, stops
+/// whatever ran into the world, and moves the body with what survives, in that order.
 ///
-/// `Force` is dyn-compatible, so forces of different types can be gathered up and handed over
-/// together — which is exactly what [`step`](Kinetic::step) takes:
+/// Forces compose: a tuple of forces is one force, applied left to right, and `()` is the still
+/// air. That is the shape a scene's whole weather takes as the one value its
+/// [`World`](super::World) [owns](super::World::with_forces):
 ///
 /// ```no_run
-/// # use pixel8::{physics::{Force, Gravity, Kinetic, Wind}, Context};
+/// # use pixel8::{physics::{Force, Gravity, Kinetic, Wind, World}, Context};
 /// # fn f(entity: &mut impl Kinetic, ctx: &Context) {
-/// let gravity = Gravity::new();
-/// let wind = Wind::new(0.3);
-/// let weather: [&dyn Force; 2] = [&gravity, &wind];
+/// let mut world: World<64, _> = World::new().with_forces((Gravity::new(), Wind::new(0.3)));
 ///
-/// entity.step(ctx, &weather);
+/// world.step(ctx, &mut [entity.as_kinetic()]);
 /// # }
 /// ```
 pub trait Force {
@@ -56,10 +55,34 @@ pub trait Force {
     /// }
     /// ```
     ///
-    /// Most carts never call this: they hand their forces to [`Kinetic::step`], which applies them
-    /// in the order the slice puts them.
+    /// Most carts never call this: they hand their forces to the
+    /// [`World`](super::World::with_forces), whose step applies them to every entity in the cast,
+    /// in the order they were composed.
     fn apply(&self, entity: &mut dyn Kinetic);
 }
+
+/// The still air: no force at all, and the weather a [`World`](super::World) that never took any
+/// owns.
+impl Force for () {
+    fn apply(&self, _: &mut dyn Kinetic) {}
+}
+
+/// Forces compose: a tuple of them is one force, applied left to right — the whole of a scene's
+/// weather as the one value its [`World`](super::World) owns.
+macro_rules! forces_compose {
+    ($( ( $($force:ident),+ ) )+) => {$(
+        #[allow(non_snake_case)]
+        impl<$($force: Force),+> Force for ($($force,)+) {
+            fn apply(&self, entity: &mut dyn Kinetic) {
+                let ($($force,)+) = self;
+                $($force.apply(entity);)+
+            }
+        }
+    )+};
+}
+forces_compose!((A)(A, B)(A, B, C)(A, B, C, D)(A, B, C, D, E)(
+    A, B, C, D, E, G
+));
 
 /// A [`mass`](Kinetic::mass) fit to divide by: one that means nothing — zero, negative, or `NaN`
 /// — reads as the default `1.0`.
@@ -109,12 +132,13 @@ pub(super) const DIRECTIONS: [Direction; 8] = [
     Direction::UpLeft,
 ];
 
-/// A minimal [`Kinetic`] for the tests throughout this module to push around: a body, a velocity
-/// and a mass, and nothing else.
+/// A minimal [`Kinetic`] for the tests throughout this module to push around: a body, a velocity,
+/// a slot to be told what it met, and a mass. Nothing else.
 #[cfg(test)]
 pub(super) struct Mob {
     pub(super) body: crate::Body,
     pub(super) velocity: super::Velocity,
+    pub(super) contacts: super::Contacts,
     mass: f32,
 }
 
@@ -125,6 +149,7 @@ impl Mob {
         Self {
             body: crate::Body::new(0.0, 0.0),
             velocity: super::Velocity::default(),
+            contacts: super::Contacts::default(),
             mass: 1.0,
         }
     }
@@ -166,6 +191,14 @@ impl Kinetic for Mob {
 
     fn velocity_mut(&mut self) -> &mut super::Velocity {
         &mut self.velocity
+    }
+
+    fn contacts(&self) -> &super::Contacts {
+        &self.contacts
+    }
+
+    fn contacts_mut(&mut self) -> &mut super::Contacts {
+        &mut self.contacts
     }
 
     fn bounds(&self) -> super::Bounds {
@@ -240,8 +273,8 @@ mod tests {
         let entity: &mut dyn Kinetic = &mut mob;
         force.apply(entity);
         assert_eq!(mob.velocity, Velocity::new(0.0, -0.5));
-        // And nothing moved: a force bends a velocity, and it is the entity's own step that
-        // turns that into movement.
+        // And nothing moved: a force bends a velocity, and it is the world's step that turns
+        // that into movement.
         assert_eq!(mob.body.pos(), (0.0, 0.0));
     }
 }
