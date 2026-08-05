@@ -24,14 +24,14 @@ bitflag_enum! {
 /// Everything one step of an entity ran into: the sides that were stopped, and the sprite flags
 /// of all it met on the way.
 ///
-/// What [`World::step`](super::World::step) writes into every entity's
-/// [`contacts`](super::Kinetic::contacts) slot — the whole of it, walls and the edge of the world
-/// together — so a cart standing an entity on the bottom of the level, on a floor tile and on a
-/// moving platform reads the same answer the same way.
+/// What [`World::step`](super::World::step) leaves in every member's seat, for
+/// [`World::contacts`](super::World::contacts) to answer with — the whole of it, walls and the edge
+/// of the world together — so a cart standing a member on the bottom of the level, on a floor tile
+/// and on a moving platform reads the same answer the same way.
 ///
 /// The two halves answer two kinds of question. The *sides* are the solid story: a side is
-/// reported when the entity was moving that way and something stopped it — or held it, at the
-/// edge of its [`confines`](super::Kinetic::confines), or pushed it back out, for a cast member
+/// reported when the member was moving that way and something stopped it — or held it, at the
+/// edge of its [confines](super::Enlisting::confined_to), or pushed it back out, for a neighbour
 /// that had come to stand on it — so one resting against a wall it is not pushing into reports
 /// nothing, and [`below`](Self::below) is what a platformer calls *grounded*. The *flags* —
 /// [`touched`](Self::touched) — are everything else: every sprite flag carried by a tile or by
@@ -45,11 +45,11 @@ bitflag_enum! {
 /// entity and is still named.
 ///
 /// ```no_run
-/// # use pixel8::{physics::Kinetic, SpriteFlag};
+/// # use pixel8::{physics::{Member, World}, SpriteFlag};
 /// # const SPIKES: SpriteFlag = SpriteFlag::Flag2;
-/// # fn f(hero: &impl Kinetic) -> (bool, bool) {
+/// # fn f(world: &World<8>, hero: Member) -> (bool, bool) {
 /// // The walls, the spikes and the edge of the world, in one answer the world left behind.
-/// let contacts = hero.contacts();
+/// let contacts = world.contacts(hero);
 ///
 /// (contacts.below(), contacts.touches(SPIKES))
 /// # }
@@ -119,12 +119,12 @@ impl Contacts {
     /// than ask it four questions.
     ///
     /// ```no_run
-    /// # use pixel8::physics::{Contact, Kinetic};
-    /// # fn f(patrol: &impl Kinetic, walking_left: bool) -> bool {
+    /// # use pixel8::physics::{Contact, Member, World};
+    /// # fn f(world: &World<8>, patrol: Member, walking_left: bool) -> bool {
     /// let ahead = if walking_left { Contact::Left } else { Contact::Right };
     ///
     /// // A wall in front of the patrol, whichever way "in front" is this update.
-    /// patrol.contacts().sides().contains(ahead)
+    /// world.contacts(patrol).sides().contains(ahead)
     /// # }
     /// ```
     pub fn sides(self) -> BitFlags<Contact> {
@@ -133,33 +133,34 @@ impl Contacts {
 
     /// Every sprite flag carried by anything on the ground the step covered — where it began, what
     /// it crossed, what stopped it, and what it ended up inside — and by anything whose own step
-    /// arrived on this entity.
+    /// arrived on this member.
     ///
-    /// The whole of the step and not its two ends: an entity that walked out of the pond this
+    /// The whole of the step and not its two ends: a member that walked out of the pond this
     /// update is told it was in the pond, and one that crossed a two-pixel trickle in the middle of
     /// a twelve-pixel stride is told about the trickle. That is more than the sides can promise —
-    /// stopping is resolved where the entity was trying to go, so a thing thin enough to be stepped
+    /// stopping is resolved where the member was trying to go, so a thing thin enough to be stepped
     /// clean over is reported and not stopped at, and what keeps a fall from doing it to a floor is
     /// [`Gravity`](super::Gravity)'s terminal velocity.
     ///
-    /// A meeting between cast members reaches both of them, whichever one's movement made it. An
-    /// entity standing still as something flies into it is told in the very update the arrival
+    /// A meeting between cast members reaches both of them, whichever one's movement made it. A
+    /// member standing still as something flies into it is told in the very update the arrival
     /// happens — not a frame later, when its own step would find the overlap, and not never, where
-    /// the arriver dies of the meeting and is dropped from the cast before its wreck could be
-    /// walked into. Only the flags carry the news: an arrival never writes a side, since the one
-    /// arrived on was stopped by nothing.
+    /// the arriver dies of the meeting and is retired before its wreck could be walked into. Only
+    /// the flags carry the news: an arrival never writes a side, since the one arrived on was
+    /// stopped by nothing.
     ///
     /// The flags say what *kind* of thing was met, never which one: a step through two patches
     /// of water reads exactly like a step through one. A cart that must know which — the coin to
     /// take off the map, the enemy to kill — looks at the state it already holds: the map, under
-    /// [`bounds`](super::Kinetic::bounds), or the one badie it keeps, asked
-    /// [`overlaps`](super::Kinetic::overlaps) if the rectangles have to be compared at all.
+    /// [`World::bounds`](super::World::bounds), or the one badie whose handle it keeps, its
+    /// rectangle asked [`Bounds::overlaps`](super::Bounds::overlaps) if the two have to be compared
+    /// at all.
     ///
     /// ```no_run
-    /// # use pixel8::{physics::Kinetic, SpriteFlag};
+    /// # use pixel8::{physics::{Member, World}, SpriteFlag};
     /// # const WATER: SpriteFlag = SpriteFlag::Flag3;
-    /// # fn f(hero: &impl Kinetic) {
-    /// let swimming = hero.contacts().touched().contains(WATER);
+    /// # fn f(world: &World<8>, hero: Member) {
+    /// let swimming = world.contacts(hero).touched().contains(WATER);
     /// # }
     /// ```
     pub fn touched(self) -> BitFlags<SpriteFlag> {
@@ -170,14 +171,14 @@ impl Contacts {
     ///
     /// [`touched`](Self::touched) with the question a cart actually asks put to it: one flag or
     /// several, and any of them in common is a yes. So the water, the lava and the spikes can be
-    /// asked about in one call, and an entity that met none of them is told so once.
+    /// asked about in one call, and a member that met none of them is told so once.
     ///
     /// ```no_run
-    /// # use pixel8::{physics::Kinetic, SpriteFlag};
+    /// # use pixel8::{physics::{Member, World}, SpriteFlag};
     /// # const WATER: SpriteFlag = SpriteFlag::Flag3;
     /// # const LAVA: SpriteFlag = SpriteFlag::Flag4;
-    /// # fn f(hero: &impl Kinetic) {
-    /// let contacts = hero.contacts();
+    /// # fn f(world: &World<8>, hero: Member) {
+    /// let contacts = world.contacts(hero);
     /// let swimming = contacts.touches(WATER);
     /// let burning = contacts.touches(LAVA | WATER);
     /// # }
@@ -189,16 +190,16 @@ impl Contacts {
 
 /// Two answers about the same update, folded into one: the sides of either, the flags of either.
 ///
-/// One step is one answer, so a cart rarely needs this for a single entity. What it is for is a
-/// whole cast read as one — what the swarm ran into this update, whether *anything* reached the
-/// water — where the fold is what turns a slice's worth of answers back into one:
+/// One step is one answer, so a cart rarely needs this for a single member. What it is for is a
+/// whole swarm read as one — what any of them ran into this update, whether *anything* reached the
+/// water — where the fold is what turns a handful of answers back into one:
 ///
 /// ```no_run
-/// # use pixel8::physics::{Contacts, Kinetic};
-/// # fn f(swarm: &[impl Kinetic]) -> Contacts {
+/// # use pixel8::physics::{Contacts, Member, World};
+/// # fn f(world: &World<16>, swarm: &[Member]) -> Contacts {
 /// let mut met = Contacts::empty();
 /// for wasp in swarm {
-///     met |= *wasp.contacts();
+///     met |= world.contacts(*wasp);
 /// }
 ///
 /// met
@@ -222,11 +223,10 @@ impl BitOrAssign for Contacts {
     }
 }
 
-/// A step that met nothing, which is what an entity that has not been stepped yet has met.
+/// A step that met nothing, which is what a member that has not been stepped yet has met.
 ///
-/// The slot every [`Kinetic`](super::Kinetic) holds starts here, so a cart writing an entity down
-/// spells it `Contacts::default()` — or derives `Default` for the whole entity and never mentions
-/// it at all.
+/// Every seat starts here, so the answer a cart reads out of one it has only just
+/// [enlisted](super::World::enlist) is empty rather than anything it has to guard against.
 impl Default for Contacts {
     fn default() -> Self {
         Self::empty()

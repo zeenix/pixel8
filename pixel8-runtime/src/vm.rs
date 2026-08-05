@@ -770,14 +770,15 @@ fn step_the_cast(caller: &mut Caller<'_, HostState>, ptr: u32, len: u32, config:
             }
             flags(state.map.get(x as i32, y as i32) as u32)
         };
-        // Any ceiling serves the host — its world carries no wire buffer — so the default one is
-        // spelled only to give inference an answer.
-        let world: World = if config & 1 != 0 {
+        // A world of no seats of its own: the cast is the one handed in, decoded out of cart
+        // memory, so the host's world is nothing but the two words of configuration below.
+        let world: World<0> = if config & 1 != 0 {
             World::new()
         } else {
             World::mapless()
         };
-        let mut entities: Vec<&mut dyn Kinetic> = cast.iter_mut().map(|e| e.as_kinetic()).collect();
+        let mut entities: Vec<&mut dyn Kinetic> =
+            cast.iter_mut().map(|e| e as &mut dyn Kinetic).collect();
         world.step_hosted(&mut entities, tiles, |sprite| flags(sprite.0 as u32));
     }
 

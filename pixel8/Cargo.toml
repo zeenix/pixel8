@@ -21,10 +21,10 @@ std = []
 plume-effects = ["dep:heapless"]
 # Gravity, wind, collision (against the map's tiles, against the scene's other
 # moving matter, and between entities) and the force fields carts write
-# themselves (`physics`). Off by default like every other family. It shares the
-# SDK's one dependency with `plume-effects`: the fixed-capacity `Cast` a cart
-# hands its moving matter over in.
-physics = ["dep:heapless"]
+# themselves (`physics`). Off by default like every other family, and
+# dependency-free: the `World` owns its cast in a fixed array of its own, so
+# there is nothing here for a vector crate to hold.
+physics = []
 
 # Dependency-free unless an effect feature asks for something: a cart building
 # for wasm32-unknown-unknown links this crate and, by default, nothing else.

@@ -47,7 +47,7 @@ where
     /// has no reason to leave any of them out.
     #[cfg_attr(
         feature = "physics",
-        doc = "[`Kinetic::heeds`](crate::physics::Kinetic::heeds) is such a question."
+        doc = "[`Enlisting::heeding`](crate::physics::Enlisting::heeding) is such a question."
     )]
     pub const fn all() -> Self {
         Self {

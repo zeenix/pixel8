@@ -2,7 +2,7 @@
 
 use core::ops::RangeInclusive;
 
-use super::{force::weighed, Force, Kinetic};
+use super::{force::weighed, Force, Subject};
 use crate::{Context, Direction};
 
 /// A wind, named for the side it comes *from*.
@@ -129,8 +129,8 @@ impl Wind {
     /// This is also the drag that keeps a wind from accelerating things forever, so `0.0` is a
     /// wind that does nothing rather than a gentle one.
     ///
-    /// An entity's [`mass`](super::Kinetic::mass) divides it: exposure is how much of the wind a
-    /// thing catches, mass is how much there is of it to shift, and the wind's grip is the one
+    /// A member's [mass](super::Enlisting::weighing) divides it: exposure is how much of the wind
+    /// a thing catches, mass is how much there is of it to shift, and the wind's grip is the one
     /// over the other.
     pub fn with_exposure(mut self, exposure: f32) -> Self {
         self.set_exposure(exposure);
@@ -237,8 +237,7 @@ impl Wind {
     ///
     /// The opposite of [`direction`](Self::direction), at [`speed`](Self::speed) — which is worth
     /// having spelled out, given that the direction names the side the wind comes from. This is
-    /// what to reach for to lean something the wind's way that is not a [`Kinetic`](super::Kinetic)
-    /// at all.
+    /// what to reach for to lean something the wind's way that is not in the cast at all.
     pub fn blow(&self) -> (f32, f32) {
         let (ux, uy) = self.direction.unit();
         (-ux * self.speed, -uy * self.speed)
@@ -246,16 +245,16 @@ impl Wind {
 }
 
 impl Force for Wind {
-    /// The mass divides the wind's grip: twice as much of an entity to shift is half the shove.
-    fn apply(&self, entity: &mut dyn Kinetic) {
+    /// The mass divides the wind's grip: twice as much of a member to shift is half the shove.
+    fn apply(&self, subject: &mut Subject) {
         // Easing towards the wind's speed instead of adding to the velocity is what makes the
         // wind self-limiting: the gap it closes shrinks as the two converge, so a velocity
         // approaches the wind's speed and never overshoots it.
         //
         // The clamp is what holds that for something light enough to be taken whole: a share of
         // the gap past 1.0 would carry a velocity past the wind and set it swinging about it.
-        let take = (self.exposure / weighed(entity.mass())).clamp(0.0, 1.0);
-        let velocity = entity.velocity_mut();
+        let take = (self.exposure / weighed(subject.mass())).clamp(0.0, 1.0);
+        let velocity = subject.velocity_mut();
         // Only the component along the line the wind blows is eased; movement across it is
         // nothing to do with the wind. The four straight winds say so on the one axis they touch,
         // which is the vector arithmetic below with the zeroes taken out — and the same float,
@@ -314,7 +313,7 @@ mod tests {
         let mut mob = Mob::new();
         let mut previous = 0.0;
         for _ in 0..600 {
-            wind.apply(&mut mob);
+            mob.shove(&wind);
             // Never backwards, never past the wind's own speed — the last few updates close a
             // gap too small for an `f32` to hold, so they stand still rather than climbing —
             // and `dy` is none of a left-hand wind's business.
@@ -331,7 +330,7 @@ mod tests {
         let wind = Wind::new(-0.5);
         let mut mob = Mob::moving(-3.0, 0.0);
         for _ in 0..600 {
-            wind.apply(&mut mob);
+            mob.shove(&wind);
             assert!(mob.velocity.dx <= -0.5);
         }
         assert!(
@@ -443,7 +442,7 @@ mod tests {
 
         for update in 0..600 {
             for mob in [&mut heavy, &mut ordinary, &mut light] {
-                wind.apply(&mut *mob);
+                mob.shove(&wind);
                 // Whatever it weighs, the shove is a share of the gap, so the gap only ever
                 // closes: nothing is blown past the wind and left oscillating about it.
                 assert!(mob.velocity.dx <= wind.speed());

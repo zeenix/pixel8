@@ -1,8 +1,16 @@
-use pixel8::{physics::Gravity, MusicId, SfxId, SpriteFlag, SpriteId, SCREEN_HEIGHT, SCREEN_WIDTH};
+use pixel8::{
+    physics::{Gravity, World},
+    MusicId, SfxId, SpriteFlag, SpriteId, SCREEN_HEIGHT, SCREEN_WIDTH,
+};
 
 pub const MAX_TAKEN: usize = 8;
-// The hero and, while it lives, the badie: everything the world is handed each update.
+// The hero and, while it lives, the badie: every seat the scene has.
 pub const MAX_CAST: usize = 2;
+
+/// The scene itself: the two seats above, under the level's pull, owning everything about the
+/// hero and the badie that moves or is collided with. Named once here because the two of them are
+/// handed it in every method that has anything to do with where they are.
+pub type Scene = World<MAX_CAST, Gravity>;
 
 // The level's pull, and the whole of the weather anything here walks around in — a constant, so
 // nothing holds a copy of it and no level has to pass one around.
