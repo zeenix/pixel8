@@ -195,8 +195,10 @@ pub trait Kinetic {
     /// and everything else the world meets on its behalf it throws away without ever working out
     /// whether it was met. Only flags in here — or in `solid`, which is always heeded whether it is
     /// named here or not — reach [`Contacts::touched`], and they reach it the same way from a tile
-    /// as from another cast member. So the promise reads in one line: *you are told what you heed,
-    /// and you are stopped by what you call solid.*
+    /// as from another cast member — and the same way again when the meeting was the *other*
+    /// party's doing, an arrival on this entity while it stood. So the promise reads in one line:
+    /// *you are told what you heed, whoever's movement brought it, and you are stopped by what you
+    /// call solid.*
     ///
     /// [Everything](BitFlags::all) is the default, and it is the honest one: an entity that has not
     /// said otherwise is told about every flag it meets, which is what makes a `Contacts` worth

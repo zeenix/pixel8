@@ -266,6 +266,12 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
     /// flagged `CRATE`, each with `CRATE` in `solid`, stop each other and neither is ever its own
     /// wall.
     ///
+    /// A meeting between cast members reaches both of them, whichever one's movement made it: the
+    /// mover's own sweep answers the mover, and whoever it arrived on is told what arrived —
+    /// filtered by that entity's own [`heeds`](Kinetic::heeds) and solid, flags only, in the same
+    /// update. So a ram is felt on both sides of it however the two were ordered, and either party
+    /// may be dropped the moment the step returns without costing the other its news.
+    ///
     /// The two halves of the answer are taken over different ground, and on purpose. An entity is
     /// *stopped* where an axis was trying to go — the endpoint, which is where a wall has to be to
     /// be one — and it is told what it *met* over the whole of the step: where it began, the ground
@@ -436,6 +442,7 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
         // the `dyn` instead, exactly as it always was — slower, and identical in what it answers.
         let mut boxes = [EMPTY; SNAPSHOT];
         let mut carries = [BitFlags::empty(); SNAPSHOT];
+        let mut wants = [BitFlags::empty(); SNAPSHOT];
         let members = cast.len();
         let fits = members <= SNAPSHOT;
         // Everything anybody in the cast is wearing, in one flag set. What it buys is the two
@@ -443,18 +450,24 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
         // own out there to be pushed out of, and whether there is anything out there at all.
         let mut worn = BitFlags::empty();
         if fits {
-            for ((rectangle, flagged), member) in
-                boxes.iter_mut().zip(carries.iter_mut()).zip(cast.iter())
+            for (((rectangle, flagged), listening), member) in boxes
+                .iter_mut()
+                .zip(carries.iter_mut())
+                .zip(wants.iter_mut())
+                .zip(cast.iter())
             {
-                // An entity that wears nothing, or whose cell the cart flagged with nothing, is
-                // not there for anybody: it is stopped and it senses, and it stops and tells
-                // nobody. Its slot stays the nothing it was born as, and it is never asked for a
-                // rectangle at all.
-                let Some(sprite) = member.sprite() else {
-                    continue;
-                };
-                let flags = carried(sprite);
-                if !flags.is_empty() {
+                // What the member is listening for — everything it heeds or calls solid — which
+                // is what an arrival on it is judged against. A prop listens for nothing: its
+                // contacts are never written, so there is nobody home to tell.
+                if !member.prop() {
+                    *listening = member.heeds() | member.solid().unwrap_or(self.solid);
+                }
+                // An entity that wears nothing, or whose cell the cart flagged with nothing,
+                // stands in nobody's way and tells nobody anything — but one that is listening
+                // still keeps a rectangle here, so an arrival on it can be seen. Only a slot
+                // neither wearing nor listening stays the nothing it was born as.
+                let flags = member.sprite().map_or(BitFlags::empty(), &carried);
+                if !flags.is_empty() || !listening.is_empty() {
                     *rectangle = member.bounds();
                     *flagged = flags;
                     worn = worn | flags;
@@ -471,6 +484,11 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
             }
         }
 
+        // The meetings each entity's own step makes, delivered to the other party once the whole
+        // cast has moved: a slot per member, holding the flags of everything that arrived on it.
+        // Collected rather than written straight away, because the other party may not have been
+        // stepped yet — and its own step overwrites its contacts whole.
+        let mut arrived = [BitFlags::<SpriteFlag>::empty(); CAST];
         for index in 0..cast.len() {
             // The cast without this entity in it, in two pieces: everything stepped already, and
             // everything still to be. The split is what the fallback walks, and the index of the
@@ -488,31 +506,70 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
                 continue;
             }
 
+            let mine = if fits {
+                carries[index]
+            } else {
+                entity.sprite().map_or(BitFlags::empty(), &carried)
+            };
+            let neighbours = Neighbours {
+                // Lazily, since the slices would be indexed out of a snapshot that was never
+                // filled for a cast too long to fit in one.
+                taken: fits.then(|| (&boxes[..members], &carries[..members], &wants[..members])),
+                worn,
+                mine: index,
+                before,
+                after,
+                carried: &carried,
+                solid: self.solid,
+                met: core::cell::Cell::new(0),
+            };
             step_entity(
                 &mut **entity,
                 tiles,
                 self.reads_map,
                 self.solid,
-                &Neighbours {
-                    // Lazily, since the slice would be indexed out of a snapshot that was never
-                    // filled for a cast too long to fit in one.
-                    taken: fits.then(|| (&boxes[..members], &carries[..members])),
-                    worn,
-                    mine: index,
-                    before,
-                    after,
-                    carried: &carried,
-                },
+                mine,
+                &neighbours,
             );
+
+            // Whoever this step arrived on is owed the news of it: what this entity wears, into
+            // the slot of each neighbour the resolution noted, for the delivery below.
+            let mut met = neighbours.met.get();
+            while met != 0 {
+                let slot = met.trailing_zeros() as usize;
+                met &= met - 1;
+                arrived[slot] = arrived[slot] | mine;
+            }
 
             // The entity has just moved, so its slot follows it. That is what keeps the cast
             // sequential: everything stepped after this one meets it where it now is, and
             // everything already stepped met it where it was. Flags cannot change under a step, so
-            // the one read of them at the top stands — and a slot with none was never a rectangle
-            // anybody was going to be shown.
-            if fits && !carries[index].is_empty() {
+            // the one read of them at the top stands — and a slot that neither wears nor listens
+            // was never a rectangle anybody was going to be shown.
+            if fits && (!carries[index].is_empty() || !wants[index].is_empty()) {
                 boxes[index] = entity.bounds();
             }
+        }
+
+        // The deliveries: every meeting reaches both of its parties in the one step, whoever's
+        // movement made it. Each recipient hears only what it was listening for — the very filter
+        // the notes were taken under — and hears it by having it joined onto the answer its own
+        // step wrote, sides untouched: an arrival tells an entity what reached it, never that it
+        // was stopped.
+        for (index, entity) in cast.iter_mut().enumerate() {
+            let news = arrived[index];
+            if news.is_empty() {
+                continue;
+            }
+            let listening = if fits {
+                wants[index]
+            } else if entity.prop() {
+                BitFlags::empty()
+            } else {
+                entity.heeds() | entity.solid().unwrap_or(self.solid)
+            };
+            let contacts = entity.contacts_mut();
+            contacts.touched = contacts.touched | (news & listening);
         }
     }
 }
@@ -552,6 +609,7 @@ fn step_entity(
     tiles: impl Fn(i16, i16) -> BitFlags<SpriteFlag> + Copy,
     reads_map: bool,
     solid: BitFlags<SpriteFlag>,
+    worn: BitFlags<SpriteFlag>,
     neighbours: &impl Cast,
 ) {
     // Everything the entity describes is read before anything of it moves — the limits along
@@ -568,9 +626,14 @@ fn step_entity(
     // The scene's word for solid, unless this entity has one of its own.
     let solid = entity.solid().unwrap_or(solid);
     let heeds = entity.heeds();
-    if let Some(mut collider) =
-        Collider::new(entity.body(), entity.bounds(), solid, heeds, reads_map)
-    {
+    if let Some(mut collider) = Collider::new(
+        entity.body(),
+        entity.bounds(),
+        solid,
+        heeds,
+        worn,
+        reads_map,
+    ) {
         // Out of anything standing on it first, so the resolution starts from a box that is clear
         // — and only where there is something out there to be inside of. An entity that calls
         // nothing solid can stand in anything, and one no neighbour is a wall to has nothing to be
@@ -613,11 +676,19 @@ fn step_entity(
 /// that is the whole of how an entity comes to be skipped against itself. What each neighbour is
 /// worth is answered as the resolution reaches its slot: the rectangle it covers *now*, and the
 /// flags the cart wrote on the cell it says it wears.
+/// The snapshot's three answers about the whole cast, a slot each in cast order: the rectangle
+/// each member covers, the flags it carries, and the flags it is listening for.
+type Snapshot<'a> = (
+    &'a [Bounds],
+    &'a [BitFlags<SpriteFlag>],
+    &'a [BitFlags<SpriteFlag>],
+);
+
 struct Neighbours<'a, 'cast, F> {
-    /// Every cast member's rectangle and the flags it carries as they stand right now, a slot each
-    /// in cast order — or nothing at all for a cast too long to have been snapshotted, which is
-    /// walked through the `dyn` below instead.
-    taken: Option<(&'a [Bounds], &'a [BitFlags<SpriteFlag>])>,
+    /// Every cast member's rectangle, the flags it carries and the flags it is listening for, as
+    /// they stand right now, a slot each in cast order — or nothing at all for a cast too long to
+    /// have been snapshotted, which is walked through the `dyn` below instead.
+    taken: Option<Snapshot<'a>>,
     /// Everything anybody in the cast is wearing, the entity being stepped included — see
     /// [`Cast::carried`]. Nothing at all for a cast too long to have been snapshotted, which
     /// answers every question the long way round.
@@ -627,12 +698,31 @@ struct Neighbours<'a, 'cast, F> {
     before: &'a [&'cast mut dyn Kinetic],
     after: &'a [&'cast mut dyn Kinetic],
     carried: F,
+    /// The scene's word for solid, which is what a neighbour with no rule of its own is listening
+    /// for a wall with — the long-cast fallback works a neighbour's listening out through the
+    /// `dyn`, and needs the world's word to finish it.
+    solid: BitFlags<SpriteFlag>,
+    /// One bit per cast slot: the neighbours this entity's step has [met](Cast::note) while they
+    /// were listening. A `Cell` because the walks hold the whole cast by `&self`; a `u64` because
+    /// the wire's ceiling is sixty-four, and the world's cannot exceed it.
+    met: core::cell::Cell<u64>,
 }
 
 impl<F: Fn(SpriteId) -> BitFlags<SpriteFlag>> Cast for Neighbours<'_, '_, F> {
     #[inline(always)]
     fn carried(&self) -> BitFlags<SpriteFlag> {
         self.worn
+    }
+
+    fn note(&self, index: usize) {
+        // The walk's index becomes the cast's slot: the snapshot indexes the whole cast, and the
+        // fallback indexes it with the entity being stepped taken out of the middle.
+        let slot = match self.taken {
+            Some(_) => index,
+            None if index < self.mine => index,
+            None => index + 1,
+        };
+        self.met.set(self.met.get() | 1 << slot);
     }
 
     #[inline(always)]
@@ -645,7 +735,7 @@ impl<F: Fn(SpriteId) -> BitFlags<SpriteFlag>> Cast for Neighbours<'_, '_, F> {
         }
 
         match self.taken {
-            Some((boxes, _)) => boxes.len(),
+            Some((boxes, ..)) => boxes.len(),
             // The entity in the middle is in neither half, so there is no slot of its own here to
             // count or to skip: the two slices are the cast without it already.
             None => self.before.len() + self.after.len(),
@@ -654,7 +744,7 @@ impl<F: Fn(SpriteId) -> BitFlags<SpriteFlag>> Cast for Neighbours<'_, '_, F> {
 
     #[inline(always)]
     fn at(&self, index: usize) -> Option<Neighbour> {
-        let Some((boxes, carries)) = self.taken else {
+        let Some((boxes, carries, wants)) = self.taken else {
             return self.asked(index);
         };
 
@@ -662,11 +752,12 @@ impl<F: Fn(SpriteId) -> BitFlags<SpriteFlag>> Cast for Neighbours<'_, '_, F> {
             return None;
         }
         let flags = *carries.get(index)?;
-        if flags.is_empty() {
+        let listening = *wants.get(index)?;
+        if flags.is_empty() && listening.is_empty() {
             return None;
         }
 
-        Some((*boxes.get(index)?, flags))
+        Some((*boxes.get(index)?, flags, listening))
     }
 }
 
@@ -682,14 +773,23 @@ impl<F: Fn(SpriteId) -> BitFlags<SpriteFlag>> Neighbours<'_, '_, F> {
             Some(other) => other,
             None => self.after.get(index - self.before.len())?,
         };
-        // An entity that wears nothing, or whose cell the cart flagged with nothing, is not there
-        // for anybody: it is stopped and it senses, and it stops and tells nobody.
-        let flags = (self.carried)(other.sprite()?);
-        if flags.is_empty() {
+        // The same two answers the snapshot holds, worked out here instead: what the neighbour
+        // wears, and what it is listening for. One that wears nothing and listens for nothing is
+        // not there for anybody: it stops nobody, tells nobody, and nothing that reaches it is
+        // news.
+        let flags = other
+            .sprite()
+            .map_or(BitFlags::empty(), |sprite| (self.carried)(sprite));
+        let listening = if other.prop() {
+            BitFlags::empty()
+        } else {
+            other.heeds() | other.solid().unwrap_or(self.solid)
+        };
+        if flags.is_empty() && listening.is_empty() {
             return None;
         }
 
-        Some((other.bounds(), flags))
+        Some((other.bounds(), flags, listening))
     }
 }
 
@@ -814,6 +914,123 @@ mod tests {
             air,
             unflagged,
         );
+    }
+
+    #[test]
+    fn a_meeting_is_told_to_both_of_its_parties_whoever_made_it() {
+        // The stander is stepped first, going nowhere: its own sweep is the box it stands in,
+        // and the mover is nowhere near it yet. The mover, stepped second, arrives on it. The
+        // meeting must reach both contacts slots in this same update — read one-sidedly, a ram
+        // kills only the party that moved, and the dead one leaves the cast before the other
+        // was ever told.
+        let mut stander = Thing::at(0.0, 0.0).wearing(CRATE_SPRITE);
+        let mut mover = Thing::at(12.0, 0.0).wearing(WALL_SPRITE).moving(-6.0, 0.0);
+        WORLD.step_cast(
+            &mut [stander.as_kinetic(), mover.as_kinetic()],
+            air,
+            flagged,
+        );
+        assert!(
+            mover.contacts.touches(CRATE),
+            "the mover's own sweep missed the meeting"
+        );
+        assert!(
+            stander.contacts.touches(WALL),
+            "the one arrived upon was never told"
+        );
+    }
+
+    #[test]
+    fn an_arrival_is_heard_only_by_a_listener_and_only_for_what_it_heeds() {
+        // The deaf stander heeds nothing, so the arrival is not its news — while the mover, its
+        // own sweep making the meeting, is still told as ever.
+        let mut deaf = Thing::at(0.0, 0.0)
+            .wearing(CRATE_SPRITE)
+            .heeding(BitFlags::empty());
+        let mut mover = Thing::at(12.0, 0.0).wearing(WALL_SPRITE).moving(-6.0, 0.0);
+        WORLD.step_cast(&mut [deaf.as_kinetic(), mover.as_kinetic()], air, flagged);
+        assert!(mover.contacts.touches(CRATE));
+        assert_eq!(deaf.contacts, Contacts::empty(), "the deaf one was told");
+
+        // And the interest can run one way alone: a mover listening for nothing hears nothing of
+        // its own sweep, and the one it arrives on is still told what arrived.
+        let mut stander = Thing::at(0.0, 0.0).wearing(CRATE_SPRITE);
+        let mut oblivious = Thing::at(12.0, 0.0)
+            .wearing(WALL_SPRITE)
+            .heeding(BitFlags::empty())
+            .moving(-6.0, 0.0);
+        WORLD.step_cast(
+            &mut [stander.as_kinetic(), oblivious.as_kinetic()],
+            air,
+            flagged,
+        );
+        assert_eq!(oblivious.contacts, Contacts::empty());
+        assert!(
+            stander.contacts.touches(WALL),
+            "the mover's own disinterest cost the stander its news"
+        );
+    }
+
+    #[test]
+    fn an_arrival_reaches_an_entity_wearing_nothing_at_all() {
+        // A hero drawn from unflagged cells is nobody's obstacle and nobody's news — and still
+        // wants to hear what runs into it. Wearing nothing must not cost it its slot.
+        let mut bare = Thing::at(0.0, 0.0).heeding(WALL.into());
+        let mut mover = Thing::at(12.0, 0.0).wearing(WALL_SPRITE).moving(-6.0, 0.0);
+        WORLD.step_cast(&mut [bare.as_kinetic(), mover.as_kinetic()], air, flagged);
+        assert!(bare.contacts.touches(WALL));
+        assert_eq!(
+            mover.contacts,
+            Contacts::empty(),
+            "something wearing nothing was met"
+        );
+    }
+
+    #[test]
+    fn an_arrival_on_a_prop_is_nobody_s_news() {
+        // A prop's contacts are never written — the cart drives it and nothing is home to read
+        // them — so an arrival on one is dropped, not delivered.
+        let mut door = Thing::at(0.0, 0.0).wearing(CRATE_SPRITE).parked();
+        let mut mover = Thing::at(12.0, 0.0)
+            .wearing(WALL_SPRITE)
+            .stopped_by(BitFlags::empty())
+            .moving(-6.0, 0.0);
+        WORLD.step_cast(&mut [door.as_kinetic(), mover.as_kinetic()], air, flagged);
+        assert!(mover.contacts.touches(CRATE));
+        assert_eq!(door.contacts, Contacts::empty());
+    }
+
+    #[test]
+    fn a_meeting_reaches_both_parties_on_a_cast_too_long_to_snapshot() {
+        // The same promise down the long-cast fallback, which walks the `dyn` instead of a
+        // snapshot and counts its neighbours with the stepped entity taken out of the middle —
+        // both directions, so the slot arithmetic is pinned on either side of `mine`.
+        let mut cast: Vec<Thing> = (0..SNAPSHOT + 2)
+            .map(|i| Thing::at(3000.0 + i as f32 * 100.0, 0.0))
+            .collect();
+        // The first arrives on the last: mover at slot 0, stander past everybody else.
+        cast[0] = Thing::at(12.0, 0.0).wearing(WALL_SPRITE).moving(-6.0, 0.0);
+        let last = cast.len() - 1;
+        cast[last] = Thing::at(0.0, 0.0).wearing(CRATE_SPRITE);
+        let mut handed: Vec<&mut dyn Kinetic> = cast.iter_mut().map(|t| t.as_kinetic()).collect();
+        WORLD.step_cast(&mut handed, air, flagged);
+        assert!(cast[0].contacts.touches(CRATE));
+        assert!(
+            cast[last].contacts.touches(WALL),
+            "the stander after `mine`"
+        );
+
+        // And the other way round: the last arrives on the first.
+        let mut cast: Vec<Thing> = (0..SNAPSHOT + 2)
+            .map(|i| Thing::at(3000.0 + i as f32 * 100.0, 0.0))
+            .collect();
+        cast[0] = Thing::at(0.0, 0.0).wearing(CRATE_SPRITE);
+        let last = cast.len() - 1;
+        cast[last] = Thing::at(12.0, 0.0).wearing(WALL_SPRITE).moving(-6.0, 0.0);
+        let mut handed: Vec<&mut dyn Kinetic> = cast.iter_mut().map(|t| t.as_kinetic()).collect();
+        WORLD.step_cast(&mut handed, air, flagged);
+        assert!(cast[last].contacts.touches(CRATE));
+        assert!(cast[0].contacts.touches(WALL), "the stander before `mine`");
     }
 
     #[test]
