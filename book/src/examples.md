@@ -35,21 +35,22 @@ here, in a few hundred lines split into small modules:
 - **map + sprite flags** as the collision system (solid tiles carry flag 0, the
   badie's sprites flag 1);
 - a **camera** that follows the hero, with the HUD drawn in screen space;
-- a **[`Body`](input.md#smooth-sub-pixel-movement-body)** for the hero, so
-  running jumps climb clean staircases;
 - the falling, the walls *and* the edge of the level from the `physics` feature:
-  the walls are declared once, on the **[`World`]** (the same flag the map marks
-  its solid tiles with), and the hero and the badie are **[`Kinetic`]**s, which
-  means they only *describe* themselves — the **[`Bounds`]** each covers, which
-  rectangle the hero may never leave (**[`confines`]**), and which **[`sprite`]**
-  the badie wears — while the world does all the moving.
-  A single **[`step`]** an update, handed the pair and the level's
-  **[`Gravity`]**, pulls the hero down, stops it at the solid tiles, holds it
-  inside the level, patrols the badie and tells each of them what it met;
+  the scene is one **[`World`]** of two seats, which owns where the hero and the
+  badie are, how fast, and what they last ran into. The walls are declared on it
+  once (the same flag the map marks its solid tiles with), it owns the level's
+  **[`Gravity`]**, and each actor is **[enlisted][`enlist`]** in one
+  **[chain][`Enlisting`]** — the **[`Bounds`]** it covers, the rectangle the hero
+  may never leave (**[`confined_to`]**), the **[`wearing`]** cell that says the
+  badie is a badie — keeping the **[`Member`]** handle the chain ends in beside
+  its own game data. A single **[`step`]** an update pulls the hero down, stops
+  it at the solid tiles, holds it inside the level, patrols the badie and tells
+  each of them what it met; the hero draws at the world's **[`draw_pos`]**, so
+  running jumps climb clean staircases;
 - nothing walks a pair of casts: the badie's sprites are flagged, so the hero's
   **[`contacts`]** report having met one in **[`touches`]** and the cart only
   decides whether that was a ram or a stomp — same frame, so a stomped badie is
-  dropped on the spot;
+  **[retired][`retire`]** on the spot;
 - coins collected by **rewriting the map** in RAM and put back on restart;
 - the best score kept in **[storage](storage.md)** across runs;
 - win/lose **music held inside the game-state enum** — leaving the state
@@ -118,10 +119,14 @@ candle, point it another way for an exhaust trail.
 [`Bounds`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Bounds.html
 [`step`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.step
 [`World`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html
-[`Kinetic`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html
-[`confines`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html#method.confines
-[`sprite`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html#method.sprite
-[`contacts`]: https://docs.rs/pixel8/latest/pixel8/physics/trait.Kinetic.html#method.contacts
+[`Enlisting`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Enlisting.html
+[`Member`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Member.html
+[`enlist`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.enlist
+[`retire`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.retire
+[`draw_pos`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.draw_pos
+[`confined_to`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Enlisting.html#method.confined_to
+[`wearing`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Enlisting.html#method.wearing
+[`contacts`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.contacts
 [`touches`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Contacts.html#method.touches
 
 ## stress
