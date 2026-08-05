@@ -22,11 +22,12 @@ use crate::Direction;
 /// [`World`](super::World) [owns](super::World::with_forces):
 ///
 /// ```no_run
-/// # use pixel8::{physics::{Force, Gravity, Kinetic, Wind, World}, Context};
+/// # use pixel8::{physics::{Cast, Force, Gravity, Kinetic, Wind, World}, Context};
 /// # fn f(entity: &mut impl Kinetic, ctx: &Context) {
-/// let mut world: World<64, _> = World::new().with_forces((Gravity::new(), Wind::new(0.3)));
+/// let mut world = World::new().with_forces((Gravity::new(), Wind::new(0.3)));
 ///
-/// world.step(ctx, &mut [entity.as_kinetic()]);
+/// let mut cast: Cast<1> = Cast::from_array([entity.as_kinetic()]);
+/// world.step(ctx, &mut cast);
 /// # }
 /// ```
 pub trait Force {

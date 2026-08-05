@@ -33,7 +33,7 @@
 #![no_std]
 
 use pixel8::{
-    physics::{Bounds, Contacts, Kinetic, Velocity, World},
+    physics::{Bounds, Cast, Contacts, Kinetic, Velocity, World},
     *,
 };
 
@@ -88,9 +88,10 @@ game!(Probe {
 });
 
 struct Probe {
-    /// The one thing that moves any of them — with a cast ceiling of the cart's own, so the
-    /// crossing this fixture pins is one a cart actually configures.
-    world: World<4>,
+    /// The one thing that moves any of them. The cast's capacity is the cart's own — the
+    /// `Cast<4>` gathered in `update` — so the crossing this fixture pins is one a cart actually
+    /// configures.
+    world: World,
     /// The two of one kind, walking into each other.
     left: Mover,
     right: Mover,
@@ -115,15 +116,13 @@ impl Game for Probe {
 
         // The whole cast, in one call: the crates against each other, the sensor against the
         // hazard, and every one of them against the map.
-        self.world.step(
-            ctx,
-            &mut [
-                self.left.as_kinetic(),
-                self.right.as_kinetic(),
-                self.sensor.as_kinetic(),
-                self.hazard.as_kinetic(),
-            ],
-        );
+        let mut cast: Cast<4> = Cast::from_array([
+            self.left.as_kinetic(),
+            self.right.as_kinetic(),
+            self.sensor.as_kinetic(),
+            self.hazard.as_kinetic(),
+        ]);
+        self.world.step(ctx, &mut cast);
     }
 
     fn draw(&self, gfx: &mut Graphics) {

@@ -322,15 +322,16 @@ pub trait Kinetic {
 
     /// This entity as the trait object the world takes.
     ///
-    /// [`World::step`](super::World::step) is handed the whole cast as a slice of
-    /// `&mut dyn Kinetic`, and a cast is heterogeneous by nature — a hero, a badie, a lift, none of
-    /// which share a type. This is the coercion, spelled once so that gathering them reads as a
-    /// list of entities rather than as a list of casts:
+    /// [`World::step`](super::World::step) is handed the whole cast as a
+    /// [`Cast`](super::Cast) of `&mut dyn Kinetic`, and a cast is heterogeneous by nature — a
+    /// hero, a badie, a lift, none of which share a type. This is the coercion, spelled once so
+    /// that gathering them reads as a list of entities rather than as a list of casts:
     ///
     /// ```no_run
-    /// # use pixel8::{physics::{Force, Gravity, Kinetic, World}, Context};
-    /// # fn f(world: &mut World<64, Gravity>, ctx: &Context, hero: &mut impl Kinetic, badie: &mut impl Kinetic) {
-    /// world.step(ctx, &mut [hero.as_kinetic(), badie.as_kinetic()]);
+    /// # use pixel8::{physics::{Cast, Force, Gravity, Kinetic, World}, Context};
+    /// # fn f(world: &mut World<Gravity>, ctx: &Context, hero: &mut impl Kinetic, badie: &mut impl Kinetic) {
+    /// let mut cast: Cast<2> = Cast::from_array([hero.as_kinetic(), badie.as_kinetic()]);
+    /// world.step(ctx, &mut cast);
     /// # }
     /// ```
     ///

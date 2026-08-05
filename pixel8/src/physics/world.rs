@@ -17,7 +17,7 @@ use crate::{BitFlags, Context, SpriteFlag, SpriteId};
 ///
 /// ```no_run
 /// use pixel8::{
-///     physics::{Bounds, Contacts, Gravity, Kinetic, Velocity, World},
+///     physics::{Bounds, Cast, Contacts, Gravity, Kinetic, Velocity, World},
 ///     *,
 /// };
 ///
@@ -41,9 +41,9 @@ use crate::{BitFlags, Context, SpriteFlag, SpriteId};
 /// # }
 /// # const SPIKES: SpriteFlag = SpriteFlag::Flag2;
 /// struct Level {
-///     // A cast of three under the level's pull, owned like everything else about the scene:
+///     // The scene under the level's pull, owned like everything else about it:
 ///     // `World::new().with_forces(Gravity::new())` is the whole of making one.
-///     world: World<3, Gravity>,
+///     world: World<Gravity>,
 ///     hero: Hero,
 ///     badies: [Badie; 2],
 /// }
@@ -53,14 +53,13 @@ use crate::{BitFlags, Context, SpriteFlag, SpriteId};
 ///         // Whatever each entity means to do this update — read the buttons, turn a patrol
 ///         // round — is written into its velocity first. Then the world moves the lot.
 ///         let [first, second] = &mut self.badies;
-///         self.world.step(
-///             ctx,
-///             &mut [
-///                 self.hero.as_kinetic(),
-///                 first.as_kinetic(),
-///                 second.as_kinetic(),
-///             ],
-///         );
+///         let mut cast: Cast<3> = Cast::from_array([
+///             self.hero.as_kinetic(),
+///             first.as_kinetic(),
+///             second.as_kinetic(),
+///         ]);
+///         self.world.step(ctx, &mut cast);
+///         drop(cast);
 ///
 ///         // And the answers are waiting on the entities themselves.
 ///         let grounded = self.hero.contacts().below();
@@ -75,13 +74,15 @@ use crate::{BitFlags, Context, SpriteFlag, SpriteId};
 ///
 /// # The cast, and the order it is in
 ///
-/// The cast is a slice of `&mut dyn Kinetic`, gathered fresh each update — a cart's entities live
-/// wherever the cart keeps them, in fields and arrays and `heapless::Vec`s that have no type in
-/// common. [`Kinetic::as_kinetic`] is the one word that turns each of them into a cast member, and
-/// a `heapless::Vec` of those is how a cart with a variable cast gathers one without allocating:
+/// The cast is a [`Cast`](super::Cast): up to `N` entities as `&mut dyn Kinetic`, gathered fresh
+/// each update — a cart's entities live wherever the cart keeps them, in fields and arrays and
+/// vectors that have no type in common, and [`Kinetic::as_kinetic`] is the one word that turns
+/// each of them into a cast member. A cast that never changes is written down whole with
+/// [`from_array`](super::Cast); one that varies is gathered a push at a time, without
+/// allocating:
 ///
 /// ```ignore
-/// let mut cast: heapless::Vec<&mut dyn Kinetic, 16> = heapless::Vec::new();
+/// let mut cast: Cast<16> = Cast::new();
 /// let _ = cast.push(self.hero.as_kinetic());
 /// for badie in &mut self.badies {
 ///     let _ = cast.push(badie.as_kinetic());
@@ -104,26 +105,16 @@ use crate::{BitFlags, Context, SpriteFlag, SpriteId};
 /// rectangle and flags stand in everybody's way from wherever the cart last put it, and the
 /// forces, the walls and the contacts all pass it by. Rails the cart drives — a patrol, a lift
 /// on a track — cost the cast no more than being seen.
-/// # The cast ceiling
+/// # The cast's capacity
 ///
-/// `CAST` is the most members one step takes, and with it the stack a step borrows while it
-/// runs: `CAST` records of forty-four bytes each, written down for the crossing of the ABI and
-/// gone the moment it returns. Nothing of them outlives the call — the world itself holds a few
-/// bytes of configuration and no buffer at all. Sixty-four — the default — is the most the wire
-/// itself takes; a cart that knows its scene is smaller says so the way it says every other
-/// capacity in this console:
-///
-/// ```
-/// # use pixel8::physics::World;
-/// /// A hero and a badie: two moving things, so two records' worth of world.
-/// const MAX_CAST: usize = 2;
-/// let world: World<MAX_CAST> = World::new();
-/// ```
-///
-/// The ceiling is a declaration, and it is held to: a cast handed past it is a cart bug and the
-/// step says so at once, rather than quietly stepping some other, dearer way. The number that
-/// bounds the cast's own `heapless::Vec` is the number to put here — one constant, owning both.
-pub struct World<const CAST: usize = 64, F: Force = ()> {
+/// The [`Cast`](super::Cast)'s `N` is the most members one step takes, and with it the stack a
+/// step borrows while it runs: `N` records of forty-four bytes each, written down for the
+/// crossing of the ABI and gone the moment it returns. Nothing of them outlives the call — the
+/// world itself holds a few bytes of configuration and no buffer at all — and nothing else
+/// declares it: the one constant a cart writes is the capacity of the cast it gathers, and the
+/// step is sized by that. Sixty-four is the most the wire itself takes, and a bigger `N` is
+/// refused at compile time, so a cast that builds is a cast that steps.
+pub struct World<F: Force = ()> {
     /// Whether the map is part of the scene or only the picture behind it. See
     /// [`mapless`](Self::mapless).
     reads_map: bool,
@@ -134,20 +125,13 @@ pub struct World<const CAST: usize = 64, F: Force = ()> {
     forces: F,
 }
 
-impl<const CAST: usize> World<CAST> {
+impl World {
     /// The world every cart starts with. It calls nothing solid until
     /// [`with_solid`](Self::with_solid) says otherwise.
     ///
     /// `const`, so a cart can spell its world out in its `game!` initializer, however it is
     /// configured.
     pub const fn new() -> Self {
-        const {
-            assert!(
-                CAST <= wire::CAP,
-                "a World's cast ceiling cannot exceed the sixty-four records the wire carries"
-            )
-        };
-
         Self {
             reads_map: true,
             solid: BitFlags::empty(),
@@ -184,7 +168,7 @@ impl<const CAST: usize> World<CAST> {
     }
 }
 
-impl<const CAST: usize, F: Force> World<CAST, F> {
+impl<F: Force> World<F> {
     /// The same world, owning `forces` as the scene's weather.
     ///
     /// One force, a tuple of them applied left to right — a tuple of [`Force`]s is itself a
@@ -195,9 +179,9 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
     ///
     /// ```no_run
     /// # use pixel8::physics::{Atmosphere, Gravity, World};
-    /// let world: World<64, _> = World::new().with_forces((Gravity::new(), Atmosphere::new()));
+    /// let world = World::new().with_forces((Gravity::new(), Atmosphere::new()));
     /// ```
-    pub fn with_forces<G: Force>(self, forces: G) -> World<CAST, G> {
+    pub fn with_forces<G: Force>(self, forces: G) -> World<G> {
         World {
             reads_map: self.reads_map,
             solid: self.solid,
@@ -298,21 +282,29 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
     /// nothing is stored on an entity between updates but its velocity and its contacts.
     ///
     /// What a step costs a cart is the crossing, not the collisions. The cast is written down
-    /// once — everything each entity describes, one fixed-size record apiece — and handed to the
-    /// console in a single call; the console steps it natively, over its own map and sheet, and
-    /// the answers are read back out of the same buffer. Nothing is allocated, no fuel is spent
-    /// on the walking and the stopping, and the engine the console runs is the very one this
-    /// module's tests drive. A cast past the world's own [ceiling](World#the-cast-ceiling)
-    /// panics — the ceiling is the cart's own declaration, and holding it to it costs one
-    /// comparison where a quiet slower path would cost an order of magnitude of fuel. An entity
-    /// that should cost nothing is simply left out of the cast.
-    pub fn step(&mut self, ctx: &Context, cast: &mut [&mut dyn Kinetic]) {
+    /// once — everything each entity describes, one fixed-size record apiece — into a buffer
+    /// borrowed from the stack and sized by the cast's own `N`, and handed to the console in a
+    /// single call; the console steps it natively, over its own map and sheet, and the answers
+    /// are read back out of the same bytes. Nothing is allocated, nothing outlives the call, no
+    /// fuel is spent on the walking and the stopping, and the engine the console runs is the very
+    /// one this module's tests drive. The wire carries sixty-four records at most, so a cast with
+    /// a bigger `N` is refused at compile time — and a cast that fits its capacity fits the step,
+    /// with nothing left to check at run time. An entity that should cost nothing is simply left
+    /// out of the cast.
+    pub fn step<const N: usize>(&mut self, ctx: &Context, cast: &mut super::Cast<'_, N>) {
+        const {
+            assert!(
+                N <= wire::CAP,
+                "a Cast's capacity cannot exceed the sixty-four records the wire carries"
+            )
+        };
+
         // In the console, the whole step is one crossing of the ABI and the console's own,
         // native, work; on the native builds the tests are, the SDK runs the same engine itself.
         #[cfg(target_arch = "wasm32")]
         {
             let _ = ctx;
-            self.step_over_the_wire(cast);
+            self.step_over_the_wire::<N>(cast);
         }
 
         #[cfg(not(target_arch = "wasm32"))]
@@ -330,7 +322,7 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
     /// read back. The console's side runs the engine [`step_cast`](Self::step_cast) is — see
     /// [`wire`] — so what a cart spends here is the writing and the reading, not the collisions.
     #[cfg(target_arch = "wasm32")]
-    fn step_over_the_wire(&mut self, cast: &mut [&mut dyn Kinetic]) {
+    fn step_over_the_wire<const N: usize>(&mut self, cast: &mut [&mut dyn Kinetic]) {
         use core::mem::MaybeUninit;
 
         // The forces are the cart's own code, so their half of the step happens on the cart's
@@ -343,7 +335,7 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
         // ceiling's worth of metered writes an update — every slot that is sent is written just
         // below, and the tail past the cast is never sent at all, so the cart pays for the
         // records it fills and holds none of them between steps.
-        let mut records = [const { MaybeUninit::<wire::Record>::uninit() }; CAST];
+        let mut records = [const { MaybeUninit::<wire::Record>::uninit() }; N];
         for (slot, entity) in records.iter_mut().zip(cast.iter_mut()) {
             let velocity = *entity.velocity_mut();
             slot.write(wire::Record::of(&**entity, self.solid, velocity));
@@ -394,14 +386,15 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
     /// Velocities only — a force never touches a position — and props are left alone: the cart
     /// drives them, weather and all.
     fn weather(&self, cast: &mut [&mut dyn Kinetic]) {
-        // The ceiling is the cart's own declaration, so a cast past it is a cart bug — and a
-        // loud one, exactly where it happened, rather than a quiet step onto some slower path.
-        // Both halves of `step` begin here, so the one guard covers them both.
+        // A cast a cart hands `step` fits by construction — its capacity is compile-checked
+        // against the wire's — so this guards the internal callers: the console's own entry, and
+        // anything a test writes down. Loud, exactly where it happened, rather than a quiet step
+        // onto some slower path. Both halves of `step` begin here, so the one guard covers both.
         assert!(
-            cast.len() <= CAST,
-            "a cast of {} was handed to a world with a ceiling of {}",
+            cast.len() <= wire::CAP,
+            "a cast of {} was handed across a wire with a ceiling of {}",
             cast.len(),
-            CAST
+            wire::CAP
         );
 
         for entity in cast.iter_mut() {
@@ -491,7 +484,7 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
         // cast has moved: a slot per member, holding the flags of everything that arrived on it.
         // Collected rather than written straight away, because the other party may not have been
         // stepped yet — and its own step overwrites its contacts whole.
-        let mut arrived = [BitFlags::<SpriteFlag>::empty(); CAST];
+        let mut arrived = [BitFlags::<SpriteFlag>::empty(); wire::CAP];
         for index in 0..cast.len() {
             // The cast without this entity in it, in two pieces: everything stepped already, and
             // everything still to be. The split is what the fallback walks, and the index of the
@@ -593,7 +586,7 @@ const SNAPSHOT: usize = 32;
 const EMPTY: Bounds = Bounds::new(0, 0, 0, 0);
 
 /// The world every cart starts with. See [`World::new`].
-impl<const CAST: usize> Default for World<CAST> {
+impl Default for World {
     fn default() -> Self {
         Self::new()
     }
@@ -903,20 +896,16 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "ceiling")]
-    fn a_cast_past_the_world_s_ceiling_is_refused_loudly() {
-        // The ceiling is the cart's own declaration; overrunning it is a bug the cart wants told
-        // about, not a quiet step onto a dearer path.
-        let (mut one, mut two, mut three) = (
-            Thing::at(0.0, 0.0),
-            Thing::at(20.0, 0.0),
-            Thing::at(40.0, 0.0),
-        );
-        let low: World<2> = World::new();
-        low.step_cast(
-            &mut [one.as_kinetic(), two.as_kinetic(), three.as_kinetic()],
-            air,
-            unflagged,
-        );
+    fn a_cast_past_the_wire_s_ceiling_is_refused_loudly() {
+        // A cast a cart hands `step` cannot overrun the wire — its capacity is compile-checked —
+        // so this pins the guard on the engine's own entry, which the console and the tests walk
+        // in through: one entity past the wire's sixty-four is refused where it happened, not
+        // quietly stepped some dearer way.
+        let mut things: Vec<Thing> = (0..wire::CAP + 1)
+            .map(|i| Thing::at(i as f32 * 100.0, 0.0))
+            .collect();
+        let mut cast: Vec<&mut dyn Kinetic> = things.iter_mut().map(|t| t.as_kinetic()).collect();
+        WORLD.step_cast(&mut cast, air, unflagged);
     }
 
     #[test]
@@ -1127,12 +1116,12 @@ mod tests {
     }
 
     /// A world under the default pull, for the tests about what the weather does.
-    fn pulled() -> World<64, Gravity> {
+    fn pulled() -> World<Gravity> {
         World::new().with_forces(GRAVITY)
     }
 
     /// A world owning whatever weather a test composes.
-    fn weathered<F: Force>(forces: F) -> World<64, F> {
+    fn weathered<F: Force>(forces: F) -> World<F> {
         World::new().with_forces(forces)
     }
 
