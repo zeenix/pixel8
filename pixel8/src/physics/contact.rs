@@ -132,7 +132,8 @@ impl Contacts {
     }
 
     /// Every sprite flag carried by anything on the ground the step covered — where it began, what
-    /// it crossed, what stopped it, and what it ended up inside.
+    /// it crossed, what stopped it, and what it ended up inside — and by anything whose own step
+    /// arrived on this entity.
     ///
     /// The whole of the step and not its two ends: an entity that walked out of the pond this
     /// update is told it was in the pond, and one that crossed a two-pixel trickle in the middle of
@@ -140,6 +141,13 @@ impl Contacts {
     /// stopping is resolved where the entity was trying to go, so a thing thin enough to be stepped
     /// clean over is reported and not stopped at, and what keeps a fall from doing it to a floor is
     /// [`Gravity`](super::Gravity)'s terminal velocity.
+    ///
+    /// A meeting between cast members reaches both of them, whichever one's movement made it. An
+    /// entity standing still as something flies into it is told in the very update the arrival
+    /// happens — not a frame later, when its own step would find the overlap, and not never, where
+    /// the arriver dies of the meeting and is dropped from the cast before its wreck could be
+    /// walked into. Only the flags carry the news: an arrival never writes a side, since the one
+    /// arrived on was stopped by nothing.
     ///
     /// The flags say what *kind* of thing was met, never which one: a step through two patches
     /// of water reads exactly like a step through one. A cart that must know which — the coin to

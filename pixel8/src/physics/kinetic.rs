@@ -195,8 +195,10 @@ pub trait Kinetic {
     /// and everything else the world meets on its behalf it throws away without ever working out
     /// whether it was met. Only flags in here — or in `solid`, which is always heeded whether it is
     /// named here or not — reach [`Contacts::touched`], and they reach it the same way from a tile
-    /// as from another cast member. So the promise reads in one line: *you are told what you heed,
-    /// and you are stopped by what you call solid.*
+    /// as from another cast member — and the same way again when the meeting was the *other*
+    /// party's doing, an arrival on this entity while it stood. So the promise reads in one line:
+    /// *you are told what you heed, whoever's movement brought it, and you are stopped by what you
+    /// call solid.*
     ///
     /// [Everything](BitFlags::all) is the default, and it is the honest one: an entity that has not
     /// said otherwise is told about every flag it meets, which is what makes a `Contacts` worth
@@ -320,15 +322,16 @@ pub trait Kinetic {
 
     /// This entity as the trait object the world takes.
     ///
-    /// [`World::step`](super::World::step) is handed the whole cast as a slice of
-    /// `&mut dyn Kinetic`, and a cast is heterogeneous by nature — a hero, a badie, a lift, none of
-    /// which share a type. This is the coercion, spelled once so that gathering them reads as a
-    /// list of entities rather than as a list of casts:
+    /// [`World::step`](super::World::step) is handed the whole cast as a
+    /// [`Cast`](super::Cast) of `&mut dyn Kinetic`, and a cast is heterogeneous by nature — a
+    /// hero, a badie, a lift, none of which share a type. This is the coercion, spelled once so
+    /// that gathering them reads as a list of entities rather than as a list of casts:
     ///
     /// ```no_run
-    /// # use pixel8::{physics::{Force, Gravity, Kinetic, World}, Context};
-    /// # fn f(world: &mut World<64, Gravity>, ctx: &Context, hero: &mut impl Kinetic, badie: &mut impl Kinetic) {
-    /// world.step(ctx, &mut [hero.as_kinetic(), badie.as_kinetic()]);
+    /// # use pixel8::{physics::{Cast, Force, Gravity, Kinetic, World}, Context};
+    /// # fn f(world: &mut World<Gravity>, ctx: &Context, hero: &mut impl Kinetic, badie: &mut impl Kinetic) {
+    /// let mut cast: Cast<2> = Cast::from_array([hero.as_kinetic(), badie.as_kinetic()]);
+    /// world.step(ctx, &mut cast);
     /// # }
     /// ```
     ///

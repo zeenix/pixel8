@@ -27,7 +27,7 @@
 //!
 //! ```no_run
 //! use pixel8::{
-//!     physics::{Atmosphere, Bounds, Contacts, Gravity, Kinetic, Velocity, Wind, World},
+//!     physics::{Atmosphere, Bounds, Cast, Contacts, Gravity, Kinetic, Velocity, Wind, World},
 //!     *,
 //! };
 //!
@@ -73,7 +73,7 @@
 //!     leaves: [Leaf; 16],
 //!     // The one thing that moves any of them, owning the scene's whole weather: the pull, the
 //!     // air the leaves fall through, and a wind that gusts and so cannot be a constant.
-//!     world: World<16, (Gravity, Atmosphere, Wind)>,
+//!     world: World<(Gravity, Atmosphere, Wind)>,
 //! }
 //!
 //! impl Game for Autumn {
@@ -81,7 +81,7 @@
 //!         // The gust first, where it lives, so every leaf is bent by the same one.
 //!         self.world.forces_mut().2.update(ctx);
 //!         // The cast, gathered where it lives and handed over whole.
-//!         let mut cast = self.leaves.each_mut().map(Kinetic::as_kinetic);
+//!         let mut cast: Cast<16> = Cast::from_array(self.leaves.each_mut().map(Kinetic::as_kinetic));
 //!         self.world.step(ctx, &mut cast);
 //!     }
 //!
@@ -267,11 +267,14 @@
 //! can pass through one — which is exactly why it is there.
 //!
 //! ```no_run
-//! # use pixel8::{physics::{Gravity, Kinetic, World}, *};
+//! # use pixel8::{physics::{Cast, Gravity, Kinetic, World}, *};
 //! # const GRAVITY: Gravity = Gravity::new();
 //! # const WATER: SpriteFlag = SpriteFlag::Flag3;
-//! # fn f(world: &mut World<64, Gravity>, ctx: &Context, hero: &mut impl Kinetic) {
-//! world.step(ctx, &mut [hero.as_kinetic()]);
+//! # fn f(world: &mut World<Gravity>, ctx: &Context, hero: &mut impl Kinetic) {
+//! {
+//!     let mut cast: Cast<1> = Cast::from_array([hero.as_kinetic()]);
+//!     world.step(ctx, &mut cast);
+//! }
 //! let (grounded, swimming) = (hero.contacts().below(), hero.contacts().touches(WATER));
 //! # }
 //! ```
@@ -303,7 +306,7 @@
 //! and the forces, the walls and the contacts all pass it by.
 //!
 //! ```no_run
-//! # use pixel8::{physics::{Bounds, Contacts, Gravity, Kinetic, Velocity, World}, *};
+//! # use pixel8::{physics::{Bounds, Cast, Contacts, Gravity, Kinetic, Velocity, World}, *};
 //! /// Walls and floors are whatever the cart flagged as such in the sprite editor.
 //! const SOLID: SpriteFlag = SpriteFlag::Flag0;
 //! /// And this walker's own sprite is flagged `WALKER`, which is how everybody else's step reports
@@ -381,12 +384,13 @@
 //!     }
 //! }
 //!
-//! fn update(world: &mut World<3, Gravity>, ctx: &mut Context, walkers: &mut [Walker; 3]) {
+//! fn update(world: &mut World<Gravity>, ctx: &mut Context, walkers: &mut [Walker; 3]) {
 //!     for walker in walkers.iter_mut() {
 //!         walker.steer(ctx);
 //!     }
 //!     // The pull, the walls, the walkers and the movement, in one call.
-//!     world.step(ctx, &mut walkers.each_mut().map(Kinetic::as_kinetic));
+//!     let mut cast: Cast<3> = Cast::from_array(walkers.each_mut().map(Kinetic::as_kinetic));
+//!     world.step(ctx, &mut cast);
 //! }
 //! ```
 //!
@@ -432,7 +436,7 @@
 //! [prop](Kinetic::prop) steers itself, so no force bends one — before any of them takes a step:
 //!
 //! ```no_run
-//! # use pixel8::{physics::{Force, Gravity, Kinetic, World}, Context};
+//! # use pixel8::{physics::{Cast, Force, Gravity, Kinetic, World}, Context};
 //! /// Water: it drags whatever moves through it, and it holds it up a little.
 //! struct Water {
 //!     drag: f32,
@@ -454,11 +458,11 @@
 //! const SINKING: Gravity = Gravity::new().with_terminal_velocity(0.8);
 //!
 //! /// The pool: its own pull and its own drag, owned by the world that will do the stepping.
-//! fn pool() -> World<8, (Gravity, Water)> {
+//! fn pool() -> World<(Gravity, Water)> {
 //!     World::new().with_forces((SINKING, Water { drag: 0.3 }))
 //! }
 //!
-//! fn sink(world: &mut World<8, (Gravity, Water)>, divers: &mut [&mut dyn Kinetic], ctx: &Context) {
+//! fn sink(world: &mut World<(Gravity, Water)>, divers: &mut Cast<8>, ctx: &Context) {
 //!     world.step(ctx, divers);
 //! }
 //! ```
@@ -490,3 +494,23 @@ pub use kinetic::Kinetic;
 pub use velocity::Velocity;
 pub use wind::Wind;
 pub use world::World;
+
+/// The scene's moving matter, gathered to be handed to [`World::step`]: up to `N` entities, each
+/// borrowed for exactly the length of the call.
+///
+/// A fixed-capacity vector rather than a slice, because `N` is a promise the step builds on: it
+/// is the size of the record buffer the cast crosses the ABI in, borrowed from the stack for the
+/// one call, and it cannot exceed the sixty-four records the wire carries — a bigger `N` is
+/// refused at compile time. So the one constant a cart names is the cast's own capacity, and
+/// everything downstream of it is sized right by construction.
+///
+/// A cast that varies is gathered a push at a time; one that never changes is written down whole:
+///
+/// ```no_run
+/// # use pixel8::physics::{Cast, Kinetic, World};
+/// # fn f(world: &mut World, hero: &mut impl Kinetic, badie: &mut impl Kinetic, ctx: &pixel8::Context) {
+/// let mut cast: Cast<2> = Cast::from_array([hero.as_kinetic(), badie.as_kinetic()]);
+/// world.step(ctx, &mut cast);
+/// # }
+/// ```
+pub type Cast<'cast, const N: usize> = heapless::Vec<&'cast mut dyn Kinetic, N>;

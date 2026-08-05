@@ -17,12 +17,13 @@ use crate::Direction;
 /// [`Atmosphere`](super::Atmosphere), which reads mass exactly where gravity refuses to.
 ///
 /// ```no_run
-/// # use pixel8::{physics::{Gravity, Kinetic, World}, Context};
+/// # use pixel8::{physics::{Cast, Gravity, Kinetic, World}, Context};
 /// // The level's pull, as a constant of the cart's own, handed to whatever falls in it.
 /// const GRAVITY: Gravity = Gravity::new();
 ///
-/// # fn fall(world: &mut World<64, Gravity>, entity: &mut impl Kinetic, ctx: &Context) {
-/// world.step(ctx, &mut [entity.as_kinetic()]);
+/// # fn fall(world: &mut World<Gravity>, entity: &mut impl Kinetic, ctx: &Context) {
+/// let mut cast: Cast<1> = Cast::from_array([entity.as_kinetic()]);
+/// world.step(ctx, &mut cast);
 /// # }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]

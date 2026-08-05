@@ -55,7 +55,7 @@ use heapless::Vec;
 // world has already said *that* the hero met the badie, and the rectangles are what tell a stomp
 // from a ram.
 use pixel8::{
-    physics::{Gravity, Kinetic, World},
+    physics::{Cast, Gravity, Kinetic, World},
     *,
 };
 
@@ -84,9 +84,9 @@ game!(Platformer {
 });
 
 struct Platformer {
-    /// The one thing that moves anything in this cart, sized for exactly the cast it steps and
-    /// owning the level's pull.
-    world: World<MAX_CAST, Gravity>,
+    /// The one thing that moves anything in this cart, owning the level's pull. The cast it
+    /// steps is sized where it is gathered — `Cast<MAX_CAST>`, below.
+    world: World<Gravity>,
     hero: Hero,
     badie: Option<Badie>,
     taken: Vec<Taken, MAX_TAKEN>,
@@ -184,7 +184,7 @@ impl Platformer {
     /// goes on to kill the badie and bounce the hero, and cannot do either while a cast is still
     /// pointing at them.
     fn step_cast(&mut self, ctx: &mut Context) {
-        let mut cast: Vec<&mut dyn Kinetic, MAX_CAST> = Vec::new();
+        let mut cast: Cast<MAX_CAST> = Cast::new();
         // The badie before the hero, so the hero meets it where it has just walked to. Neither
         // push can fail: the cast is the hero and at most one badie.
         if let Some(badie) = &mut self.badie {

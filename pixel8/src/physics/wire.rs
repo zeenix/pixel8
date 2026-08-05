@@ -21,11 +21,11 @@ use super::{Bounds, Contacts, Kinetic, Velocity};
 use crate::{BitFlags, Body, SpriteFlag, SpriteId};
 
 /// How many cast members fit over the wire in one step: the ceiling on a
-/// [`World`](super::World)'s own `CAST` parameter.
+/// [`Cast`](super::Cast)'s capacity.
 ///
-/// Sixty-four records is under 3 KiB of cart memory, and sixty-four moving, colliding things is
-/// well past what fits on a 128x128 screen. A cast past its world's ceiling is a cart bug, and
-/// the step refuses it loudly — see the [ceiling](super::World#the-cast-ceiling).
+/// Sixty-four records is under 3 KiB of stack for the length of one call, and sixty-four moving,
+/// colliding things is well past what fits on a 128x128 screen. A cast with a bigger capacity is
+/// refused at compile time, in [`World::step`](super::World::step)'s own `const` check.
 pub const CAP: usize = 64;
 
 /// The record's `meta` bit for a [prop](Kinetic::prop): met, never moved.

@@ -29,19 +29,26 @@ pub(super) struct Collider {
     /// which is what a narrow one buys. `solid` is always in it, so nothing here can cost the
     /// entity a wall.
     mask: BitFlags<SpriteFlag>,
+    /// The flags the entity itself carries, which is what its arrival means to whoever it arrives
+    /// on: a neighbour listening for any of these is [told](Cast::note) of the meeting this
+    /// entity's own movement makes. Empty for an entity wearing nothing, whose comings and goings
+    /// are nobody's news.
+    worn: BitFlags<SpriteFlag>,
     /// Whether the map is worth asking about at all. See
     /// [`World::mapless`](super::World::mapless).
     reads_map: bool,
 }
 
-/// One thing in the way that is not a tile: the rectangle it covers *right now*, and the sprite
-/// flags it carries.
+/// One thing in the way that is not a tile: the rectangle it covers *right now*, the sprite
+/// flags it carries, and the flags it wants to hear about.
 ///
-/// The whole of what one cast member is to another. Nothing in it says which entity it was — a
-/// collision is judged on pixels and flags, and who is who is [`World`](super::World)'s to know,
-/// which is how an entity comes to be skipped against itself without any of this having heard of
-/// identity.
-pub(super) type Neighbour = (Bounds, BitFlags<SpriteFlag>);
+/// The whole of what one cast member is to another. The third element is the neighbour's own
+/// listening — everything it heeds or calls solid, or nothing at all for a prop — and is what a
+/// meeting the *entity's* movement makes is judged against before the neighbour is
+/// [told](Cast::note) of it. Nothing in any of it says which entity it was — a collision is judged
+/// on pixels and flags, and who is who is [`World`](super::World)'s to know, which is how an
+/// entity comes to be skipped against itself without any of this having heard of identity.
+pub(super) type Neighbour = (Bounds, BitFlags<SpriteFlag>, BitFlags<SpriteFlag>);
 
 /// The rest of the cast, as the resolution asks about it.
 ///
@@ -76,6 +83,18 @@ pub(super) trait Cast {
     /// `dyn` for the reason it always was — an indirect call per neighbour on top — and there is
     /// one cast in the console, so there is nothing for monomorphizing this to duplicate.
     fn at(&self, index: usize) -> Option<Neighbour>;
+
+    /// The neighbour in `index` was met by the entity being stepped, and is listening for
+    /// something it wears.
+    ///
+    /// A meeting has two parties and one sweep: only the mover's step sees it, and a neighbour
+    /// stepped earlier — or standing still — would otherwise learn of an arrival a frame late, or
+    /// never, where the arriver dies of the meeting and leaves the cast. This is the resolution
+    /// saying so at the moment it knows, for the world to deliver once the whole cast has moved.
+    /// Called only where the neighbour's own listening — the third of its
+    /// [three answers](Neighbour) — says the news is wanted; the default drops it, for the walks
+    /// written down in tests where nobody is waiting.
+    fn note(&self, _index: usize) {}
 }
 
 impl Collider {
@@ -91,6 +110,7 @@ impl Collider {
         bounds: Bounds,
         solid: BitFlags<SpriteFlag>,
         heeds: BitFlags<SpriteFlag>,
+        worn: BitFlags<SpriteFlag>,
         reads_map: bool,
     ) -> Option<Self> {
         if bounds.is_empty() {
@@ -118,6 +138,7 @@ impl Collider {
             size: (bounds.width(), bounds.height()),
             solid,
             mask: solid | heeds,
+            worn,
             reads_map,
         })
     }
@@ -169,7 +190,7 @@ impl Collider {
             let began_edges = edges(began);
 
             for index in 0..members {
-                let Some((bounds, flags)) = cast.at(index) else {
+                let Some((bounds, flags, _)) = cast.at(index) else {
                     continue;
                 };
                 let neighbour = edges(bounds);
@@ -365,20 +386,32 @@ impl Collider {
         let already = edges(already);
         let solid = self.solid;
         let mask = self.mask;
+        let worn = self.worn;
         for index in 0..cast.len() {
-            let Some((bounds, carried)) = cast.at(index) else {
+            let Some((bounds, carried, wants)) = cast.at(index) else {
                 continue;
             };
-            // Nothing this one carries is anything the entity is stopped by or asked to hear
-            // about, so there is no answer it could contribute — and it is refused here, before a
-            // single edge of it is worked out. `solid` is inside the mask, so a wall can never be
-            // refused by this.
-            if !mask.intersects(carried) {
+            // A meeting can matter to either of its parties: to this entity, where the neighbour
+            // carries something it is stopped by or asked to hear about, and to the neighbour,
+            // where it is listening for something this entity wears. One that is neither is
+            // refused here, before a single edge of it is worked out — and `solid` is inside the
+            // mask, so a wall can never be refused by this.
+            let mine = mask.intersects(carried);
+            let theirs = wants.intersects(worn);
+            if !mine && !theirs {
                 continue;
             }
             let bounds = edges(bounds);
             if overlap(swept, bounds) {
-                flags = flags | (carried & mask);
+                if mine {
+                    flags = flags | (carried & mask);
+                }
+                // The other party's half of the meeting, said where the sweep knows it: the
+                // neighbour was met, and it is listening. The world delivers once the cast has
+                // moved.
+                if theirs {
+                    cast.note(index);
+                }
             }
             if wall_hunting
                 && !stopped
@@ -739,7 +772,7 @@ mod tests {
         fn carried(&self) -> BitFlags<SpriteFlag> {
             self.0
                 .iter()
-                .fold(BitFlags::empty(), |all, &(_, f)| all | f)
+                .fold(BitFlags::empty(), |all, &(_, f, _)| all | f)
         }
 
         fn len(&self) -> usize {
@@ -761,7 +794,15 @@ mod tests {
         let body = Body::new(x, y);
         let bounds = Bounds::of(&body, width, height);
 
-        Collider::new(&body, bounds, WALL.into(), BitFlags::all(), true).unwrap()
+        Collider::new(
+            &body,
+            bounds,
+            WALL.into(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap()
     }
 
     /// One that is told about only what it names, for the tests that pin what heeding buys.
@@ -774,18 +815,22 @@ mod tests {
         let body = Body::new(x, y);
         let bounds = Bounds::of(&body, 8, 8);
 
-        Collider::new(&body, bounds, solid, heeds, true).unwrap()
+        Collider::new(&body, bounds, solid, heeds, BitFlags::empty(), true).unwrap()
     }
 
     /// A neighbour covering a rectangle of the screen and carrying whatever the tiles carry where
     /// they are walls: the lifts, the crates and the closed doors of a level.
     fn wall(x: i16, y: i16, width: u16, height: u16) -> Neighbour {
-        (Bounds::new(x, y, width, height), WALL.into())
+        (
+            Bounds::new(x, y, width, height),
+            WALL.into(),
+            BitFlags::empty(),
+        )
     }
 
     /// One carrying a flag of its own, for the things that are met and never stopped at.
     fn carrying(x: i16, y: i16, flags: BitFlags<SpriteFlag>) -> Neighbour {
-        (Bounds::new(x, y, 8, 8), flags)
+        (Bounds::new(x, y, 8, 8), flags, BitFlags::empty())
     }
 
     #[test]
@@ -797,7 +842,15 @@ mod tests {
         let solid = WALL.into();
         for empty in [Bounds::new(0, 0, 0, 8), Bounds::new(0, 0, 8, 0)] {
             assert!(
-                Collider::new(&body, empty, solid, BitFlags::all(), true).is_none(),
+                Collider::new(
+                    &body,
+                    empty,
+                    solid,
+                    BitFlags::all(),
+                    BitFlags::empty(),
+                    true
+                )
+                .is_none(),
                 "{empty:?}"
             );
         }
@@ -805,7 +858,15 @@ mod tests {
         // And a box that names nothing solid still gets one: it is stopped by nothing, and it is
         // asked what it walked through all the same.
         let bounds = Bounds::of(&body, 8, 8);
-        assert!(Collider::new(&body, bounds, BitFlags::empty(), BitFlags::all(), true).is_some());
+        assert!(Collider::new(
+            &body,
+            bounds,
+            BitFlags::empty(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true
+        )
+        .is_some());
     }
 
     #[test]
@@ -870,8 +931,15 @@ mod tests {
         };
         let body = Body::new(0.0, 0.0);
         let everywhere = Bounds::new(i16::MIN, i16::MIN, u16::MAX, u16::MAX);
-        let collider =
-            Collider::new(&body, everywhere, WALL.into(), BitFlags::all(), true).unwrap();
+        let collider = Collider::new(
+            &body,
+            everywhere,
+            WALL.into(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap();
         collider.resolve(Velocity::new(1.0, 0.0), counted, &alone());
         assert_eq!(
             asked.get(),
@@ -884,7 +952,15 @@ mod tests {
         asked.set(0);
         let body = Body::new(-300.0, -300.0);
         let outside = Bounds::of(&body, 8, 8);
-        let collider = Collider::new(&body, outside, WALL.into(), BitFlags::all(), true).unwrap();
+        let collider = Collider::new(
+            &body,
+            outside,
+            WALL.into(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap();
         collider.resolve(Velocity::new(1.0, 0.0), counted, &alone());
         assert_eq!(asked.get(), 0);
     }
@@ -917,7 +993,15 @@ mod tests {
         let wall = map(&[".#"]);
         let body = Body::new(0.5, 0.0);
         let bounds = Bounds::of(&body, 8, 8);
-        let collider = Collider::new(&body, bounds, WALL.into(), BitFlags::all(), true).unwrap();
+        let collider = Collider::new(
+            &body,
+            bounds,
+            WALL.into(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap();
         assert_eq!(
             bounds.x(),
             0,
@@ -958,6 +1042,7 @@ mod tests {
             Bounds::of(&body, 9, 8),
             WALL.into(),
             BitFlags::all(),
+            BitFlags::empty(),
             true,
         );
         let (moved, contacts) = collider
@@ -979,7 +1064,15 @@ mod tests {
         let wall = map(&[".#"]);
         let body = Body::new(0.0, 0.0);
         let inset = Bounds::new(body.draw_x() + 2, body.draw_y(), 4, 8);
-        let collider = Collider::new(&body, inset, WALL.into(), BitFlags::all(), true).unwrap();
+        let collider = Collider::new(
+            &body,
+            inset,
+            WALL.into(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap();
         let (moved, contacts) = collider.resolve(Velocity::new(2.0, 0.0), wall, &alone());
         assert_eq!(
             moved,
@@ -989,14 +1082,30 @@ mod tests {
         assert_eq!(contacts, Contacts::empty());
 
         // Two pixels further and the box itself reaches the wall, so it is stopped there.
-        let collider = Collider::new(&body, inset, WALL.into(), BitFlags::all(), true).unwrap();
+        let collider = Collider::new(
+            &body,
+            inset,
+            WALL.into(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap();
         let (moved, contacts) = collider.resolve(Velocity::new(4.0, 0.0), map(&[".#"]), &alone());
         assert_eq!(moved, Velocity::default());
         assert!(contacts.right());
 
         // And the sprite-sized box at the same body, which reaches the wall two pixels sooner.
         let whole = Bounds::of(&body, 8, 8);
-        let collider = Collider::new(&body, whole, WALL.into(), BitFlags::all(), true).unwrap();
+        let collider = Collider::new(
+            &body,
+            whole,
+            WALL.into(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap();
         let (moved, contacts) = collider.resolve(Velocity::new(2.0, 0.0), map(&[".#"]), &alone());
         assert_eq!(moved, Velocity::default());
         assert!(contacts.right());
@@ -1170,7 +1279,15 @@ mod tests {
         let body = Body::new(0.0, 0.0);
         let bounds = Bounds::of(&body, 8, 8);
         let solid = SpriteFlag::Flag0 | SpriteFlag::Flag1;
-        let walls = Collider::new(&body, bounds, solid, BitFlags::all(), true).unwrap();
+        let walls = Collider::new(
+            &body,
+            bounds,
+            solid,
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap();
         assert!(walls.stops_at(SpriteFlag::Flag1.into()));
         assert!(walls.stops_at(SpriteFlag::Flag1 | SpriteFlag::Flag7));
         assert!(!walls.stops_at(SpriteFlag::Flag7.into()));
@@ -1198,8 +1315,15 @@ mod tests {
         let pool = map(&["~~~~", "~~~~"]);
         let body = Body::new(0.0, 0.0);
         let bounds = Bounds::of(&body, 8, 8);
-        let collider =
-            Collider::new(&body, bounds, BitFlags::empty(), BitFlags::all(), true).unwrap();
+        let collider = Collider::new(
+            &body,
+            bounds,
+            BitFlags::empty(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap();
         let hazard = [carrying(4, 0, SPIKES.into())];
         let velocity = Velocity::new(1.0, 1.0);
         let (moved, contacts) = collider.resolve(velocity, pool, &cast(&hazard));
@@ -1208,8 +1332,15 @@ mod tests {
         assert!(contacts.touches(WATER) && contacts.touches(SPIKES));
 
         // And a solid neighbour is no more of a wall to it than the water was.
-        let collider =
-            Collider::new(&body, bounds, BitFlags::empty(), BitFlags::all(), true).unwrap();
+        let collider = Collider::new(
+            &body,
+            bounds,
+            BitFlags::empty(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap();
         let walls = [wall(4, 0, 8, 8)];
         let (moved, contacts) = collider.resolve(velocity, air, &cast(&walls));
         assert_eq!(moved, velocity, "a sensor was walled in");
@@ -1223,8 +1354,15 @@ mod tests {
         // shoves it anywhere — and the resolution still reports what it is inside.
         let body = Body::new(0.0, 0.0);
         let bounds = Bounds::of(&body, 8, 8);
-        let mut collider =
-            Collider::new(&body, bounds, BitFlags::empty(), BitFlags::all(), true).unwrap();
+        let mut collider = Collider::new(
+            &body,
+            bounds,
+            BitFlags::empty(),
+            BitFlags::all(),
+            BitFlags::empty(),
+            true,
+        )
+        .unwrap();
         let walls = [wall(4, 0, 8, 8)];
         let (push, pushed) = collider.expel(&cast(&walls));
         assert_eq!(push, (0.0, 0.0));
@@ -1303,6 +1441,7 @@ mod tests {
             Bounds::of(&body, 8, 8),
             WALL.into(),
             BitFlags::all(),
+            BitFlags::empty(),
             true,
         )
         .unwrap();
@@ -1315,7 +1454,7 @@ mod tests {
     fn a_neighbour_sharing_no_flag_is_swum_through_and_still_reported() {
         // A pond the level drags around. It shares no flag with this entity, so it is no wall to
         // it and never shoves it anywhere — and the step still says the entity is in the water.
-        let pond = [(Bounds::new(0, 0, 24, 24), WATER.into())];
+        let pond = [(Bounds::new(0, 0, 24, 24), WATER.into(), BitFlags::empty())];
         let mut collider = hitbox(8.0, 8.0);
         let (push, pushed) = collider.expel(&cast(&pond));
         assert_eq!(push, (0.0, 0.0), "the water shoved the swimmer out");
@@ -1454,6 +1593,7 @@ mod tests {
             Bounds::of(&body, 8, 8),
             WALL.into(),
             BitFlags::all(),
+            BitFlags::empty(),
             true,
         )
         .unwrap();
@@ -1480,7 +1620,7 @@ mod tests {
         // covers neither end of the strip — 0..7 before the step, 12..19 after — so a pair of
         // endpoint snapshots passes clean over it and reports nothing at all. The flags are taken
         // over the ground the step covered instead, and the swim comes back.
-        let stream = [(Bounds::new(9, 0, 2, 8), WATER.into())];
+        let stream = [(Bounds::new(9, 0, 2, 8), WATER.into(), BitFlags::empty())];
         let velocity = Velocity::new(12.0, 0.0);
         let (moved, contacts) = hitbox(0.0, 0.0).resolve(velocity, air, &cast(&stream));
         assert_eq!(moved, velocity, "the water stopped it");
@@ -1488,7 +1628,7 @@ mod tests {
 
         // The same strip, met falling rather than walking: the vertical sweep is the column the
         // entity really went down.
-        let strip = [(Bounds::new(0, 9, 8, 2), WATER.into())];
+        let strip = [(Bounds::new(0, 9, 8, 2), WATER.into(), BitFlags::empty())];
         let velocity = Velocity::new(0.0, 12.0);
         let (moved, contacts) = hitbox(0.0, 0.0).resolve(velocity, air, &cast(&strip));
         assert_eq!(moved, velocity);
@@ -1534,7 +1674,7 @@ mod tests {
         // somewhere the paling is not, so nothing stops it. Meeting is the whole step's, so it is
         // told exactly what it went through — and a cart that must not be gone through keeps a
         // terminal velocity, so that nothing moves further in an update than a wall is thick.
-        let paling = [(Bounds::new(9, 0, 2, 8), WALL.into())];
+        let paling = [(Bounds::new(9, 0, 2, 8), WALL.into(), BitFlags::empty())];
         let velocity = Velocity::new(12.0, 0.0);
         let (moved, contacts) = hitbox(0.0, 0.0).resolve(velocity, air, &cast(&paling));
         assert_eq!(moved, velocity);

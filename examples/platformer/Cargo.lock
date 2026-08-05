@@ -30,6 +30,9 @@ dependencies = [
 [[package]]
 name = "pixel8"
 version = "0.1.0"
+dependencies = [
+ "heapless",
+]
 
 [[package]]
 name = "platformer"
