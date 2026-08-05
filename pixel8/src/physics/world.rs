@@ -106,11 +106,12 @@ use crate::{BitFlags, Context, SpriteFlag, SpriteId};
 /// on a track — cost the cast no more than being seen.
 /// # The cast ceiling
 ///
-/// `CAST` is the most members one step takes at full speed, and with it the size of the buffer
-/// the cast crosses the ABI in: `CAST` records of forty-four bytes each, carried inside the
-/// world. Sixty-four — the default — is the most the wire itself takes; a cart that knows its
-/// scene is smaller says so the way it says every other capacity in this console, and pays for
-/// no more records than it means to fill:
+/// `CAST` is the most members one step takes, and with it the stack a step borrows while it
+/// runs: `CAST` records of forty-four bytes each, written down for the crossing of the ABI and
+/// gone the moment it returns. Nothing of them outlives the call — the world itself holds a few
+/// bytes of configuration and no buffer at all. Sixty-four — the default — is the most the wire
+/// itself takes; a cart that knows its scene is smaller says so the way it says every other
+/// capacity in this console:
 ///
 /// ```
 /// # use pixel8::physics::World;
@@ -131,10 +132,6 @@ pub struct World<const CAST: usize = 64, F: Force = ()> {
     solid: BitFlags<SpriteFlag>,
     /// The scene's weather, the world's own. See [`with_forces`](Self::with_forces).
     forces: F,
-    /// The buffer the cast crosses the ABI in — see [`step`](Self::step). Only a cart has a wire
-    /// to cross, so only the cart's build carries it.
-    #[cfg(target_arch = "wasm32")]
-    records: [wire::Record; CAST],
 }
 
 impl<const CAST: usize> World<CAST> {
@@ -155,8 +152,6 @@ impl<const CAST: usize> World<CAST> {
             reads_map: true,
             solid: BitFlags::empty(),
             forces: (),
-            #[cfg(target_arch = "wasm32")]
-            records: [wire::EMPTY; CAST],
         }
     }
 
@@ -207,8 +202,6 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
             reads_map: self.reads_map,
             solid: self.solid,
             forces,
-            #[cfg(target_arch = "wasm32")]
-            records: self.records,
         }
     }
 
@@ -338,19 +331,26 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
     /// [`wire`] — so what a cart spends here is the writing and the reading, not the collisions.
     #[cfg(target_arch = "wasm32")]
     fn step_over_the_wire(&mut self, cast: &mut [&mut dyn Kinetic]) {
+        use core::mem::MaybeUninit;
+
         // The forces are the cart's own code, so their half of the step happens on the cart's
         // side — before the cast is written down, which is the one snapshot point both halves of
         // `step` share.
         self.weather(cast);
 
-        // The buffer is the world's own, so the record a cast member crosses in costs the cart
-        // exactly the ceiling it declared.
-        let records = &mut self.records;
-        for (record, entity) in records.iter_mut().zip(cast.iter_mut()) {
+        // The records live for exactly this call, on the stack: a step's worth of scratch, not a
+        // cart's worth of state. Uninitialized rather than cleared, because clearing would be a
+        // ceiling's worth of metered writes an update — every slot that is sent is written just
+        // below, and the tail past the cast is never sent at all, so the cart pays for the
+        // records it fills and holds none of them between steps.
+        let mut records = [const { MaybeUninit::<wire::Record>::uninit() }; CAST];
+        for (slot, entity) in records.iter_mut().zip(cast.iter_mut()) {
             let velocity = *entity.velocity_mut();
-            *record = wire::Record::of(&**entity, self.solid, velocity);
+            slot.write(wire::Record::of(&**entity, self.solid, velocity));
         }
 
+        // The cast fits the buffer — `weather` refused anything past the ceiling — so the console
+        // is handed exactly the initialized prefix, and answers into those same bytes.
         unsafe {
             crate::ffi::step_cast(
                 records.as_mut_ptr().cast(),
@@ -359,12 +359,15 @@ impl<const CAST: usize, F: Force> World<CAST, F> {
             );
         }
 
-        for (record, entity) in records.iter().zip(cast.iter_mut()) {
+        for (slot, entity) in records.iter().zip(cast.iter_mut()) {
             // A prop went along only to be met: nothing was decided about it, so nothing of it
             // is touched.
             if entity.prop() {
                 continue;
             }
+            // Written before the crossing and answered in place by the console, so every slot
+            // this zip reaches is initialized.
+            let record = unsafe { slot.assume_init_ref() };
             entity
                 .body_mut()
                 .set_wire((record.x, record.y, record.rx, record.ry));
