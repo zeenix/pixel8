@@ -1,6 +1,6 @@
 //! The air a scene is played in.
 
-use super::{force::weighed, Force, Kinetic};
+use super::{force::weighed, Force, Subject};
 
 /// The air itself: it drags on everything that moves through it, on both axes, forever.
 ///
@@ -84,13 +84,13 @@ impl Atmosphere {
 
 impl Force for Atmosphere {
     /// The mass divides the drag: the same air barely holds an anvil and takes a feather at once.
-    fn apply(&self, entity: &mut dyn Kinetic) {
+    fn apply(&self, subject: &mut Subject) {
         // A share of the speed rather than a constant subtracted from it, which is what makes the
         // drag grow with the speed and a fall settle where it matches the pull. The clamp holds
         // that for something light enough for the air to take whole: a share past 1.0 would stop
         // it and start dragging it backwards.
-        let take = (self.density / weighed(entity.mass())).clamp(0.0, 1.0);
-        let velocity = entity.velocity_mut();
+        let take = (self.density / weighed(subject.mass())).clamp(0.0, 1.0);
+        let velocity = subject.velocity_mut();
         velocity.dx -= velocity.dx * take;
         velocity.dy -= velocity.dy * take;
     }
@@ -139,8 +139,8 @@ mod tests {
         const PULL: Gravity = Gravity::new().with_terminal_velocity(f32::MAX);
         let mut mob = Mob::new();
         for _ in 0..1_000 {
-            AIR.apply(&mut mob);
-            PULL.apply(&mut mob);
+            mob.shove(&AIR);
+            mob.shove(&PULL);
         }
         assert!(
             (mob.velocity.dy - Gravity::DEFAULT_TERMINAL_VELOCITY).abs() < 1e-3,
@@ -153,8 +153,8 @@ mod tests {
         // run in is the slice's, and this is the whole of what it costs.
         let mut mob = Mob::new();
         for _ in 0..1_000 {
-            PULL.apply(&mut mob);
-            AIR.apply(&mut mob);
+            mob.shove(&PULL);
+            mob.shove(&AIR);
         }
         let settled = Gravity::DEFAULT_TERMINAL_VELOCITY - Gravity::DEFAULT_STRENGTH;
         assert!(
@@ -185,7 +185,7 @@ mod tests {
         let mut mob = Mob::moving(2.0, -2.0);
         let (mut previous_x, mut previous_y) = (mob.velocity.dx, mob.velocity.dy);
         for _ in 0..600 {
-            air.apply(&mut mob);
+            mob.shove(&air);
             // Always towards rest, never past it: a share of what is left is never more than what
             // is left.
             assert!(mob.velocity.dx >= 0.0 && mob.velocity.dx <= previous_x);

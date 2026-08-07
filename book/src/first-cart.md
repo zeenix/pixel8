@@ -100,9 +100,30 @@ A game is a struct holding your state, plus the [`Game`] trait:
   drawing observes the world, it doesn't change it. That split — mutate in
   `update`, render in `draw` — is enforced by the types, and it keeps game
   logic untangled from presentation.
-- **`game!(MyGame { x: 60, y: 70 })`** declares the entry point and the
-  initial state. Any constructor works: `game!(MyGame = MyGame::new())`, or
-  just `game!(MyGame)` if your type implements `Default`.
+- **`game!(MyGame { x: 60, y: 70 })`** declares the entry point and the state
+  the cart starts in. That state is *data*: the initializer is a constant, so
+  it is written into the cart's memory image and placed there when the module
+  loads — nothing runs to build it, and nothing copies it onto the stack. A
+  `const fn` constructor works the same way: `game!(MyGame = MyGame::new())`.
+- **`boot(&mut self, ctx: &mut Context)`** — optional — runs once, before the
+  first `update`, on that state. It is where anything a constant cannot say
+  goes: reading saved data, asking the clock, seeding the dice, giving a
+  physics world its cast. It is also the first moment a [`Context`] exists, so
+  no cart needs a *"first frame is secretly the setup"* branch in `update`:
+
+```rust
+fn boot(&mut self, ctx: &mut Context) {
+    // Where the player left the box last time, if they have played before.
+    self.x = ctx.storage_get("x").and_then(|v| v.as_i64()).unwrap_or(60) as i16;
+}
+```
+
+If your constructor genuinely cannot be a constant — it allocates, or it has to
+look something up first — say `game!(MyGame = defer MyGame::new())` and it is
+built at start-up instead. `game!(MyGame)`, the `Default` form, is deferred for the
+same reason. Deferring costs stack: the state exists twice for a moment, once on the
+stack and once in the static it is moved into, so a big game built that way
+needs a big [stack reserve](limits.md).
 
 There is no main loop to write, no window to open, no timing code: the
 console calls you.

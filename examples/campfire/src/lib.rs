@@ -13,7 +13,7 @@ use smoker::Smoker;
 
 use crate::owl::Owl;
 
-game!(Campfire = Campfire::new());
+game!(Campfire = defer Campfire::new());
 
 /// A campfire and nothing else, out of one of the SDK's plume effects: a fire whose spent flames
 /// carry on as smoke, so the column reads as a single effect rather than a fire with smoke on top.
@@ -33,6 +33,10 @@ struct Campfire {
 }
 
 impl Campfire {
+    /// Built at start-up rather than shipped placed — the `defer` form of `game!` — because the
+    /// plumes and the gusting wind are put together by ordinary constructors, and a constant may
+    /// call none of them. The cost is the stack: for a moment the whole campfire exists twice,
+    /// once here and once in the static it is moved into.
     fn new() -> Self {
         Self {
             fire: SmokingFire::new(FIRE_X, FIRE_Y),
@@ -46,18 +50,18 @@ impl Campfire {
 }
 
 impl Game for Campfire {
-    fn update(&mut self, ctx: &mut Context) {
+    fn boot(&mut self, ctx: &mut Context) {
         // Started here rather than in `new`, which has no `Context` to ask. The song loops on its
-        // own, so this only ever runs on the first frame.
-        if self.ambience.is_none() {
-            self.ambience = ctx
-                .music(AMBIENCE)
-                .fade_in(AMBIENCE_FADE_IN_MS)
-                .reserve_channels(Channel::Channel0 | Channel::Channel1 | Channel::Channel2)
-                .play()
-                .ok();
-        }
+        // own, and boot runs once, so this is the whole of it.
+        self.ambience = ctx
+            .music(AMBIENCE)
+            .fade_in(AMBIENCE_FADE_IN_MS)
+            .reserve_channels(Channel::Channel0 | Channel::Channel1 | Channel::Channel2)
+            .play()
+            .ok();
+    }
 
+    fn update(&mut self, ctx: &mut Context) {
         // The gust first: everything that sways this frame sways on the same one.
         self.wind.update(ctx);
         self.fire.blown_by(&self.wind);

@@ -1,16 +1,16 @@
 //! The cast on the wire: how a step crosses the ABI, written down once for both sides of it.
 //!
-//! [`World::step`](super::World::step) hands the whole cast to the console in one `step_cast`
-//! import — everything the engine needs to know about an entity in one fixed-size [`Record`], a
-//! cast of them in one buffer — and the console runs the very engine this module's neighbours in
-//! `world.rs` and `collider.rs` are, natively, over its own map and sprite sheet. What comes back
-//! in the same buffer is everything the step decided: where each body ended up, what survived of
-//! its velocity, and what it met. The cart pays for the writing down and the reading back;
-//! the collisions themselves never spend a drop of cart fuel.
+//! A [`World`](super::World) keeps its whole cast in these records — one fixed-size [`Record`] a
+//! seat, in the world itself — and [`step`](super::World::step) hands that very array to the
+//! console in one `step_cast` import. The console runs the engine this module's neighbours in
+//! `world.rs` and `collider.rs` are, natively, over its own map and sprite sheet, and answers into
+//! the same bytes: where each body ended up, what survived of its velocity, and what it met.
+//! Nothing is marshalled in either direction — the cart's state *is* the buffer — and the
+//! collisions themselves never spend a drop of cart fuel.
 //!
-//! Both halves of the crossing live in this one file so they cannot drift: the SDK fills and
-//! reads [`Record`]s in cart memory, and the console — which depends on this very crate — decodes
-//! them with [`Record::read`], steps a cast of [`Recast`]s, and writes the answers back with
+//! Both halves of the crossing live in this one file so they cannot drift: the SDK fills and reads
+//! [`Record`]s in cart memory, and the console — which depends on this very crate — decodes them
+//! with [`Record::read`], steps a cast of [`Recast`]s, and writes the answers back with
 //! [`Record::write`]. The layout is `#[repr(C)]`, little-endian like wasm itself, and pinned by
 //! the tests at the bottom.
 //!
@@ -21,11 +21,11 @@ use super::{Bounds, Contacts, Kinetic, Velocity};
 use crate::{BitFlags, Body, SpriteFlag, SpriteId};
 
 /// How many cast members fit over the wire in one step: the ceiling on a
-/// [`Cast`](super::Cast)'s capacity.
+/// [`World`](super::World)'s `N`.
 ///
-/// Sixty-four records is under 3 KiB of stack for the length of one call, and sixty-four moving,
-/// colliding things is well past what fits on a 128x128 screen. A cast with a bigger capacity is
-/// refused at compile time, in [`World::step`](super::World::step)'s own `const` check.
+/// Sixty-four records is under 3 KiB, and sixty-four moving, colliding things is well past what
+/// fits on a 128x128 screen. A world with more seats than this is refused at compile time, in
+/// [`World::new`](super::World::new)'s own `const` check.
 pub const CAP: usize = 64;
 
 /// The record's `meta` bit for a [prop](Kinetic::prop): met, never moved.
@@ -37,14 +37,15 @@ pub const CONFINED: u8 = 1 << 1;
 /// The `sprite` field's value for an entity that wears nothing.
 pub const UNWORN: u16 = u16::MAX;
 
-/// One cast member on the wire: what the engine needs of it going in, and what the step decided
+/// One cast member on the wire — and, since the world keeps its cast in these, one seat of a
+/// [`World`](super::World): what the engine needs of a member going in, and what the step decided
 /// coming back, in the same forty-four bytes.
 ///
-/// Going in, everything is a plain copy of what the entity [describes](Kinetic) — with `solid`
-/// already settled between the entity's own rule and the world's, so the engine never has to ask
-/// whose word it was. Coming back, `x`/`y`/`rx`/`ry` are the body's whole state after the step,
-/// `dx`/`dy` the velocity that survived it, and `sides`/`touched` the [`Contacts`]; the rest
-/// comes back untouched.
+/// Going in, everything is what the cart said as it [enlisted](super::World::enlist) the member —
+/// with `solid` already settled between the member's own rule and the world's, so the engine never
+/// has to ask whose word it was. Coming back, `x`/`y`/`rx`/`ry` are the body's whole state after
+/// the step, `dx`/`dy` the velocity that survived it, and `sides`/`touched` the [`Contacts`]; the
+/// rest comes back untouched, which is why the world can keep its state here between steps.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Record {
@@ -86,7 +87,22 @@ pub struct Record {
 /// The record size the layout above must come to — the wire stride, pinned by a test.
 pub const RECORD: usize = 44;
 
-/// A record of nothing, for the buffer to start as.
+/// An empty seat, as it travels: a prop covering no pixels, wearing nothing and listening for
+/// nothing.
+///
+/// The world's seats are always all there — `N` of them, filled or not — and the crossing carries
+/// everything up to the last one taken. A vacant one goes along as this, and the engine is inert
+/// against it without knowing anything about vacancy: a prop is never moved and never given
+/// contacts, no force reaches it, and a rectangle of no size overlaps nothing, so it is dropped
+/// from the snapshot for wearing nothing and listening for nothing. Which is what lets a world
+/// with gaps in its cast cross an *unchanged* wire — a cart built today still steps on a console
+/// built before any of this.
+pub const VACANT: Record = Record {
+    meta: PROP,
+    ..EMPTY
+};
+
+/// A record of nothing, for a buffer to start as.
 pub const EMPTY: Record = Record {
     x: 0.0,
     y: 0.0,
@@ -112,41 +128,6 @@ pub const EMPTY: Record = Record {
 };
 
 impl Record {
-    /// Everything the engine will need of `entity`, written down — with `solid` already settled
-    /// between the entity's own rule and the world's.
-    pub fn of(entity: &dyn Kinetic, world_solid: BitFlags<SpriteFlag>, velocity: Velocity) -> Self {
-        let (x, y, rx, ry) = entity.body().wire();
-        let bounds = entity.bounds();
-        let (confined, limits) = match entity.confines() {
-            Some(limits) => (CONFINED, limits),
-            None => (0, Bounds::new(0, 0, 0, 0)),
-        };
-
-        Self {
-            x,
-            y,
-            dx: velocity.dx,
-            dy: velocity.dy,
-            rx,
-            ry,
-            bx: bounds.x(),
-            by: bounds.y(),
-            bw: bounds.width(),
-            bh: bounds.height(),
-            cx: limits.x(),
-            cy: limits.y(),
-            cw: limits.width(),
-            ch: limits.height(),
-            sprite: entity.sprite().map_or(UNWORN, |sprite| sprite.0 as u16),
-            solid: entity.solid().unwrap_or(world_solid).bits(),
-            heeds: entity.heeds().bits(),
-            meta: confined | if entity.prop() { PROP } else { 0 },
-            sides: 0,
-            touched: 0,
-            pad: 0,
-        }
-    }
-
     /// The record read out of raw wire bytes — the console's side of the crossing.
     ///
     /// Field by field and little-endian, so the answer is the cart's layout whatever the host is,
@@ -202,13 +183,14 @@ impl Record {
     }
 }
 
-/// A record recast as a cast member, on the console's side of the wire: the engine steps these
-/// exactly as it steps a cart's own entities, because they are [`Kinetic`] like everything else.
+/// A record recast as a cast member, for the engine to step: on the console's side of the wire,
+/// and on the world's own native path, where the very same engine is run over the world's records
+/// in place of the crossing.
 ///
-/// The one modelling choice is the rectangle. An entity's [`bounds`](Kinetic::bounds) travel as
-/// the rectangle they were at the top of the step, and the engine needs them to *follow the
-/// body* as it moves — which is what they do in every cart, [`Bounds::of`] and inset hurtboxes
-/// alike: a rectangle at a fixed offset from the drawn pixel. So the offset is taken once, at
+/// The one modelling choice is the rectangle. A member's rectangle travels as the one it covered
+/// at the top of the step, and the engine needs it to *follow the body* as it moves — which is
+/// what a rectangle does: it keeps a fixed offset from the drawn pixel, zero for the usual one
+/// over the sprite and whatever an inset hurtbox was given. So the offset is taken once, at
 /// decode, and the rectangle is wherever the body now draws plus that.
 pub struct Recast {
     body: Body,

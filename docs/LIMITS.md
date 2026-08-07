@@ -42,6 +42,17 @@ default 32 KiB reserve, roughly 95 KiB of heap headroom remains for carts
 that opt into `std` and a heap allocator. Simple `no_std` carts use a small
 fraction of this; even a heap-using cart typically stays well inside the budget.
 
+What most often decides how big that reserve has to be is start-up. A cart's
+game state lives in a `static`, which reserves its size whether or not anything
+has been written into it — so the state costs the same RAM however it is made.
+The stack is the part that varies: a state *built* at start-up is assembled on
+the stack and then moved into that `static`, so for a moment the whole game
+exists twice and the reserve must cover a copy of it. A `game!` initializer that
+is a constant is placed by the loader instead — nothing is built and nothing is
+copied — and a cart with a large state can then run on a far smaller stack than
+its own size. See `Game::boot` for where the setup a constant cannot express
+goes.
+
 ## Per-frame work — 128 K
 
 Each call to `update` and each call to `draw` has a fixed work budget.

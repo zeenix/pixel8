@@ -2,70 +2,126 @@
 
 use core::f32::consts::FRAC_1_SQRT_2;
 
-use super::Kinetic;
+use super::Velocity;
 use crate::Direction;
 
-/// A force field: anything that bends what an entity is travelling at, one update at a time.
+/// A force field: anything that bends what a cast member is travelling at, one update at a time.
 ///
 /// [`Gravity`](super::Gravity), [`Atmosphere`](super::Atmosphere) and [`Wind`](super::Wind) are
 /// the three this module ships, and a cart's own is an `impl Force` that works everywhere they do
 /// — see the [module docs](super#forces-of-your-own).
 ///
-/// A force reaches an entity through what [`Kinetic`] grants and nothing else: it reads whatever
-/// it cares about — the [`mass`](Kinetic::mass), usually — and bends the
-/// [`velocity_mut`](Kinetic::velocity_mut). Position is never touched, which is what leaves the
-/// cart in charge of movement: [`World::step`](super::World::step) applies the forces, stops
-/// whatever ran into the world, and moves the body with what survives, in that order.
+/// A force is shown one [`Subject`] at a time and touches one thing on it: the velocity. Position
+/// is never written, which is what leaves the movement in one place —
+/// [`World::step`](super::World::step) runs the forces over the whole cast, stops whatever ran
+/// into the world, and moves what survives, in that order.
 ///
 /// Forces compose: a tuple of forces is one force, applied left to right, and `()` is the still
 /// air. That is the shape a scene's whole weather takes as the one value its
 /// [`World`](super::World) [owns](super::World::with_forces):
 ///
 /// ```no_run
-/// # use pixel8::{physics::{Cast, Force, Gravity, Kinetic, Wind, World}, Context};
-/// # fn f(entity: &mut impl Kinetic, ctx: &Context) {
-/// let mut world = World::new().with_forces((Gravity::new(), Wind::new(0.3)));
+/// # use pixel8::{physics::{Gravity, Wind, World}, Context};
+/// # fn f(ctx: &Context) {
+/// let mut world: World<8, _> = World::new().with_forces((Gravity::new(), Wind::new(0.3)));
 ///
-/// let mut cast: Cast<1> = Cast::from_array([entity.as_kinetic()]);
-/// world.step(ctx, &mut cast);
+/// world.step(ctx);
 /// # }
 /// ```
 pub trait Force {
-    /// Bends `entity`'s velocity by one update's worth of this force.
+    /// Bends `subject`'s velocity by one update's worth of this force.
     ///
-    /// What the entity's [`mass`](Kinetic::mass) is worth is this force's own business:
+    /// What the subject's [`mass`](Subject::mass) is worth is this force's own business:
     /// [`Wind`](super::Wind) and [`Atmosphere`](super::Atmosphere) divide their grip by it, while
     /// [`Gravity`](super::Gravity) never reads it at all and pulls everything alike. See the
     /// [module docs](super#mass).
     ///
-    /// Read whatever is wanted off the entity *before* taking its velocity, or the two borrows
-    /// overlap:
-    ///
     /// ```no_run
-    /// # use pixel8::physics::{Force, Kinetic};
+    /// # use pixel8::physics::{Force, Subject};
     /// /// A current: it pushes, and it pushes something heavy less.
     /// struct Current {
     ///     push: f32,
     /// }
     ///
     /// impl Force for Current {
-    ///     fn apply(&self, entity: &mut dyn Kinetic) {
-    ///         let mass = entity.mass();
-    ///         entity.velocity_mut().dx += self.push / mass;
+    ///     fn apply(&self, subject: &mut Subject) {
+    ///         let mass = subject.mass();
+    ///         subject.velocity_mut().dx += self.push / mass;
     ///     }
     /// }
     /// ```
     ///
     /// Most carts never call this: they hand their forces to the
-    /// [`World`](super::World::with_forces), whose step applies them to every entity in the cast,
-    /// in the order they were composed.
-    fn apply(&self, entity: &mut dyn Kinetic);
+    /// [`World`](super::World::with_forces), whose step runs them over every member of the cast it
+    /// moves, in the order they were composed.
+    fn apply(&self, subject: &mut Subject);
+}
+
+/// What a force is handed to act on: a member's velocity to bend, and its mass and position to
+/// read.
+///
+/// The world builds one of these per member as the weather runs, out of what it holds for that
+/// seat, and takes the bent velocity back the moment the force returns. So a force never sees the
+/// cast, never sees a handle, and cannot move anything: it is handed a speed and a couple of
+/// facts, and the whole of its say is what it leaves in the speed.
+///
+/// Reading and bending are separate borrows of nothing at all — [`mass`](Self::mass) and
+/// [`pos`](Self::pos) are plain copies — so the order they are asked in no longer matters.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Subject {
+    velocity: Velocity,
+    mass: f32,
+    pos: (f32, f32),
+}
+
+impl Subject {
+    /// A subject of a given velocity, mass and position.
+    ///
+    /// The world makes these; a cart wanting to push its own [`Force`] around in a test of its own
+    /// makes one here.
+    pub const fn new(velocity: Velocity, mass: f32, pos: (f32, f32)) -> Self {
+        Self {
+            velocity,
+            mass,
+            pos,
+        }
+    }
+
+    /// What the member is travelling at, as the force found it.
+    pub const fn velocity(&self) -> Velocity {
+        self.velocity
+    }
+
+    /// The same velocity, to bend: the one thing a force may change, and the whole of what it
+    /// leaves behind.
+    pub const fn velocity_mut(&mut self) -> &mut Velocity {
+        &mut self.velocity
+    }
+
+    /// How hard the member is to push, relative to everything else in the scene.
+    ///
+    /// `1.0` is the weight nobody has to think about; a member says otherwise once, with
+    /// [`Enlisting::weighing`](super::Enlisting::weighing). A force that divides by it does well
+    /// to clamp what it works out, the way the ones here do, so that a mass a cart arrived at from
+    /// something empty — a zero, a `NaN` — gives an ordinary member rather than one flung off the
+    /// screen.
+    pub const fn mass(&self) -> f32 {
+        self.mass
+    }
+
+    /// Where the member is: its exact sub-pixel position.
+    ///
+    /// For a force that varies over the scene rather than blowing everywhere alike — a magnet, a
+    /// current down one side of a level, a fan at the end of a corridor.
+    pub const fn pos(&self) -> (f32, f32) {
+        self.pos
+    }
 }
 
 /// The still air: no force at all, and the weather a [`World`](super::World) that never took any
 /// owns.
 impl Force for () {
-    fn apply(&self, _: &mut dyn Kinetic) {}
+    fn apply(&self, _: &mut Subject) {}
 }
 
 /// Forces compose: a tuple of them is one force, applied left to right — the whole of a scene's
@@ -74,9 +130,9 @@ macro_rules! forces_compose {
     ($( ( $($force:ident),+ ) )+) => {$(
         #[allow(non_snake_case)]
         impl<$($force: Force),+> Force for ($($force,)+) {
-            fn apply(&self, entity: &mut dyn Kinetic) {
+            fn apply(&self, subject: &mut Subject) {
                 let ($($force,)+) = self;
-                $($force.apply(entity);)+
+                $($force.apply(subject);)+
             }
         }
     )+};
@@ -85,12 +141,12 @@ forces_compose!((A)(A, B)(A, B, C)(A, B, C, D)(A, B, C, D, E)(
     A, B, C, D, E, G
 ));
 
-/// A [`mass`](Kinetic::mass) fit to divide by: one that means nothing — zero, negative, or `NaN`
+/// A [`mass`](Subject::mass) fit to divide by: one that means nothing — zero, negative, or `NaN`
 /// — reads as the default `1.0`.
 ///
 /// Quietly, like everything else here: a cart that works out a mass from something that turned
-/// out to be empty gets an ordinary entity for it, not a division by zero that puts the entity a
-/// thousand screens away.
+/// out to be empty gets an ordinary member for it, not a division by zero that puts it a thousand
+/// screens away.
 pub(super) fn weighed(mass: f32) -> f32 {
     // `NaN` fails this comparison along with the zero and the negatives, which is the point.
     if mass > 0.0 {
@@ -133,8 +189,12 @@ pub(super) const DIRECTIONS: [Direction; 8] = [
     Direction::UpLeft,
 ];
 
-/// A minimal [`Kinetic`] for the tests throughout this module to push around: a body, a velocity,
+/// A minimal cast member for the tests throughout this module to push around: a body, a velocity,
 /// a slot to be told what it met, and a mass. Nothing else.
+///
+/// The engine's own tests hand these to [`step_cast`](super::World::step_hosted) as the
+/// [`Kinetic`](super::Kinetic)s they are; the forces' tests [shove](Mob::shove) them one update at
+/// a time, exactly as the world's weather does.
 #[cfg(test)]
 pub(super) struct Mob {
     pub(super) body: crate::Body,
@@ -171,17 +231,29 @@ impl Mob {
         }
     }
 
+    /// One update of `force`, over the subject the world would have made of this one.
+    pub(super) fn shove(&mut self, force: &dyn Force) {
+        let mut subject = Subject::new(self.velocity, self.mass, self.body.pos());
+        force.apply(&mut subject);
+        self.velocity = subject.velocity();
+    }
+
     /// The velocity it is left with after `updates` of `force` and nothing else.
     pub(super) fn under(mut self, force: &dyn Force, updates: usize) -> super::Velocity {
         for _ in 0..updates {
-            force.apply(&mut self);
+            self.shove(force);
         }
         self.velocity
+    }
+
+    /// This mob as the trait object the engine's cast is made of.
+    pub(super) fn as_kinetic(&mut self) -> &mut dyn super::Kinetic {
+        self
     }
 }
 
 #[cfg(test)]
-impl Kinetic for Mob {
+impl super::Kinetic for Mob {
     fn body(&self) -> &crate::Body {
         &self.body
     }
@@ -204,10 +276,6 @@ impl Kinetic for Mob {
 
     fn bounds(&self) -> super::Bounds {
         super::Bounds::of(&self.body, 8, 8)
-    }
-
-    fn mass(&self) -> f32 {
-        self.mass
     }
 }
 
@@ -257,25 +325,45 @@ mod tests {
     }
 
     #[test]
-    fn a_force_reaches_an_entity_through_the_traits_alone() {
-        // A cart's own force applied to a cart's own entity, both as trait objects: the whole of
-        // what the two traits promise each other.
+    fn a_force_reaches_a_member_through_the_subject_alone() {
+        // A cart's own force against the subject the world hands it: a velocity to bend, and what
+        // the world knows about the member behind it.
         struct Updraft;
 
         impl Force for Updraft {
-            fn apply(&self, entity: &mut dyn Kinetic) {
-                let mass = entity.mass();
-                entity.velocity_mut().dy -= 1.0 / mass;
+            fn apply(&self, subject: &mut Subject) {
+                let mass = subject.mass();
+                subject.velocity_mut().dy -= 1.0 / mass;
             }
         }
 
         let force: &dyn Force = &Updraft;
-        let mut mob = Mob::with_mass(2.0);
-        let entity: &mut dyn Kinetic = &mut mob;
-        force.apply(entity);
-        assert_eq!(mob.velocity, Velocity::new(0.0, -0.5));
-        // And nothing moved: a force bends a velocity, and it is the world's step that turns
-        // that into movement.
-        assert_eq!(mob.body.pos(), (0.0, 0.0));
+        let mut subject = Subject::new(Velocity::default(), 2.0, (8.0, 16.0));
+        force.apply(&mut subject);
+        assert_eq!(subject.velocity(), Velocity::new(0.0, -0.5));
+        // And nothing moved: a force bends a velocity, and it is the world's step that turns that
+        // into movement.
+        assert_eq!(subject.pos(), (8.0, 16.0));
+    }
+
+    #[test]
+    fn a_force_that_reads_where_it_is_pushing_is_shown_the_exact_position() {
+        // A force of a cart's own that varies over the scene: everything left of the middle is
+        // pushed one way and everything right of it the other.
+        struct Draught;
+
+        impl Force for Draught {
+            fn apply(&self, subject: &mut Subject) {
+                let (x, _) = subject.pos();
+                subject.velocity_mut().dx += if x < 64.0 { 1.0 } else { -1.0 };
+            }
+        }
+
+        let mut near = Subject::new(Velocity::default(), 1.0, (10.5, 0.0));
+        let mut far = Subject::new(Velocity::default(), 1.0, (100.0, 0.0));
+        Draught.apply(&mut near);
+        Draught.apply(&mut far);
+        assert_eq!(near.velocity().dx, 1.0);
+        assert_eq!(far.velocity().dx, -1.0);
     }
 }

@@ -770,14 +770,15 @@ fn step_the_cast(caller: &mut Caller<'_, HostState>, ptr: u32, len: u32, config:
             }
             flags(state.map.get(x as i32, y as i32) as u32)
         };
-        // Any ceiling serves the host — its world carries no wire buffer — so the default one is
-        // spelled only to give inference an answer.
-        let world: World = if config & 1 != 0 {
+        // A world of no seats of its own: the cast is the one handed in, decoded out of cart
+        // memory, so the host's world is nothing but the two words of configuration below.
+        let world: World<0> = if config & 1 != 0 {
             World::new()
         } else {
             World::mapless()
         };
-        let mut entities: Vec<&mut dyn Kinetic> = cast.iter_mut().map(|e| e.as_kinetic()).collect();
+        let mut entities: Vec<&mut dyn Kinetic> =
+            cast.iter_mut().map(|e| e as &mut dyn Kinetic).collect();
         world.step_hosted(&mut entities, tiles, |sprite| flags(sprite.0 as u32));
     }
 
@@ -1433,6 +1434,26 @@ mod tests {
         let reloaded = Storage::at_path(path.clone());
         assert_eq!(reloaded.get_json("score").as_deref(), Some("42"));
         std::fs::remove_file(&path).unwrap();
+    }
+
+    /// A hand-written cart that only works out its rate while `pixel8_init` runs: what the
+    /// documented query order — `pixel8_fps` once, after init — exists for.
+    const FPS_FROM_INIT_CART: &str = r#"
+        (module
+          (global $rate (mut i32) (i32.const 0))
+          (func (export "pixel8_init") (global.set $rate (i32.const 30)))
+          (func (export "pixel8_fps") (result i32) (global.get $rate))
+          (func (export "pixel8_update"))
+          (func (export "pixel8_draw")))
+    "#;
+
+    #[test]
+    fn a_carts_rate_may_be_worked_out_by_its_init() {
+        // The raw-ABI contract: `pixel8_fps` is asked once, after `pixel8_init`, so a cart is
+        // free to compute its rate from state init builds. (The SDK's `boot` is answered the
+        // target cart-side, from the game's own constant, precisely so this order can stand.)
+        let vm = load_test_vm(FPS_FROM_INIT_CART).unwrap();
+        assert_eq!(vm.state().measured_fps_or_target(), 30.0);
     }
 
     #[test]

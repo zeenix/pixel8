@@ -1,6 +1,6 @@
 //! The pull a level falls under.
 
-use super::{Force, Kinetic};
+use super::{Force, Subject};
 use crate::Direction;
 
 /// A steady pull: the level's gravity, applied to everything that falls in it.
@@ -12,18 +12,17 @@ use crate::Direction;
 /// against or the wall a puzzle turns the room onto. See the [module docs](super#gravity).
 ///
 /// **Mass does not enter into it.** Everything falls alike, whatever it weighs, so an anvil and a
-/// feather drop side by side and a cart that gives an entity a [`mass`](super::Kinetic::mass) does
-/// not change how it falls by doing so. What tells the two apart is the air between them: see
+/// feather drop side by side and a cart that gives a member a [mass](super::Enlisting::weighing)
+/// does not change how it falls by doing so. What tells the two apart is the air between them: see
 /// [`Atmosphere`](super::Atmosphere), which reads mass exactly where gravity refuses to.
 ///
 /// ```no_run
-/// # use pixel8::{physics::{Cast, Gravity, Kinetic, World}, Context};
-/// // The level's pull, as a constant of the cart's own, handed to whatever falls in it.
+/// # use pixel8::{physics::{Gravity, World}, Context};
+/// // The level's pull, as a constant of the cart's own, owned by the world that does the falling.
 /// const GRAVITY: Gravity = Gravity::new();
 ///
-/// # fn fall(world: &mut World<Gravity>, entity: &mut impl Kinetic, ctx: &Context) {
-/// let mut cast: Cast<1> = Cast::from_array([entity.as_kinetic()]);
-/// world.step(ctx, &mut cast);
+/// # fn fall(world: &mut World<8, Gravity>, ctx: &Context) {
+/// world.step(ctx);
 /// # }
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -128,9 +127,9 @@ impl Gravity {
 }
 
 impl Force for Gravity {
-    /// The entity's mass is never read, deliberately: everything falls alike. See [`Gravity`].
-    fn apply(&self, entity: &mut dyn Kinetic) {
-        let velocity = entity.velocity_mut();
+    /// The subject's mass is never read, deliberately: everything falls alike. See [`Gravity`].
+    fn apply(&self, subject: &mut Subject) {
+        let velocity = subject.velocity_mut();
         // The cap is one-sided on purpose: it is a *terminal* velocity, the speed a fall stops
         // gaining at, so a negative strength (buoyancy) rises past it unhindered — and it holds
         // the component along the pull alone, leaving movement across it to whatever else is
@@ -190,9 +189,9 @@ mod tests {
         assert_eq!(GRAVITY.direction(), Direction::Down);
 
         let mut mob = Mob::new();
-        GRAVITY.apply(&mut mob);
+        mob.shove(&GRAVITY);
         assert_eq!(mob.velocity, Velocity::new(0.0, Gravity::DEFAULT_STRENGTH));
-        GRAVITY.apply(&mut mob);
+        mob.shove(&GRAVITY);
         assert_eq!(mob.velocity.dy, 2.0 * Gravity::DEFAULT_STRENGTH);
         // Only `dy`: gravity has no opinion about sideways movement.
         assert_eq!(mob.velocity.dx, 0.0);
@@ -225,8 +224,8 @@ mod tests {
         let gravity = Gravity::new();
         let (mut feather, mut anvil) = (Mob::with_mass(0.01), Mob::with_mass(100.0));
         for _ in 0..100 {
-            gravity.apply(&mut feather);
-            gravity.apply(&mut anvil);
+            feather.shove(&gravity);
+            anvil.shove(&gravity);
             assert_eq!(feather.velocity, anvil.velocity);
         }
         assert_eq!(feather.velocity.dy, Gravity::DEFAULT_TERMINAL_VELOCITY);

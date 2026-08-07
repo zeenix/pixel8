@@ -1,12 +1,13 @@
-//! The pixels an entity covers, and what two of them have to say to each other.
+//! The pixels a member covers, and what two of them have to say to each other.
 
 use crate::{Body, SCREEN_HEIGHT, SCREEN_WIDTH};
 
 /// The rectangle something covers, and what a cart's own collisions are judged against.
 ///
-/// One entity against another, either of them against the edges of the screen, or a door or a
-/// trigger the level puts down once and never moves. [`Kinetic::bounds`] is where an entity says
-/// which rectangle is its own, and every question about two of them is asked here.
+/// One member against another, either of them against the edges of the screen, or a door or a
+/// trigger the level puts down once and never moves. [`World::enlist`](super::World::enlist) is
+/// where a member's own rectangle is given, [`World::bounds`](super::World::bounds) is where it is
+/// asked for, and every question about two of them is asked here.
 ///
 /// Whole pixels, measured from where a [`Body`] *draws* rather than the sub-pixel position it
 /// tracks: two things that overlap on screen overlap here, which is the only answer a player will
@@ -17,7 +18,6 @@ use crate::{Body, SCREEN_HEIGHT, SCREEN_WIDTH};
 /// nothing, is nowhere on screen, and holds nothing inside it.
 ///
 /// [`Body`]: crate::Body
-/// [`Kinetic::bounds`]: super::Kinetic::bounds
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Bounds {
     x: i16,
@@ -49,17 +49,14 @@ impl Bounds {
 
     /// The rectangle a `body` covers, `width` x `height` pixels from where it draws.
     ///
-    /// [`new`](Self::new) with the body's own position filled in, which is how an entity almost
-    /// always answers [`Kinetic::bounds`](super::Kinetic::bounds):
+    /// [`new`](Self::new) with the body's own position filled in — for a cart that keeps a
+    /// [`Body`](crate::Body) of its own, outside any [`World`](super::World), and still wants the
+    /// rectangle questions here:
     ///
     /// ```
-    /// # use pixel8::{physics::{Bounds, Kinetic}, Body};
-    /// # struct Hero { body: Body }
-    /// # impl Hero {
-    /// fn bounds(&self) -> Bounds {
-    ///     Bounds::of(&self.body, 8, 8)
-    /// }
-    /// # }
+    /// # use pixel8::{physics::Bounds, Body};
+    /// # let body = Body::new(16.0, 16.0);
+    /// let bounds = Bounds::of(&body, 8, 8);
     /// ```
     pub fn of(body: &Body, width: u16, height: u16) -> Self {
         let (x, y) = body.draw_pos();
@@ -69,8 +66,8 @@ impl Bounds {
 
     /// The screen, as a rectangle.
     ///
-    /// The limit most carts hold their entities inside — see
-    /// [`Kinetic::confines`](super::Kinetic::confines) — and what
+    /// The limit most carts hold their members inside — see
+    /// [`Enlisting::confined_to`](super::Enlisting::confined_to) — and what
     /// [`on_screen`](Self::on_screen) is measured against. A cart with a level bigger than the
     /// screen writes down the level instead; this knows nothing of a
     /// [`camera`](crate::Graphics::camera).
@@ -141,10 +138,10 @@ impl Bounds {
 
     /// Whether any pixel of the rectangle is on the screen.
     ///
-    /// This is what a cart drops a stray bullet or a spent enemy on: nothing here keeps an entity
-    /// on the screen — it is free to travel right off it — and this is how the cart notices it has
-    /// gone. One that should not be allowed to leave says so instead, in
-    /// [`Kinetic::confines`](super::Kinetic::confines).
+    /// This is what a cart [retires](super::World::retire) a stray bullet or a spent enemy on:
+    /// nothing here keeps a member on the screen — it is free to travel right off it — and this is
+    /// how the cart notices it has gone. One that should not be allowed to leave says so instead,
+    /// in [`Enlisting::confined_to`](super::Enlisting::confined_to).
     ///
     /// Measured against [`screen`](Self::screen), so it means the first screenful of the world.
     /// A cart that scrolls with a [`camera`](crate::Graphics::camera) is asking about somewhere

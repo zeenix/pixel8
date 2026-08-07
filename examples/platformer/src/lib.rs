@@ -4,43 +4,48 @@
 //! coins (tile 3) and the trophy (tile 4) are collected by rewriting the map,
 //! and put back when the game restarts.
 //!
-//! The best score is kept between runs with [`Context::storage_get`] /
-//! [`Context::storage_set`] — loaded once at startup, saved whenever a run
-//! beats it — so the high score survives closing the console.
+//! The cart ships in its opening state rather than building one: the `game!`
+//! initializer is a constant, so the empty scene, the hero waiting for a seat
+//! and the fresh clock are all part of the module's memory image and nothing
+//! runs to assemble them. What a constant cannot say is said once in
+//! [`Game::boot`] — the level's word for a wall, the best score out of the
+//! store, the two seats, the clock a run starts on — against the state where it
+//! already lives. There is no *first update is secretly the setup* mode.
 //!
-//! The hero owns a [`Body`], so a running jump (hold Right + jump) — a
-//! sub-pixel diagonal — climbs a clean staircase instead of shimmering. The
-//! body owns the position, the physics below hands it the movement worked out
-//! for the frame, and the cart draws at `draw_x`/`draw_y`.
+//! The best score is kept between runs with [`Context::storage_get`] /
+//! [`Context::storage_set`] — loaded in `boot`, saved whenever a run beats it —
+//! so the high score survives closing the console.
 //!
 //! The falling, the walls and the badie all come from the SDK's `physics` module
-//! (the `physics` feature). The walls are declared once, on the
-//! [`World`](pixel8::physics::World) — flag 0, the same one the map editor marks the
-//! tiles with — and the hero and the badie are
-//! [`Kinetic`](pixel8::physics::Kinetic)s, which is only a description apiece: one
-//! sprite's worth of [`Bounds`](pixel8::physics::Bounds), the level itself as the
-//! rectangle the hero may never leave, and — for the badie — the sprite it
-//! [wears](pixel8::physics::Kinetic::sprite). Neither of them detects anything. The
-//! world owns the level's pull — a [`Gravity`](pixel8::physics::Gravity), handed over
-//! once at the start — and handed the pair once an update it does the moving, the
-//! stopping and the reporting for both; the `below()` of what it leaves in the hero's
-//! [`contacts`](pixel8::physics::Kinetic::contacts) is what this cart calls
-//! *grounded*.
+//! (the `physics` feature), and so does everything about where the hero and the
+//! badie *are*. The scene is one [`World`](pixel8::physics::World) of two seats: the
+//! walls are declared on it once — flag 0, the same one the map editor marks the
+//! tiles with — it owns the level's pull, a [`Gravity`](pixel8::physics::Gravity)
+//! handed over at the start, and it owns the position, the velocity, the rectangle
+//! and the contacts of both actors. Each of them is
+//! [enlisted](pixel8::physics::World::enlist) once — one sprite's worth of rectangle,
+//! the level itself as the edge the hero may never leave, and, for the badie, the
+//! sprite it wears — and keeps the [`Member`](pixel8::physics::Member) handle it gets
+//! back beside its own game data.
+//! Neither of them detects anything, and neither of them holds a position.
 //!
-//! The level's edges are not tiles and there is no floor past the last one, so the
-//! hero hands the level to [`confines`](pixel8::physics::Kinetic::confines) once
-//! rather than fencing itself in every update.
+//! One [`step`](pixel8::physics::World::step) an update does the moving, the stopping
+//! and the reporting for both; the `below()` of what it leaves in the hero's
+//! [`contacts`](pixel8::physics::World::contacts) is what this cart calls *grounded*.
+//! Because the world holds the trajectory, a running jump (hold Right + jump) — a
+//! sub-pixel diagonal — climbs a clean staircase instead of shimmering, and the cart
+//! draws at [`draw_pos`](pixel8::physics::World::draw_pos).
 //!
 //! The badie is met through that same step: both of its sprites carry the `BADIE`
 //! flag in the sprite editor, so [`touches`](pixel8::physics::Contacts::touches)
 //! answers for it and nothing here walks a pair of casts. Whether the touch was a
 //! ram or a stomp — and what it costs — is settled in this file, where the badie
-//! lives.
+//! lives; a stomped badie is [retired](pixel8::physics::World::retire) on the spot,
+//! its seat free for the next run.
 //!
 //! The code is split into small modules: `hero` and `badie` (the two moving
 //! actors), `taken` (a collected coin or trophy, so it can be scored and put
-//! back), `game_mode` (the `Init` → `InGame` → `Ended` state machine), and
-//! `constants`.
+//! back), `game_mode` (the `InGame` → `Ended` state machine), and `constants`.
 
 #![no_std]
 
@@ -51,42 +56,25 @@ mod hero;
 mod taken;
 
 use heapless::Vec;
-// `Kinetic` for the cast handed to the world, and for the two rectangles compared below: the
-// world has already said *that* the hero met the badie, and the rectangles are what tell a stomp
-// from a ram.
-use pixel8::{
-    physics::{Cast, Gravity, Kinetic, World},
-    *,
-};
+use pixel8::{physics::World, *};
 
 use crate::{
     badie::Badie,
     constants::{
-        BADIE_DEAD_SFX, BADIE_KILL_POINTS, COMPLETION_MUSIC, GAME_OVER_MUSIC, GAME_OVER_TIMEOUT,
-        GAME_TIMEOUT, GRAVITY, MAX_CAST, MAX_TAKEN, SOLID,
+        Scene, BADIE_DEAD_SFX, BADIE_KILL_POINTS, COMPLETION_MUSIC, GAME_OVER_MUSIC,
+        GAME_OVER_TIMEOUT, GAME_TIMEOUT, GRAVITY, MAX_TAKEN, SOLID,
     },
     game_mode::GameMode,
     hero::Hero,
     taken::Taken,
 };
 
-game!(Platformer {
-    // The walls are the scene's to declare: one flag, said once, and everything the world moves
-    // stops at the tiles carrying it.
-    world: World::new().with_solid(SOLID).with_forces(GRAVITY),
-    hero: Hero::new(),
-    badie: Some(Badie::new()),
-    taken: Vec::new(),
-    badies_killed: 0,
-    best_score: 0,
-    frame: 0,
-    mode: GameMode::Init,
-});
+game!(Platformer = Platformer::new());
 
 struct Platformer {
-    /// The one thing that moves anything in this cart, owning the level's pull. The cast it
-    /// steps is sized where it is gathered — `Cast<MAX_CAST>`, below.
-    world: World<Gravity>,
+    /// The one thing that holds or moves anything in this cart: the level's pull, the level's
+    /// word for a wall, and the two seats the hero and the badie live in.
+    scene: Scene,
     hero: Hero,
     badie: Option<Badie>,
     taken: Vec<Taken, MAX_TAKEN>,
@@ -99,6 +87,22 @@ struct Platformer {
 }
 
 impl Platformer {
+    /// The state the cart ships in, every bit of it a constant: an empty scene under the
+    /// level's pull, a hero with no seat yet, no badie, nothing taken and no score. `boot` below
+    /// opens a game in it rather than making one.
+    const fn new() -> Self {
+        Self {
+            scene: World::new().with_forces(GRAVITY),
+            hero: Hero::waiting(),
+            badie: None,
+            taken: Vec::new(),
+            badies_killed: 0,
+            best_score: 0,
+            frame: 0,
+            mode: GameMode::fresh(),
+        }
+    }
+
     fn in_game_update(&mut self, ctx: &mut Context) {
         let GameMode::InGame {
             start_time,
@@ -117,16 +121,16 @@ impl Platformer {
         *time_left = GAME_TIMEOUT - elapsed;
 
         // What each of the two means to do this update, written into its own velocity.
-        self.hero.steer(ctx);
+        self.hero.steer(ctx, &mut self.scene);
         if let Some(badie) = &mut self.badie {
-            badie.patrol();
+            badie.patrol(&mut self.scene);
         }
 
         // The pull, the walls, the level's edges and the hero-meets-badie, all settled by the
         // time this returns.
-        self.step_cast(ctx);
+        self.scene.step(ctx);
 
-        if let Some(taken) = self.hero.pick_up(ctx) {
+        if let Some(taken) = self.hero.pick_up(ctx, &self.scene) {
             let took_trophy = taken.is_trophy();
             self.taken.push(taken).unwrap();
             if took_trophy {
@@ -152,9 +156,9 @@ impl Platformer {
         // The badie walked its patrol and the hero was stepped against it there, so both
         // rectangles compared here are exactly the ones that met.
         let (mut rammed, mut stomped) = (false, false);
-        if let (true, Some(badie)) = (self.hero.met_badie(), &self.badie) {
+        if let (true, Some(badie)) = (self.hero.met_badie(&self.scene), &self.badie) {
             // Level with the badie is a ram; anything else is the hero coming down on it.
-            if self.hero.bounds().y() == badie.bounds().y() {
+            if self.scene.bounds(self.hero.member()).y() == self.scene.bounds(badie.member()).y() {
                 rammed = true;
             } else {
                 stomped = true;
@@ -169,34 +173,26 @@ impl Platformer {
         }
         if stomped {
             // Hero hitting the badie from the top, kills the badie and gives hero a boost. It can
-            // be dropped here and now: the world steps the cast where it stands, so the meeting
-            // has already happened and nothing is waiting on a picture of it.
-            self.badie = None;
+            // leave the cast here and now: the world steps the cast where it stands, so the
+            // meeting has already happened and nothing is waiting on a picture of it.
+            if let Some(badie) = self.badie.take() {
+                badie.retire(&mut self.scene);
+            }
             self.badies_killed += 1;
-            self.hero.jump(ctx);
+            self.hero.jump(ctx, &mut self.scene);
             ctx.sfx(BADIE_DEAD_SFX);
         }
     }
 
-    /// The whole cast, gathered fresh out of the fields it lives in and handed to the world.
-    ///
-    /// A function of its own so that the borrows the cast holds end with it: the update above
-    /// goes on to kill the badie and bounce the hero, and cannot do either while a cast is still
-    /// pointing at them.
-    fn step_cast(&mut self, ctx: &mut Context) {
-        let mut cast: Cast<MAX_CAST> = Cast::new();
-        // The badie before the hero, so the hero meets it where it has just walked to. Neither
-        // push can fail: the cast is the hero and at most one badie.
-        if let Some(badie) = &mut self.badie {
-            let _ = cast.push(badie.as_kinetic());
-        }
-        let _ = cast.push(self.hero.as_kinetic());
-        self.world.step(ctx, &mut cast);
-    }
-
     fn restart_game(&mut self, ctx: &mut Context) {
-        self.hero = Hero::new();
-        self.badie = Some(Badie::new());
+        // Both seats given back and taken again, badie first, so the cast is seated in the order
+        // the scene works whether or not the last run ended with the badie stomped.
+        if let Some(badie) = self.badie.take() {
+            badie.retire(&mut self.scene);
+        }
+        self.hero.retire(&mut self.scene);
+        self.badie = Some(Badie::new(&mut self.scene));
+        self.hero = Hero::new(&mut self.scene);
         self.frame = 0;
         self.mode.start(ctx);
         self.badies_killed = 0;
@@ -235,18 +231,30 @@ impl Platformer {
 }
 
 impl Game for Platformer {
+    fn boot(&mut self, ctx: &mut Context) {
+        // Everything the constant above could not say, said once into the state it already lives
+        // in — and every one of these is a call: the flags are worked out through `Into`, the best
+        // score comes from the store, the seats are the world's to hand out and the clock is the
+        // host's.
+        //
+        // The walls are the scene's to declare: one flag, said once, and everything the world
+        // moves stops at the tiles carrying it.
+        self.scene.declare_solid(SOLID);
+        self.best_score = ctx
+            .storage_get("best")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as u16;
+        // The badie takes the first seat and the hero the second, because seat order is stepping
+        // order: the hero meets the badie where it has just walked to.
+        self.badie = Some(Badie::new(&mut self.scene));
+        self.hero = Hero::new(&mut self.scene);
+        self.mode.start(ctx);
+    }
+
     fn update(&mut self, ctx: &mut Context) {
         self.frame += 1;
 
         match &mut self.mode {
-            GameMode::Init => {
-                // First frame: pick up the best score from a previous session.
-                self.best_score = ctx
-                    .storage_get("best")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(0) as u16;
-                self.mode.start(ctx);
-            }
             GameMode::InGame { .. } => self.in_game_update(ctx),
             GameMode::Ended { time, .. } if ctx.time() - *time > GAME_OVER_TIMEOUT => {
                 self.restart_game(ctx)
@@ -266,12 +274,12 @@ impl Game for Platformer {
             gfx.clear(Color::DARK_BLUE);
         }
 
-        self.hero.center(gfx);
+        self.hero.center(gfx, &self.scene);
         gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
 
-        self.hero.draw(gfx, self.frame, &self.mode);
+        self.hero.draw(gfx, &self.scene, self.frame, &self.mode);
         if let Some(badie) = &self.badie {
-            badie.draw(gfx, self.frame, &self.mode);
+            badie.draw(gfx, &self.scene, self.frame, &self.mode);
         }
 
         gfx.camera(0, 0);

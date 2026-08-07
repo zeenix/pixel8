@@ -1,164 +1,207 @@
-//! The scene's one mover: the whole cast, stepped where it stands.
+//! The scene's one mover, and the cast it keeps: everything seated, stepped where it stands.
 
 use super::{
     collider::{far, Cast, Collider, Neighbour},
-    wire, Bounds, Contact, Contacts, Force, Kinetic, Velocity,
+    wire, Bounds, Contact, Contacts, Force, Kinetic, Member, Subject, Velocity,
 };
-use crate::{BitFlags, Context, SpriteFlag, SpriteId};
+use crate::{motion::floor_i16, BitFlags, Context, SpriteFlag, SpriteId};
 
-/// The thing that moves everything: hand it the weather and the cast, once an update.
+/// The thing that moves everything, and the thing that holds it: `N` seats of cast, the scene's
+/// weather, and one call an update.
 ///
-/// A cart holds one and calls [`step`](Self::step). What that does, for each entity in turn, is
-/// what an update of a moving thing has always had to do — run the forces over its velocity, stop
-/// whatever ran into the map's tiles or into the rest of the cast, keep it inside the rectangle it
-/// says it may not leave, move its [`Body`](crate::Body) with what survived, and write down what it
-/// met — except that no entity does any of it. Entities only [describe](Kinetic) themselves; the
-/// world is where the collisions live.
+/// A cart makes one, [enlists](Self::enlist) everybody its scene is played by, and calls
+/// [`step`](Self::step). What that does, for each member in turn, is what an update of a moving
+/// thing has always had to do — run the forces over its velocity, stop whatever ran into the map's
+/// tiles or into the rest of the cast, keep it inside the rectangle it may not leave, move it by
+/// what survived, and write down what it met — except that nothing else in the cart does any of
+/// it, and nothing else in the cart holds any of it.
 ///
 /// ```no_run
 /// use pixel8::{
-///     physics::{Bounds, Cast, Contacts, Gravity, Kinetic, Velocity, World},
+///     physics::{Bounds, Gravity, Member, World},
 ///     *,
 /// };
 ///
-/// # struct Hero { body: Body, velocity: Velocity, contacts: Contacts }
-/// # struct Badie { body: Body, velocity: Velocity, contacts: Contacts }
-/// # impl Kinetic for Hero {
-/// #     fn body(&self) -> &Body { &self.body }
-/// #     fn body_mut(&mut self) -> &mut Body { &mut self.body }
-/// #     fn velocity_mut(&mut self) -> &mut Velocity { &mut self.velocity }
-/// #     fn contacts(&self) -> &Contacts { &self.contacts }
-/// #     fn contacts_mut(&mut self) -> &mut Contacts { &mut self.contacts }
-/// #     fn bounds(&self) -> Bounds { Bounds::of(&self.body, 8, 8) }
-/// # }
-/// # impl Kinetic for Badie {
-/// #     fn body(&self) -> &Body { &self.body }
-/// #     fn body_mut(&mut self) -> &mut Body { &mut self.body }
-/// #     fn velocity_mut(&mut self) -> &mut Velocity { &mut self.velocity }
-/// #     fn contacts(&self) -> &Contacts { &self.contacts }
-/// #     fn contacts_mut(&mut self) -> &mut Contacts { &mut self.contacts }
-/// #     fn bounds(&self) -> Bounds { Bounds::of(&self.body, 8, 8) }
-/// # }
 /// # const SPIKES: SpriteFlag = SpriteFlag::Flag2;
+/// # const BADIE_SPRITE: SpriteId = SpriteId(6);
 /// struct Level {
-///     // The scene under the level's pull, owned like everything else about it:
-///     // `World::new().with_forces(Gravity::new())` is the whole of making one.
-///     world: World<Gravity>,
-///     hero: Hero,
-///     badies: [Badie; 2],
+///     /// The scene: three seats under the level's pull, and every one of them a member the
+///     /// handles below are the cart's grip on.
+///     world: World<3, Gravity>,
+///     hero: Member,
+///     badies: [Member; 2],
+///     /// And what is the cart's own, which the world has never heard of.
+///     score: u16,
+/// }
+///
+/// impl Level {
+///     fn new() -> Self {
+///         let mut world = World::new().with_solid(SpriteFlag::Flag0).with_forces(Gravity::new());
+///         // Seat order is stepping order, so the badies go on before the hero that meets them.
+///         let badies = [40.0, 90.0].map(|x| {
+///             world
+///                 .enlist(x, 96.0, 8, 8)
+///                 .expect("a seat apiece for the badies")
+///                 .wearing(BADIE_SPRITE)
+///                 .member()
+///         });
+///         let hero = world
+///             .enlist(16.0, 80.0, 8, 8)
+///             .expect("a seat for the hero")
+///             .confined_to(Bounds::screen())
+///             .member();
+///
+///         Self { world, hero, badies, score: 0 }
+///     }
 /// }
 ///
 /// impl Game for Level {
 ///     fn update(&mut self, ctx: &mut Context) {
-///         // Whatever each entity means to do this update — read the buttons, turn a patrol
+///         // Whatever each of them means to do this update — read the buttons, turn a patrol
 ///         // round — is written into its velocity first. Then the world moves the lot.
-///         let [first, second] = &mut self.badies;
-///         let mut cast: Cast<3> = Cast::from_array([
-///             self.hero.as_kinetic(),
-///             first.as_kinetic(),
-///             second.as_kinetic(),
-///         ]);
-///         self.world.step(ctx, &mut cast);
-///         drop(cast);
+///         let mut velocity = self.world.velocity(self.hero);
+///         velocity.dx = if ctx.is_button_down(Button::Right) { 0.7 } else { 0.0 };
+///         self.world.set_velocity(self.hero, velocity);
 ///
-///         // And the answers are waiting on the entities themselves.
-///         let grounded = self.hero.contacts().below();
-///         let hurt = self.hero.contacts().touches(SPIKES);
+///         self.world.step(ctx);
+///
+///         // And the answers are waiting in the seats.
+///         let grounded = self.world.contacts(self.hero).below();
+///         let hurt = self.world.contacts(self.hero).touches(SPIKES);
 ///     }
 ///
 ///     fn draw(&self, gfx: &mut Graphics) {
 ///         gfx.clear(Color::BLACK);
+///         let (x, y) = self.world.draw_pos(self.hero);
+///         gfx.sprite(SpriteId(1), x, y);
 ///     }
 /// }
 /// ```
 ///
-/// # The cast, and the order it is in
+/// # What the world owns
 ///
-/// The cast is a [`Cast`](super::Cast): up to `N` entities as `&mut dyn Kinetic`, gathered fresh
-/// each update — a cart's entities live wherever the cart keeps them, in fields and arrays and
-/// vectors that have no type in common, and [`Kinetic::as_kinetic`] is the one word that turns
-/// each of them into a cast member. A cast that never changes is written down whole with
-/// [`from_array`](super::Cast); one that varies is gathered a push at a time, without
-/// allocating:
+/// Everything about a member that moves or is collided with: the exact sub-pixel position and the
+/// coherent pixel it draws at, the velocity, the rectangle it covers, the cell it wears, what
+/// stops it, what it cares to hear about, how far it may go, what it weighs, and what its last
+/// step ran into. A cart keeps a [`Member`] — two bytes — and its own game data beside it, and
+/// asks the world for the rest.
 ///
-/// ```ignore
-/// let mut cast: Cast<16> = Cast::new();
-/// let _ = cast.push(self.hero.as_kinetic());
-/// for badie in &mut self.badies {
-///     let _ = cast.push(badie.as_kinetic());
-/// }
-/// self.world.step(ctx, &mut cast);
-/// ```
+/// It is not a saving in bytes and does not pretend to be one. A seat is the forty-four bytes of
+/// its record plus nine the world keeps alongside, `N` of them for as long as the world lives,
+/// where those same fields used to sit in the cart's own structs — some twenty-two bytes an entity
+/// — and the wire's records were borrowed from the stack for the length of one call. What it buys
+/// is that there is only ever *one* of everything: nothing is copied into a buffer before the
+/// crossing and nothing is read back out of one after it, because the buffer is the state. A cart
+/// no longer gathers a cast of borrows an update, and the old friction of a fixed-capacity vector
+/// whose `Drop` kept those borrows alive to the end of the block — the reason a cart used to hand
+/// its cast to a function of its own — is gone with them.
 ///
-/// Entities are stepped one at a time, in the order the slice puts them, and each of them is
-/// resolved against the others *where they now stand*. So an entity stepped early is met at the
-/// position it began the update at by nobody, and at the position it ended the update at by
-/// everybody after it. That is a feature, and the one worth ordering a cast for: put a lift before
-/// its rider and the rider is carried up the moment the lift moves, with no lag at all; put it
-/// after and the rider spends the update on last update's platform.
+/// # The seats, and the order they are in
 ///
-/// Nothing is lagged, and nothing has to linger. An entity that dies this update has still been
-/// met this update by everything stepped after it, and the cart may drop it the moment the step
-/// returns.
+/// `N` is the whole cast a scene can have at once, and a cart names it: it is the size of the one
+/// array the world keeps, and the sixty-four the wire carries is the ceiling — a bigger `N` is
+/// refused at compile time, so a world that builds is a world that steps.
 ///
-/// A cast member that declares itself a [prop](Kinetic::prop) is met and never moved: its
-/// rectangle and flags stand in everybody's way from wherever the cart last put it, and the
-/// forces, the walls and the contacts all pass it by. Rails the cart drives — a patrol, a lift
-/// on a track — cost the cast no more than being seen.
-/// # The cast's capacity
+/// Members are stepped one at a time, in seat order, and each of them is resolved against the
+/// others *where they now stand*. That is the one thing worth ordering a cast for: enlist a lift
+/// before its rider and the rider is carried up the moment the lift moves; enlist it after, and
+/// the rider spends the update on last update's platform. [`enlist`](Self::enlist) fills the lowest
+/// empty seat, so a cast seated once in the order the scene works stays in it.
 ///
-/// The [`Cast`](super::Cast)'s `N` is the most members one step takes, and with it the stack a
-/// step borrows while it runs: `N` records of forty-four bytes each, written down for the
-/// crossing of the ABI and gone the moment it returns. Nothing of them outlives the call — the
-/// world itself holds a few bytes of configuration and no buffer at all — and nothing else
-/// declares it: the one constant a cart writes is the capacity of the cast it gathers, and the
-/// step is sized by that. Sixty-four is the most the wire itself takes, and a bigger `N` is
-/// refused at compile time, so a cast that builds is a cast that steps.
-pub struct World<F: Force = ()> {
+/// An empty seat is nothing to anybody: it goes over the wire as a prop covering no pixels, which
+/// no force reaches, nothing is stopped by and nobody is told about. Retiring a member costs the
+/// rest of the cast exactly nothing but the seat it leaves behind.
+pub struct World<const N: usize, F: Force = ()> {
     /// Whether the map is part of the scene or only the picture behind it. See
     /// [`mapless`](Self::mapless).
     reads_map: bool,
-    /// What the scene calls a wall, for every entity that has no rule of its own. See
+    /// What the scene calls a wall, for every member that has no rule of its own. See
     /// [`with_solid`](Self::with_solid).
     solid: BitFlags<SpriteFlag>,
     /// The scene's weather, the world's own. See [`with_forces`](Self::with_forces).
     forces: F,
+    /// The cast itself, stored once and in the very layout the step crosses the ABI in. A seat
+    /// nobody is in holds [`wire::VACANT`].
+    records: [wire::Record; N],
+    /// What each member weighs — the forces' business, and nobody's on the other side of the wire,
+    /// so it never crosses it.
+    masses: [f32; N],
+    /// Where each member's rectangle sits relative to the pixel it draws at. The step moves the
+    /// body and, honouring the wire's in/out split, leaves the rectangle's corner alone, so this
+    /// is what puts it back on the body afterwards.
+    offsets: [(i16, i16); N],
+    /// How many times each seat has been emptied, so a handle to somebody who has left can be told
+    /// from a handle to whoever was seated there next.
+    generations: [u8; N],
+    /// Which seats are taken, a bit apiece. A `u64` covers every `N` there can be, the wire's
+    /// ceiling being sixty-four.
+    seated: u64,
+    /// And which of those members answered what is solid with a rule of their own, so that the
+    /// scene changing its word ([`with_solid`](Self::with_solid)) reaches the members who go by it
+    /// and leaves the others theirs.
+    own_solid: u64,
 }
 
-impl World {
-    /// The world every cart starts with. It calls nothing solid until
-    /// [`with_solid`](Self::with_solid) says otherwise.
+impl<const N: usize> World<N> {
+    /// A world of `N` empty seats. It calls nothing solid until
+    /// [`with_solid`](Self::with_solid) says otherwise, and its weather is the still air until
+    /// [`with_forces`](Self::with_forces) gives it one.
     ///
     /// `const`, so a cart can spell its world out in its `game!` initializer, however it is
-    /// configured.
+    /// configured:
+    ///
+    /// ```
+    /// # use pixel8::physics::World;
+    /// const SCENE: World<8> = World::new();
+    /// ```
+    ///
+    /// `N` cannot exceed the sixty-four members the wire carries, and the check is a compile-time
+    /// one — there is nothing about it left to go wrong while a cart runs:
+    ///
+    /// ```compile_fail
+    /// # use pixel8::physics::World;
+    /// const CROWD: World<65> = World::new();
+    /// ```
     pub const fn new() -> Self {
+        const {
+            assert!(
+                N <= wire::CAP,
+                "a World cannot have more seats than the sixty-four records the wire carries"
+            )
+        };
+
         Self {
             reads_map: true,
             solid: BitFlags::empty(),
             forces: (),
+            records: [wire::VACANT; N],
+            masses: [1.0; N],
+            offsets: [(0, 0); N],
+            generations: [0; N],
+            seated: 0,
+            own_solid: 0,
         }
     }
 
     /// A world whose map is scenery: the tiles are drawn and nothing else.
     ///
     /// The map is the one thing in a step that everything is resolved against whether it asked to
-    /// be or not — every entity sweeps the tiles under it every update, so that a cart which
+    /// be or not — every member sweeps the tiles under it every update, so that a cart which
     /// flagged its walls gets them for nothing. A scene that flagged no tile at all pays for that
-    /// anyway: a host call per tile per axis per entity, collecting an answer that is always
-    /// empty. This is how a cart says not to bother. Shoot-'em-ups whose level scrolls past behind
-    /// the fight are the case it is for; so is anything whose collisions are all between moving
-    /// things.
+    /// anyway: a lookup per tile per axis per member, collecting an answer that is always empty.
+    /// This is how a cart says not to bother. Shoot-'em-ups whose level scrolls past behind the
+    /// fight are the case it is for; so is anything whose collisions are all between moving things.
     ///
-    /// Nothing else changes. The cast still meets itself, [`confines`](Kinetic::confines) still
-    /// holds, and *solid* — the scene's ([`with_solid`](Self::with_solid)) and anybody's
-    /// [own](Kinetic::solid) — still means what it meant; there is simply nothing on
-    /// the map for it to mean it against.
+    /// Nothing else changes. The cast still meets itself, [confines](Enlisting::confined_to) still
+    /// hold, and *solid* — the scene's ([`with_solid`](Self::with_solid)) and anybody's
+    /// [own](Enlisting::stopped_by) — still means what it meant; there is simply nothing on the map
+    /// for it to mean it against.
     ///
     /// `const`, like [`new`](Self::new), so a level's world is spelled out where it is made:
     ///
     /// ```
     /// # use pixel8::physics::World;
-    /// let world: World = World::mapless();
+    /// let sky: World<16> = World::mapless();
     /// ```
     pub const fn mapless() -> Self {
         Self {
@@ -166,29 +209,51 @@ impl World {
             ..Self::new()
         }
     }
-}
 
-impl<F: Force> World<F> {
     /// The same world, owning `forces` as the scene's weather.
     ///
     /// One force, a tuple of them applied left to right — a tuple of [`Force`]s is itself a
     /// [`Force`] — or nothing at all, which is what a world starts with. The step runs them over
-    /// every entity it moves, before anything moves; the ones with state of their own — a gusting
+    /// every member it moves, before anything moves; the ones with state of their own — a gusting
     /// [`Wind`](super::Wind) — stay reachable through [`forces_mut`](Self::forces_mut), to be
     /// updated where they live.
     ///
+    /// The cast comes along: a world already seated may be given its weather afterwards, and
+    /// everybody in it keeps their seat.
+    ///
+    /// `const`, like the two constructors above and for the same reason — a cart's whole opening
+    /// world, weather and all, is a constant its [`game!`](crate::game) initializer can be:
+    ///
+    /// ```
+    /// # use pixel8::physics::{Gravity, World};
+    /// const LEVEL: World<8, Gravity> = World::new().with_forces(Gravity::new());
+    /// ```
+    ///
+    /// The weather is given to a world that has none, which is every world as it is made. One that
+    /// already has weather keeps it and drives it through [`forces_mut`](Self::forces_mut) — the
+    /// forces a scene is played under are a fact about the scene, and a `World<N, F>` says which in
+    /// its own type.
+    ///
     /// ```no_run
     /// # use pixel8::physics::{Atmosphere, Gravity, World};
-    /// let world = World::new().with_forces((Gravity::new(), Atmosphere::new()));
+    /// let world: World<8, _> = World::new().with_forces((Gravity::new(), Atmosphere::new()));
     /// ```
-    pub fn with_forces<G: Force>(self, forces: G) -> World<G> {
+    pub const fn with_forces<G: Force>(self, forces: G) -> World<N, G> {
         World {
             reads_map: self.reads_map,
             solid: self.solid,
             forces,
+            records: self.records,
+            masses: self.masses,
+            offsets: self.offsets,
+            generations: self.generations,
+            seated: self.seated,
+            own_solid: self.own_solid,
         }
     }
+}
 
+impl<const N: usize, F: Force> World<N, F> {
     /// The weather the world owns — see [`with_forces`](Self::with_forces).
     pub fn forces(&self) -> &F {
         &self.forces
@@ -202,175 +267,546 @@ impl<F: Force> World<F> {
 
     /// The same world, with `solid` as the scene's word for *wall*.
     ///
-    /// What stops an entity is usually a fact about the scene rather than about anybody in it: one
-    /// flag on the level's walls and floors, and everything that moves stops at them. So it is
-    /// said once, here, and every cast member is stopped by these flags — on a tile or on a
-    /// neighbour — unless it answers [`Kinetic::solid`] with rules of its own, which replace the
-    /// scene's for that entity alone.
+    /// What stops a member is usually a fact about the scene rather than about anybody in it: one
+    /// flag on the level's walls and floors, and everything that moves stops at them. So it is said
+    /// once, here, and every member is stopped by these flags — on a tile or on a neighbour —
+    /// unless it named [rules of its own](Enlisting::stopped_by), which replace the scene's for
+    /// that member alone.
+    ///
+    /// A scene that changes its mind mid-game — a level where the water turns to ice — says so
+    /// here too, and the new word reaches everybody already seated who goes by the scene's.
     ///
     /// ```no_run
     /// # use pixel8::{physics::World, SpriteFlag};
     /// # const SOLID: SpriteFlag = SpriteFlag::Flag0;
-    /// let world: World = World::new().with_solid(SOLID);
+    /// let world: World<8> = World::new().with_solid(SOLID);
     /// ```
+    ///
+    /// This is the builder, for a world being made. A world that already exists — the one a cart
+    /// keeps in a `static`, which is where a scene lives — is told the same thing by
+    /// [`declare_solid`](Self::declare_solid).
     pub fn with_solid(mut self, solid: impl Into<BitFlags<SpriteFlag>>) -> Self {
-        self.solid = solid.into();
+        self.declare_solid(solid);
 
         self
     }
 
-    /// Moves the whole `cast` one update: the forces the world owns, then the world, then the
-    /// bodies.
+    /// The scene's word for *wall*, said to a world that is already there.
     ///
-    /// For each entity in turn, in cast order: the world's own [forces](Self::with_forces) bend
-    /// its velocity, in the order they were composed; whatever ran its
-    /// [`bounds`](Kinetic::bounds) into something solid to it — the
-    /// scene's word ([`with_solid`](Self::with_solid)), unless the entity has
-    /// [rules of its own](Kinetic::solid) — is taken out of it, on each axis separately; the
-    /// velocity that survives is stored back and the [`Body`](crate::Body) moved by it;
-    /// whatever that carried outside its [`confines`](Kinetic::confines) is put back; and the
-    /// sides that stopped it together with the flags of everything it met are written into its
-    /// [`contacts`](Kinetic::contacts) slot, where the cart reads them at its leisure.
+    /// What [`with_solid`](Self::with_solid) says, said in place instead of on the way in: the two
+    /// are one thing, and a cart uses whichever fits where it is standing. A world spelled out as a
+    /// constant cannot take the builder — flags are worked out through [`Into`], and that is not
+    /// something a constant may call — so a scene that ships placed declares its walls in
+    /// [`Game::boot`](crate::Game::boot), in one line, before anybody is enlisted.
     ///
-    /// *Something* is the map and the rest of the cast alike. The tiles under the entity are asked
-    /// what they carry, and so is every other cast member, at the rectangle its
-    /// [`bounds`](Kinetic::bounds) covers right now and under the flags its
-    /// [`sprite`](Kinetic::sprite) carries in the sprite editor. Flags shared with what is solid
-    /// to the entity stop it — a tile and a neighbour in the same one-axis
-    /// pass, so landing on a lift reads [`below`](Contacts::below) exactly as landing on a floor
-    /// tile does — and everything met, wall or not, comes back in [`Contacts::touched`]. An entity
-    /// is never asked about itself, so its own kind is a wall like anybody else's: two crates
-    /// flagged `CRATE`, each with `CRATE` in `solid`, stop each other and neither is ever its own
-    /// wall.
+    /// ```no_run
+    /// # use pixel8::{physics::World, SpriteFlag};
+    /// # const SOLID: SpriteFlag = SpriteFlag::Flag0;
+    /// # fn f(world: &mut World<8>) {
+    /// world.declare_solid(SOLID);
+    /// # }
+    /// ```
+    pub fn declare_solid(&mut self, solid: impl Into<BitFlags<SpriteFlag>>) {
+        self.solid = solid.into();
+        // Each seat carries the word already settled between the member's own rule and the
+        // scene's, so that the step never has to ask whose it was — which leaves the members who
+        // go by the scene's to be told when it changes.
+        let word = self.solid.bits();
+        let mut theirs = self.seated & !self.own_solid;
+        while theirs != 0 {
+            let slot = theirs.trailing_zeros() as usize;
+            theirs &= theirs - 1;
+            self.records[slot].solid = word;
+        }
+    }
+
+    /// Takes somebody into the cast at (`x`, `y`), covering `width` x `height` pixels from the
+    /// pixel they draw at, and hands back the [`Enlisting`] the rest of them is described through.
     ///
-    /// A meeting between cast members reaches both of them, whichever one's movement made it: the
+    /// The position is exact and sub-pixel, like everything else that moves here; the rectangle is
+    /// whole pixels, and it is the one rectangle a member has — what the walls stop, what the rest
+    /// of the cast meets, and what the edge of the world holds. A hurtbox narrower than the sprite
+    /// says so with [`offset`](Enlisting::offset).
+    ///
+    /// That is a whole member already: standing still, wearing nothing, stopped by whatever the
+    /// scene calls solid, told about everything it meets, free to walk off the map and of the
+    /// weight nobody has to think about. [`Enlisting`]'s builders say the rest, and
+    /// [`member`](Enlisting::member) closes the description and hands over the handle the cart
+    /// asks about the seat with.
+    ///
+    /// The lowest empty seat, always: a cast seated once, in the order the scene works, keeps that
+    /// order — and it is the order the step goes in, so a lift enlisted before its rider carries it
+    /// the same update. A seat freed by [`retire`](Self::retire) is the next one filled.
+    ///
+    /// `None` is a full house: all `N` seats are taken, and the scene has to make room before it
+    /// can take anybody else on. A cart that spawns as it goes — bullets, sparks — either sizes `N`
+    /// for its worst frame or takes `None` as *not this frame*.
+    ///
+    /// ```no_run
+    /// # use pixel8::physics::World;
+    /// # fn f(world: &mut World<8>) {
+    /// let Some(spark) = world.enlist(64.0, 64.0, 2, 2) else {
+    ///     // Every seat is taken; this one waits for the next explosion.
+    ///     return;
+    /// };
+    /// let spark = spark.moving(0.0, -1.5).member();
+    /// # }
+    /// ```
+    #[must_use = "the claim is rolled back unless `member` is called and its handle kept"]
+    pub fn enlist(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: u16,
+        height: u16,
+    ) -> Option<Enlisting<'_, N, F>> {
+        // The lowest empty seat. Past `N` the mask reads as empty, so a full house answers here
+        // rather than needing a count of its own.
+        let slot = (!self.seated).trailing_zeros() as usize;
+        if slot >= N {
+            return None;
+        }
+
+        self.seated |= 1 << slot;
+        // Everything a member is until it says otherwise, written straight into the seat: the
+        // builders below change it where it now lives rather than describing it somewhere else
+        // first.
+        let (rx, ry) = (floor_i16(x), floor_i16(y));
+        self.records[slot] = wire::Record {
+            x,
+            y,
+            rx,
+            ry,
+            bx: rx,
+            by: ry,
+            bw: width,
+            bh: height,
+            solid: self.solid.bits(),
+            heeds: BitFlags::<SpriteFlag>::all().bits(),
+            ..wire::EMPTY
+        };
+        self.masses[slot] = 1.0;
+        self.offsets[slot] = (0, 0);
+        self.own_solid &= !(1 << slot);
+
+        Some(Enlisting { world: self, slot })
+    }
+
+    /// Empties `member`'s seat: it leaves the cast, and its handle goes stale on the spot.
+    ///
+    /// What a cart does with a bullet that has left the screen, a badie that has been stomped, an
+    /// explosion that has burned out. The seat is the next one [`enlist`](Self::enlist) fills, and
+    /// until it is filled it is nothing to anybody — the step carries it as a prop covering no
+    /// pixels, which nothing meets and no force reaches.
+    ///
+    /// The member is gone the moment this returns, so the meeting it died of has already been
+    /// reported to whoever it met: the whole cast is stepped where it stands, and nothing is
+    /// waiting on a picture of it.
+    ///
+    /// Retiring a member twice, or asking the world anything with the handle afterwards, is a bug
+    /// in the cart and panics saying so.
+    pub fn retire(&mut self, member: Member) {
+        let slot = self.seat(member);
+        self.vacate(slot);
+        // The seat is let again to somebody else, and the handle to whoever has just left it must
+        // not answer for them.
+        self.generations[slot] = self.generations[slot].wrapping_add(1);
+    }
+
+    /// Whether `member` is still in the cast.
+    ///
+    /// The question to ask instead of finding out the hard way: everything else here panics on a
+    /// handle whose member has [retired](Self::retire), because a stale handle is a cart holding on
+    /// to somebody who left. A cart that would rather ask asks here.
+    pub fn seated(&self, member: Member) -> bool {
+        self.holds(member)
+    }
+
+    /// Where `member` is: its exact sub-pixel position.
+    ///
+    /// The truth for a cart's own arithmetic — which tile it is over, how far it is from something.
+    /// What to *draw* at is [`draw_pos`](Self::draw_pos).
+    pub fn pos(&self, member: Member) -> (f32, f32) {
+        let record = &self.records[self.seat(member)];
+
+        (record.x, record.y)
+    }
+
+    /// The coherent pixel `member` draws at.
+    ///
+    /// The one to hand [`Graphics::sprite`](crate::Graphics::sprite). It is
+    /// [`Body`](crate::Body)'s phase-coherent pixel — a sub-pixel diagonal climbs a clean staircase
+    /// through it instead of shimmering — and the step keeps it coherent across the wire, so a
+    /// running jump reads the same as it always did.
+    pub fn draw_pos(&self, member: Member) -> (i16, i16) {
+        let record = &self.records[self.seat(member)];
+
+        (record.rx, record.ry)
+    }
+
+    /// Puts `member` at (`x`, `y`) — a teleport, not a movement.
+    ///
+    /// The drawn pixel is re-snapped to the floor of the new position rather than eased towards it,
+    /// because this is a jump: a respawn, a room the player has walked into, the rails a
+    /// [prop](Enlisting::prop) is driven along. The rectangle goes with it, keeping whatever
+    /// [offset](Enlisting::offset) it was given.
+    ///
+    /// Ordinary movement is not this. A member is moved by having a velocity
+    /// ([`set_velocity`](Self::set_velocity)) and being stepped: that is what is stopped by walls,
+    /// held inside limits and reported in contacts, and none of it happens here.
+    pub fn set_pos(&mut self, member: Member, x: f32, y: f32) {
+        let slot = self.seat(member);
+        let offset = self.offsets[slot];
+        let record = &mut self.records[slot];
+        (record.x, record.y) = (x, y);
+        (record.rx, record.ry) = (floor_i16(x), floor_i16(y));
+        (record.bx, record.by) = corner((record.rx, record.ry), offset);
+    }
+
+    /// What `member` is travelling at, in pixels per update.
+    ///
+    /// After a step, what survived it: an axis that ran into something has been spent, so a fall
+    /// that landed reads zero and something that walked into a wall is not still walking.
+    pub fn velocity(&self, member: Member) -> Velocity {
+        let record = &self.records[self.seat(member)];
+
+        Velocity::new(record.dx, record.dy)
+    }
+
+    /// Sets what `member` is travelling at: what the cart means it to do this update.
+    ///
+    /// Where the buttons, the patrol and the jump all end up. It is written before
+    /// [`step`](Self::step), which is what turns it into movement — and written afresh every
+    /// update by anything that leans on a wall, since the step spends the speed that ran into one.
+    pub fn set_velocity(&mut self, member: Member, velocity: Velocity) {
+        let record = &mut self.records[self.seat(member)];
+        (record.dx, record.dy) = (velocity.dx, velocity.dy);
+    }
+
+    /// What `member`'s last step ran into: the sides it was stopped at, and the flags of everything
+    /// it met.
+    ///
+    /// The whole answer, walls and the edge of the world together, so a cart standing a member on
+    /// the bottom of the level, on a floor tile and on a moving platform reads all three the same
+    /// way. A [prop](Enlisting::prop) is never given contacts: the cart drives it, and there is
+    /// nobody home to tell.
+    pub fn contacts(&self, member: Member) -> Contacts {
+        let record = &self.records[self.seat(member)];
+
+        Contacts::from_wire(record.sides, record.touched)
+    }
+
+    /// The rectangle `member` covers, where it now stands.
+    ///
+    /// The one rectangle a member has: what the walls stopped, what the rest of the cast met, and
+    /// what the edge of the world held. It follows the body through every step, so this is always
+    /// the rectangle that was collided with.
+    ///
+    /// The step says *the hero met a badie*; which badie, and what that costs, is the cart's, and
+    /// this is what it settles it with — a stomp told from a ram by comparing two rectangles the
+    /// world has just moved.
+    ///
+    /// ```no_run
+    /// # use pixel8::physics::{Member, World};
+    /// # fn f(world: &World<4>, hero: Member, badie: Member) -> bool {
+    /// // Level with the badie is a ram; anything else is the hero coming down on it.
+    /// world.bounds(hero).y() == world.bounds(badie).y()
+    /// # }
+    /// ```
+    pub fn bounds(&self, member: Member) -> Bounds {
+        let record = &self.records[self.seat(member)];
+
+        Bounds::new(record.bx, record.by, record.bw, record.bh)
+    }
+
+    /// Sets how big `member`'s rectangle is.
+    ///
+    /// For a hitbox that follows the animation — a crouch, a blast that grows, a hurtbox switched
+    /// off by giving it no size at all, which is a member nothing resolves and everything lets
+    /// through. Where the rectangle sits on the body is [`set_offset`](Self::set_offset).
+    pub fn resize(&mut self, member: Member, width: u16, height: u16) {
+        let record = &mut self.records[self.seat(member)];
+        (record.bw, record.bh) = (width, height);
+    }
+
+    /// Sets where `member`'s rectangle sits relative to the pixel it draws at — see
+    /// [`Enlisting::offset`].
+    pub fn set_offset(&mut self, member: Member, dx: i16, dy: i16) {
+        let slot = self.seat(member);
+        self.offsets[slot] = (dx, dy);
+        let record = &mut self.records[slot];
+        (record.bx, record.by) = corner((record.rx, record.ry), (dx, dy));
+    }
+
+    /// The rectangle `member` may not leave, if it named one — see [`Enlisting::confined_to`].
+    pub fn confines(&self, member: Member) -> Option<Bounds> {
+        let record = &self.records[self.seat(member)];
+
+        (record.meta & wire::CONFINED != 0)
+            .then(|| Bounds::new(record.cx, record.cy, record.cw, record.ch))
+    }
+
+    /// Sets the rectangle `member` may not leave, or takes its limits away — see
+    /// [`Enlisting::confined_to`].
+    ///
+    /// The room the player has just walked into, an arena closing in, a level that grows. `None`
+    /// is a member let go: free to walk off the map, which is what a bullet or a spent enemy wants.
+    pub fn set_confines(&mut self, member: Member, confines: Option<Bounds>) {
+        let record = &mut self.records[self.seat(member)];
+        match confines {
+            Some(limits) => {
+                record.meta |= wire::CONFINED;
+                (record.cx, record.cy) = (limits.x(), limits.y());
+                (record.cw, record.ch) = (limits.width(), limits.height());
+            }
+            None => record.meta &= !wire::CONFINED,
+        }
+    }
+
+    /// The cell `member` wears, if any — see [`Enlisting::wearing`].
+    ///
+    /// The one answer for whoever draws the member and for whoever asks what everybody else
+    /// meets in it: the world owns the worn cell, so what is drawn and what is met can never
+    /// be two different sprites.
+    pub fn sprite(&self, member: Member) -> Option<SpriteId> {
+        let record = &self.records[self.seat(member)];
+        match record.sprite {
+            wire::UNWORN => None,
+            id => Some(SpriteId(id as u8)),
+        }
+    }
+
+    /// Sets the cell `member` wears, or takes it off — see [`Enlisting::wearing`].
+    ///
+    /// A member whose look changes with its state: two walk-cycle cells carrying the same flag make
+    /// this moot, and a badie that turns into a puff of smoke does not.
+    pub fn set_sprite(&mut self, member: Member, sprite: Option<SpriteId>) {
+        let record = &mut self.records[self.seat(member)];
+        record.sprite = match sprite {
+            Some(sprite) => sprite.0 as u16,
+            None => wire::UNWORN,
+        };
+    }
+
+    /// The member's own answer to what means *wall* to it, where it gave one — see
+    /// [`Enlisting::stopped_by`].
+    ///
+    /// `None` is a member that goes by the scene's word, whatever
+    /// [`with_solid`](Self::with_solid) declared it to be.
+    pub fn solid(&self, member: Member) -> Option<BitFlags<SpriteFlag>> {
+        let slot = self.seat(member);
+
+        (self.own_solid & (1 << slot) != 0).then(|| {
+            BitFlags::from_bits(self.records[slot].solid)
+                .expect("a seat's solid was written from real flags")
+        })
+    }
+
+    /// Sets what means *wall* to `member`, or hands it back to the scene's word — see
+    /// [`Enlisting::stopped_by`].
+    ///
+    /// `None` is the scene's word as it stands now ([`with_solid`](Self::with_solid)), and the
+    /// member follows it from here on.
+    pub fn set_solid(&mut self, member: Member, solid: Option<BitFlags<SpriteFlag>>) {
+        let slot = self.seat(member);
+        let word = match solid {
+            Some(solid) => {
+                self.own_solid |= 1 << slot;
+                solid
+            }
+            None => {
+                self.own_solid &= !(1 << slot);
+                self.solid
+            }
+        };
+        self.records[slot].solid = word.bits();
+    }
+
+    /// Which flags `member` cares to be told about — see [`Enlisting::heeding`].
+    pub fn heeds(&self, member: Member) -> BitFlags<SpriteFlag> {
+        BitFlags::from_bits(self.records[self.seat(member)].heeds)
+            .expect("a seat's heeds was written from real flags")
+    }
+
+    /// Sets which flags `member` cares to be told about — see [`Enlisting::heeding`].
+    pub fn set_heeds(&mut self, member: Member, heeds: impl Into<BitFlags<SpriteFlag>>) {
+        let record = &mut self.records[self.seat(member)];
+        record.heeds = heeds.into().bits();
+    }
+
+    /// What `member` weighs — see [`Enlisting::weighing`].
+    pub fn mass(&self, member: Member) -> f32 {
+        self.masses[self.seat(member)]
+    }
+
+    /// Sets what `member` weighs: a crate that fills with water, a ship that burns its fuel off.
+    pub fn set_mass(&mut self, member: Member, mass: f32) {
+        let slot = self.seat(member);
+        self.masses[slot] = mass;
+    }
+
+    /// Moves the whole cast one update: the forces the world owns, then the world, then the bodies.
+    ///
+    /// For each member in turn, in seat order: the world's own [forces](Self::with_forces) bend its
+    /// velocity, in the order they were composed; whatever ran its [rectangle](Self::bounds) into
+    /// something solid to it — the scene's word ([`with_solid`](Self::with_solid)), unless the
+    /// member has [rules of its own](Enlisting::stopped_by) — is taken out of it, on each axis
+    /// separately; the velocity that survives is stored back and the body moved by it; whatever
+    /// that carried outside its [confines](Enlisting::confined_to) is put back; and the sides that
+    /// stopped it together with the flags of everything it met are written into its
+    /// [`contacts`](Self::contacts), where the cart reads them at its leisure.
+    ///
+    /// *Something* is the map and the rest of the cast alike. The tiles under the member are asked
+    /// what they carry, and so is every other member, at the rectangle it covers right now and
+    /// under the flags the cell it [wears](Enlisting::wearing) carries in the sprite editor. Flags
+    /// shared with what is solid to the member stop it — a tile and a neighbour in the same
+    /// one-axis pass, so landing on a lift reads [`below`](Contacts::below) exactly as landing on a
+    /// floor tile does — and everything met, wall or not, comes back in [`Contacts::touched`]. A
+    /// member is never asked about itself, so its own kind is a wall like anybody else's: two
+    /// crates wearing `CRATE`, each with `CRATE` in solid, stop each other and neither is ever its
+    /// own wall.
+    ///
+    /// A meeting between two members reaches both of them, whichever one's movement made it: the
     /// mover's own sweep answers the mover, and whoever it arrived on is told what arrived —
-    /// filtered by that entity's own [`heeds`](Kinetic::heeds) and solid, flags only, in the same
-    /// update. So a ram is felt on both sides of it however the two were ordered, and either party
-    /// may be dropped the moment the step returns without costing the other its news.
+    /// filtered by that member's own [heeds](Enlisting::heeding) and solid, flags only, in the same
+    /// update. So a ram is felt on both sides of it however the two were seated, and either party
+    /// may be [retired](Self::retire) the moment the step returns without costing the other its
+    /// news.
     ///
-    /// The two halves of the answer are taken over different ground, and on purpose. An entity is
+    /// The two halves of the answer are taken over different ground, and on purpose. A member is
     /// *stopped* where an axis was trying to go — the endpoint, which is where a wall has to be to
     /// be one — and it is told what it *met* over the whole of the step: where it began, the ground
-    /// each axis swept across, and where it ended up. So the pond an entity walks out of this
-    /// update is reported, and so is a hazard crossed between one pixel and the next. One thing
-    /// follows from the difference and is worth knowing: something thinner than an update's
-    /// movement can be stepped clean over without stopping the entity, and comes back in
+    /// each axis swept across, and where it ended up. So the pond a member walks out of this update
+    /// is reported, and so is a hazard crossed between one pixel and the next. One thing follows
+    /// from the difference and is worth knowing: something thinner than an update's movement can be
+    /// stepped clean over without stopping the member, and comes back in
     /// [`touched`](Contacts::touched) all the same. Keeping a fall from doing that to a floor is
     /// what [`Gravity`](super::Gravity)'s terminal velocity is for.
     ///
-    /// A neighbour standing *on* an entity pushes it out before anything moves — out the shallower
+    /// A neighbour standing *on* a member pushes it out before anything moves — out the shallower
     /// way, out the side it was already nearer — and reports the side it pushed *from*: a lift that
     /// has just risen a pixel into the rider standing on it carries the rider up, and the rider
     /// still reads `below`. What the push could not fully separate is reported but cannot block, so
     /// a thing caught between two solids can still walk out of them. A tile can never do any of
-    /// this; a cast member can.
+    /// this; a member can.
     ///
     /// The edge of the world is the last thing to have its say, after the movement that took the
-    /// entity out there: one that named a rectangle in [`confines`](Kinetic::confines) is put back
-    /// against it, the speed that carried it out is spent, and the sides it was held at join the
-    /// walls' in the answer.
+    /// member out there: one that named [confines](Enlisting::confined_to) is put back against
+    /// them, the speed that carried it out is spent, and the sides it was held at join the walls'
+    /// in the answer.
     ///
     /// An axis that was blocked is zeroed in the stored velocity too, not just in this update's
     /// movement: a fall that lands has been spent, and something that walked into a wall is not
-    /// still walking. An entity driven by the buttons writes its sideways speed afresh every update
+    /// still walking. A member driven by the buttons writes its sideways speed afresh every update
     /// and never notices; one carrying its own momentum does, which is the point.
     ///
     /// The weather is the world's own — one value, handed over once in
-    /// [`with_forces`](Self::with_forces) — so a step asks for nothing but the cast. A gust the
-    /// whole scene is bent by lives on the world and is [driven](Self::forces_mut) between steps;
-    /// nothing is stored on an entity between updates but its velocity and its contacts.
+    /// [`with_forces`](Self::with_forces) — so a step asks for nothing but the update's context. A
+    /// gust the whole scene is bent by lives on the world and is [driven](Self::forces_mut) between
+    /// steps.
     ///
-    /// What a step costs a cart is the crossing, not the collisions. The cast is written down
-    /// once — everything each entity describes, one fixed-size record apiece — into a buffer
-    /// borrowed from the stack and sized by the cast's own `N`, and handed to the console in a
-    /// single call; the console steps it natively, over its own map and sheet, and the answers
-    /// are read back out of the same bytes. Nothing is allocated, nothing outlives the call, no
-    /// fuel is spent on the walking and the stopping, and the engine the console runs is the very
-    /// one this module's tests drive. The wire carries sixty-four records at most, so a cast with
-    /// a bigger `N` is refused at compile time — and a cast that fits its capacity fits the step,
-    /// with nothing left to check at run time. An entity that should cost nothing is simply left
-    /// out of the cast.
-    pub fn step<const N: usize>(&mut self, ctx: &Context, cast: &mut super::Cast<'_, N>) {
-        const {
-            assert!(
-                N <= wire::CAP,
-                "a Cast's capacity cannot exceed the sixty-four records the wire carries"
-            )
-        };
+    /// What a step costs a cart is the crossing, and nothing else. The world's own seats are handed
+    /// to the console as they stand — one pointer, one call, nothing written down for the journey —
+    /// and the console steps them natively, over its own map and sheet, answering into the very
+    /// bytes the cast lives in. No fuel is spent on the walking and the stopping, nothing is
+    /// allocated, and the engine the console runs is the one this module's tests drive. A member
+    /// that should cost nothing is simply not enlisted.
+    pub fn step(&mut self, ctx: &Context) {
+        // The forces are the cart's own code, so their half of the step happens on the cart's side
+        // whichever way the rest of it goes — and before anything is read, which is the one
+        // snapshot point both halves share.
+        self.weather();
 
-        // In the console, the whole step is one crossing of the ABI and the console's own,
-        // native, work; on the native builds the tests are, the SDK runs the same engine itself.
+        // In the console, the whole step is one crossing of the ABI and the console's own, native,
+        // work; on the native builds the tests are, the SDK runs the same engine itself.
         #[cfg(target_arch = "wasm32")]
         {
             let _ = ctx;
-            self.step_over_the_wire::<N>(cast);
+            self.step_over_the_wire();
         }
 
         #[cfg(not(target_arch = "wasm32"))]
-        self.step_cast(
-            cast,
-            |x, y| {
-                ctx.map_tile(x, y)
-                    .map_or(BitFlags::empty(), |tile| ctx.sprite_flags(tile))
-            },
-            |sprite| ctx.sprite_flags(sprite),
-        );
+        self.step_natively(ctx);
     }
 
-    /// The step, sent across the ABI: the cast written down, one `step_cast` import, the answers
-    /// read back. The console's side runs the engine [`step_cast`](Self::step_cast) is — see
-    /// [`wire`] — so what a cart spends here is the writing and the reading, not the collisions.
-    #[cfg(target_arch = "wasm32")]
-    fn step_over_the_wire<const N: usize>(&mut self, cast: &mut [&mut dyn Kinetic]) {
-        use core::mem::MaybeUninit;
+    /// One update's worth of the world's own forces, over every member the world moves.
+    ///
+    /// Velocities only — a force never touches a position — and props are left alone: the cart
+    /// drives them, weather and all. What a force is shown is a [`Subject`] built from the seat: a
+    /// velocity to bend, and the mass and position it may read.
+    fn weather(&mut self) {
+        let mut seated = self.seated;
+        while seated != 0 {
+            let slot = seated.trailing_zeros() as usize;
+            seated &= seated - 1;
+            let record = &mut self.records[slot];
+            if record.meta & wire::PROP != 0 {
+                continue;
+            }
 
-        // The forces are the cart's own code, so their half of the step happens on the cart's
-        // side — before the cast is written down, which is the one snapshot point both halves of
-        // `step` share.
-        self.weather(cast);
-
-        // The records live for exactly this call, on the stack: a step's worth of scratch, not a
-        // cart's worth of state. Uninitialized rather than cleared, because clearing would be a
-        // ceiling's worth of metered writes an update — every slot that is sent is written just
-        // below, and the tail past the cast is never sent at all, so the cart pays for the
-        // records it fills and holds none of them between steps.
-        let mut records = [const { MaybeUninit::<wire::Record>::uninit() }; N];
-        for (slot, entity) in records.iter_mut().zip(cast.iter_mut()) {
-            let velocity = *entity.velocity_mut();
-            slot.write(wire::Record::of(&**entity, self.solid, velocity));
+            let mut subject = Subject::new(
+                Velocity::new(record.dx, record.dy),
+                self.masses[slot],
+                (record.x, record.y),
+            );
+            self.forces.apply(&mut subject);
+            let bent = subject.velocity();
+            (record.dx, record.dy) = (bent.dx, bent.dy);
         }
+    }
 
-        // The cast fits the buffer — `weather` refused anything past the ceiling — so the console
-        // is handed exactly the initialized prefix, and answers into those same bytes.
+    /// The step, sent across the ABI: the world's own seats handed over, the answers written into
+    /// them. The console's side runs the engine [`step_cast`](Self::step_cast) is — see [`wire`] —
+    /// so what a cart spends here is the call, not the collisions.
+    #[cfg(target_arch = "wasm32")]
+    fn step_over_the_wire(&mut self) {
+        // Everything up to the last seat taken. What is empty in the middle of it travels as the
+        // inert prop `wire::VACANT` is, so the console sees the cast at the very indices the world
+        // keeps it at and needs to know nothing about vacancy.
+        let taken = self.high_water();
         unsafe {
             crate::ffi::step_cast(
-                records.as_mut_ptr().cast(),
-                cast.len() as u32,
+                self.records.as_mut_ptr().cast(),
+                taken as u32,
                 self.reads_map as u32,
             );
         }
 
-        for (slot, entity) in records.iter().zip(cast.iter_mut()) {
-            // A prop went along only to be met: nothing was decided about it, so nothing of it
-            // is touched.
-            if entity.prop() {
-                continue;
-            }
-            // Written before the crossing and answered in place by the console, so every slot
-            // this zip reaches is initialized.
-            let record = unsafe { slot.assume_init_ref() };
-            entity
-                .body_mut()
-                .set_wire((record.x, record.y, record.rx, record.ry));
-            *entity.velocity_mut() = Velocity::new(record.dx, record.dy);
-            *entity.contacts_mut() = Contacts::from_wire(record.sides, record.touched);
-        }
+        self.reseat();
     }
 
-    /// The console's half of [`step`](Self::step): the same engine, over the map and the sheet
-    /// the console binds in natively. Hidden — a cart calls `step`, and this is what answers it
-    /// on the other side of the wire.
+    /// The step, run here: the seats decoded into the engine's own view of a cast, the very engine
+    /// the console runs, and the answers reported back into the seats.
+    ///
+    /// What answers a cart on a native build — the SDK's tests, and anything that runs a cart's
+    /// logic outside the console. The map and the sprite sheet are reached for a host call at a
+    /// time here, where the console has them natively; everything else is the same code.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn step_natively(&mut self, ctx: &Context) {
+        let taken = self.high_water();
+        let mut cast: [wire::Recast; N] =
+            core::array::from_fn(|slot| wire::Recast::of(&self.records[slot]));
+        {
+            let mut members = cast.each_mut().map(|member| member as &mut dyn Kinetic);
+            self.step_cast(
+                &mut members[..taken],
+                |x, y| {
+                    ctx.map_tile(x, y)
+                        .map_or(BitFlags::empty(), |tile| ctx.sprite_flags(tile))
+                },
+                |sprite| ctx.sprite_flags(sprite),
+            );
+        }
+        for (member, record) in cast.iter().zip(self.records.iter_mut()).take(taken) {
+            member.report(record);
+        }
+
+        self.reseat();
+    }
+
+    /// The console's half of [`step`](Self::step): the same engine, over the map and the sheet the
+    /// console binds in natively. Hidden — a cart calls `step`, and this is what answers it on the
+    /// other side of the wire.
     #[doc(hidden)]
     pub fn step_hosted(
         &self,
@@ -381,15 +817,76 @@ impl<F: Force> World<F> {
         self.step_cast(cast, tiles, carried);
     }
 
-    /// One update's worth of the world's own forces, over every entity the world moves.
+    /// Puts every rectangle back on the body the step has just moved.
     ///
-    /// Velocities only — a force never touches a position — and props are left alone: the cart
-    /// drives them, weather and all.
-    fn weather(&self, cast: &mut [&mut dyn Kinetic]) {
-        // A cast a cart hands `step` fits by construction — its capacity is compile-checked
-        // against the wire's — so this guards the internal callers: the console's own entry, and
+    /// The wire's answers are the body, the velocity and the contacts, and nothing else: what the
+    /// cart wrote comes back exactly as the cart wrote it, which is what lets the seats *be* the
+    /// state. So the rectangle's corner is the one thing left to work out afterwards — wherever the
+    /// member now draws, plus the offset it keeps from it.
+    fn reseat(&mut self) {
+        let mut seated = self.seated;
+        while seated != 0 {
+            let slot = seated.trailing_zeros() as usize;
+            seated &= seated - 1;
+            let offset = self.offsets[slot];
+            let record = &mut self.records[slot];
+            (record.bx, record.by) = corner((record.rx, record.ry), offset);
+        }
+    }
+
+    /// How much of the cast a step has to carry: one past the last seat taken.
+    ///
+    /// The empty seats before it go along as props of no size; the ones after it are not sent at
+    /// all, so a world with room to spare pays for the room it is using.
+    fn high_water(&self) -> usize {
+        (u64::BITS - self.seated.leading_zeros()) as usize
+    }
+
+    /// `member`'s seat, or a panic naming it.
+    ///
+    /// A handle to somebody who has left the cast — or to somebody who was never enlisted, which is
+    /// what [`Member::NOBODY`] is — is a cart holding on to nobody, and there is no honest answer
+    /// to give it: the seat is empty, or it has been let to somebody else who is nobody's hero.
+    /// Loud, and exactly where it happened.
+    ///
+    /// The check is on every accessor a cart calls in an update, so its hot half is spelled to
+    /// inline there — a compare and a taken seat — and the panic lives in [`stale`], cold and out
+    /// of line, where it costs nothing until it fires.
+    #[inline(always)]
+    fn seat(&self, member: Member) -> usize {
+        if !self.holds(member) {
+            stale(member.slot, N);
+        }
+
+        member.slot as usize
+    }
+
+    /// Whether `member` names somebody actually in the cast: a seat of this world's, taken, and
+    /// taken by the very member the handle was made for.
+    #[inline(always)]
+    fn holds(&self, member: Member) -> bool {
+        let slot = member.slot as usize;
+
+        slot < N && self.seated & (1 << slot) != 0 && self.generations[slot] == member.generation
+    }
+
+    /// The step itself, over a map and a sprite sheet handed in rather than reached for.
+    ///
+    /// Everything that makes a world a world is here — the order, the splitting of the cast, the
+    /// resolution, the contacts — so a test can drive the whole of it against a map and a sheet it
+    /// wrote down itself, and what it proves holds for the console running the very same engine.
+    /// The weather is not here: the forces are the cart's own code and have already had their say,
+    /// over the whole cast at once, before any of this was read.
+    fn step_cast(
+        &self,
+        cast: &mut [&mut dyn Kinetic],
+        tiles: impl Fn(i16, i16) -> BitFlags<SpriteFlag> + Copy,
+        carried: impl Fn(SpriteId) -> BitFlags<SpriteFlag>,
+    ) {
+        // A world's own cast fits by construction — its `N` is compile-checked against the wire's
+        // ceiling — so this guards the ways in that are not a world's own: the console's entry, and
         // anything a test writes down. Loud, exactly where it happened, rather than a quiet step
-        // onto some slower path. Both halves of `step` begin here, so the one guard covers both.
+        // onto some slower path.
         assert!(
             cast.len() <= wire::CAP,
             "a cast of {} was handed across a wire with a ceiling of {}",
@@ -397,40 +894,12 @@ impl<F: Force> World<F> {
             wire::CAP
         );
 
-        for entity in cast.iter_mut() {
-            if entity.prop() {
-                continue;
-            }
-            self.forces.apply(&mut **entity);
-        }
-    }
-
-    /// The step itself, over a map and a sprite sheet handed in rather than reached for.
-    ///
-    /// [`step`](Self::step) is this with the console bound into the two closures — bound in
-    /// natively on the console's own side of the wire, and through a host call apiece in the
-    /// SDK's fall-back. Everything that makes a world a world is here — the order, the splitting
-    /// of the cast, the resolution, the contacts slot — so a test can drive the whole of it
-    /// against a map and a sheet it wrote down itself, and what it proves holds for the console
-    /// running the very same engine.
-    fn step_cast(
-        &self,
-        cast: &mut [&mut dyn Kinetic],
-        tiles: impl Fn(i16, i16) -> BitFlags<SpriteFlag> + Copy,
-        carried: impl Fn(SpriteId) -> BitFlags<SpriteFlag>,
-    ) {
-        // The weather first, over the whole cast, so that everything an entity describes is read
-        // after the forces have had their say — one defined moment, and the same one the wire
-        // crossing samples at, so the two halves of `step` can never disagree about what a
-        // velocity-dependent description answered.
-        self.weather(cast);
-
         // What every cast member is worth to everybody else, taken once at the top: the rectangle
-        // it covers and the flags its cell carries. Each entity is then resolved against the rest
+        // it covers and the flags its cell carries. Each member is then resolved against the rest
         // of the cast several times over — once to be pushed out of it, once for each axis it
         // moves along — and every one of those questions used to go back through the cast's `dyn`
         // for a rectangle and a sheet lookup that had not changed since the last one. That is the
-        // n-squared this takes out: one question an entity a step, and plain loads after it.
+        // n-squared this takes out: one question a member a step, and plain loads after it.
         //
         // Two arrays rather than one of pairs, and the difference is measurable: a rectangle is
         // eight bytes and a flag set is one, so an array of pairs is a run of stores to clear
@@ -442,7 +911,7 @@ impl<F: Force> World<F> {
         let members = cast.len();
         let fits = members <= SNAPSHOT;
         // Everything anybody in the cast is wearing, in one flag set. What it buys is the two
-        // questions an entity can settle without walking anybody: whether there is a wall of its
+        // questions a member can settle without walking anybody: whether there is a wall of its
         // own out there to be pushed out of, and whether there is anything out there at all.
         let mut worn = BitFlags::empty();
         if fits {
@@ -458,7 +927,7 @@ impl<F: Force> World<F> {
                 if !member.prop() {
                     *listening = member.heeds() | member.solid().unwrap_or(self.solid);
                 }
-                // An entity that wears nothing, or whose cell the cart flagged with nothing,
+                // A member that wears nothing, or whose cell the cart flagged with nothing,
                 // stands in nobody's way and tells nobody anything — but one that is listening
                 // still keeps a rectangle here, so an arrival on it can be seen. Only a slot
                 // neither wearing nor listening stays the nothing it was born as.
@@ -471,7 +940,7 @@ impl<F: Force> World<F> {
             }
         } else {
             // A cast too long to snapshot still gets the one flag set, since it is what says
-            // whether any of the walking below is worth doing at all. One question an entity
+            // whether any of the walking below is worth doing at all. One question a member
             // where the snapshot would have asked two.
             for member in cast.iter() {
                 if let Some(sprite) = member.sprite() {
@@ -480,24 +949,24 @@ impl<F: Force> World<F> {
             }
         }
 
-        // The meetings each entity's own step makes, delivered to the other party once the whole
+        // The meetings each member's own step makes, delivered to the other party once the whole
         // cast has moved: a slot per member, holding the flags of everything that arrived on it.
         // Collected rather than written straight away, because the other party may not have been
         // stepped yet — and its own step overwrites its contacts whole.
         let mut arrived = [BitFlags::<SpriteFlag>::empty(); wire::CAP];
         for index in 0..cast.len() {
-            // The cast without this entity in it, in two pieces: everything stepped already, and
+            // The cast without this member in it, in two pieces: everything stepped already, and
             // everything still to be. The split is what the fallback walks, and the index of the
-            // entity in the middle is what the snapshot skips — either way, the whole of how an
-            // entity comes to be skipped against itself is that no question ever reaches it.
+            // member in the middle is what the snapshot skips — either way, the whole of how a
+            // member comes to be skipped against itself is that no question ever reaches it.
             let (before, rest) = cast.split_at_mut(index);
             let Some((entity, after)) = rest.split_first_mut() else {
                 break;
             };
 
             // A prop was placed by the cart and stays placed: its slot in the snapshot is where
-            // everybody meets it, and the whole of the stepping below — forces, walls, the hold —
-            // is for things the world moves.
+            // everybody meets it, and the whole of the stepping below — walls, the hold — is for
+            // things the world moves.
             if entity.prop() {
                 continue;
             }
@@ -528,7 +997,7 @@ impl<F: Force> World<F> {
                 &neighbours,
             );
 
-            // Whoever this step arrived on is owed the news of it: what this entity wears, into
+            // Whoever this step arrived on is owed the news of it: what this member wears, into
             // the slot of each neighbour the resolution noted, for the delivery below.
             let mut met = neighbours.met.get();
             while met != 0 {
@@ -537,7 +1006,7 @@ impl<F: Force> World<F> {
                 arrived[slot] = arrived[slot] | mine;
             }
 
-            // The entity has just moved, so its slot follows it. That is what keeps the cast
+            // The member has just moved, so its slot follows it. That is what keeps the cast
             // sequential: everything stepped after this one meets it where it now is, and
             // everything already stepped met it where it was. Flags cannot change under a step, so
             // the one read of them at the top stands — and a slot that neither wears nor listens
@@ -550,7 +1019,7 @@ impl<F: Force> World<F> {
         // The deliveries: every meeting reaches both of its parties in the one step, whoever's
         // movement made it. Each recipient hears only what it was listening for — the very filter
         // the notes were taken under — and hears it by having it joined onto the answer its own
-        // step wrote, sides untouched: an arrival tells an entity what reached it, never that it
+        // step wrote, sides untouched: an arrival tells a member what reached it, never that it
         // was stopped.
         for (index, entity) in cast.iter_mut().enumerate() {
             let news = arrived[index];
@@ -570,34 +1039,271 @@ impl<F: Force> World<F> {
     }
 }
 
+/// A member mid-enlistment: the seat is taken already, and this is what says who is in it.
+///
+/// [`World::enlist`] claims the lowest empty seat and puts a whole member in it — standing where it
+/// was told to, covering the rectangle it was given, and everything else the default: still,
+/// wearing nothing, stopped by whatever the scene calls solid, told about everything it meets, free
+/// to walk off the map and of the weight nobody has to think about. Every builder here says one
+/// more thing about whoever is in that seat, writing it where the member now lives, and
+/// [`member`](Self::member) closes the description and hands the [`Member`] handle over.
+///
+/// ```no_run
+/// # use pixel8::{physics::{Bounds, World}, SpriteId};
+/// # const BADIE_SPRITE: SpriteId = SpriteId(6);
+/// # const LEVEL: Bounds = Bounds::new(0, 0, 256, 128);
+/// # fn f(world: &mut World<4>) {
+/// // The badie: one sprite's worth of it, wearing the cell its flag is written on, patrolling
+/// // inside the level and never let out of it.
+/// let badie = world
+///     .enlist(200.0, 104.0, 8, 8)
+///     .expect("a seat for the badie")
+///     .wearing(BADIE_SPRITE)
+///     .confined_to(LEVEL)
+///     .member();
+/// # }
+/// ```
+///
+/// The chain is the whole of it: nothing is kept here, because there was never anywhere else for it
+/// to be kept. What a member is *now* is asked of the world with the handle enlisting gave back,
+/// and changed there — [`set_sprite`](World::set_sprite), [`set_confines`](World::set_confines) and
+/// the rest.
+///
+/// Only [`member`](Self::member) makes the enlistment stand. A chain abandoned before it — dropped,
+/// or unwound out of — gives its seat straight back, as if nobody had ever been asked: a seat may
+/// be held by a handle or by this, and never by nothing.
+#[must_use = "an enlisting left unfinished gives its seat straight back — `member` is what makes \
+              it stand"]
+pub struct Enlisting<'a, const N: usize, F: Force> {
+    /// The world the seat is in, held for as long as the member is being described.
+    world: &'a mut World<N, F>,
+    /// And which seat, which is the one thing about it that cannot change from here.
+    slot: usize,
+}
+
+impl<const N: usize, F: Force> Enlisting<'_, N, F> {
+    /// The same member, already travelling.
+    ///
+    /// Standing still is the default, and what most members want: a velocity is written afresh
+    /// every update with [`set_velocity`](World::set_velocity), out of the buttons or a patrol or
+    /// whatever else the cart is thinking.
+    pub fn moving(self, dx: f32, dy: f32) -> Self {
+        let record = &mut self.world.records[self.slot];
+        (record.dx, record.dy) = (dx, dy);
+
+        self
+    }
+
+    /// The same member, wearing `sprite`: the cell whose flags everybody else meets in it.
+    ///
+    /// The other side of [`stopped_by`](Self::stopped_by). That says which flags stop *me*; this
+    /// says which flags I carry, and they are the flags the cart wrote on that cell in the sprite
+    /// editor — the same one vocabulary the map's tiles already speak. So a badie is a badie
+    /// because its cell is flagged `BADIE`, and everything that meets it is told `BADIE` in
+    /// [`Contacts::touched`](super::Contacts::touched).
+    ///
+    /// Wearing nothing — the default — is a member nobody is stopped by and nobody is told about.
+    /// It is still stopped by everything, and still told everything: a sensor needs no flag of its
+    /// own. A member whose look changes with its state changes what it wears with
+    /// [`set_sprite`](World::set_sprite); two walk-cycle cells carrying the same flag make the
+    /// question moot, which is the usual case.
+    pub fn wearing(self, sprite: SpriteId) -> Self {
+        self.world.records[self.slot].sprite = sprite.0 as u16;
+
+        self
+    }
+
+    /// The same member, with rules of its own about what means *wall* to it.
+    ///
+    /// The scene's word — [`World::with_solid`] — is what a member is stopped by unless it says
+    /// otherwise here, and most of a cast never says otherwise, because what is a wall is usually a
+    /// fact about the scene rather than about anybody in it. What is said here *replaces* the
+    /// scene's word for this member alone, and the emptiest rule of all — `BitFlags::empty()` — is
+    /// a member nothing anywhere stops, whatever the scene declares: a bullet, a bird, anything a
+    /// cart wants told about the world rather than stopped by it.
+    ///
+    /// A member's *own* kind belongs here as readily as anything else, and is the usual reason to
+    /// have rules of one's own at all: the world knows who is who and never asks a member about
+    /// itself, so two crates wearing `CRATE`, each with `CRATE` solid to it, block each other and
+    /// neither is ever its own wall.
+    ///
+    /// ```no_run
+    /// # use pixel8::{physics::World, SpriteFlag, SpriteId};
+    /// # const SOLID: SpriteFlag = SpriteFlag::Flag0;
+    /// # const CRATE: SpriteFlag = SpriteFlag::Flag1;
+    /// # const CRATE_SPRITE: SpriteId = SpriteId(9);
+    /// # fn f(world: &mut World<4>) {
+    /// // The walls stop a crate like they stop everybody — and so does another crate.
+    /// let crated = world
+    ///     .enlist(0.0, 0.0, 8, 8)
+    ///     .expect("a seat for the crate")
+    ///     .wearing(CRATE_SPRITE)
+    ///     .stopped_by(SOLID | CRATE)
+    ///     .member();
+    /// # }
+    /// ```
+    pub fn stopped_by(self, solid: impl Into<BitFlags<SpriteFlag>>) -> Self {
+        self.world.own_solid |= 1 << self.slot;
+        self.world.records[self.slot].solid = solid.into().bits();
+
+        self
+    }
+
+    /// The same member, told about `heeds` and nothing else.
+    ///
+    /// [`stopped_by`](Self::stopped_by) says what stops the member; this says what it wants to hear
+    /// about, and everything else the world meets on its behalf it throws away without ever working
+    /// out whether it was met. Everything is the default, and it is the honest one — a member that
+    /// has not said otherwise is told about every flag it meets.
+    ///
+    /// Narrowing it is a promise the cart makes and the world takes at its word: a neighbour
+    /// carrying nothing this member heeds is skipped before a single edge of it is worked out, and
+    /// a tile's flags are dropped before they are collected. In a scene where everything is in one
+    /// cast that is most of the work of an update, and it is spent on answers nobody was going to
+    /// read.
+    ///
+    /// It cannot cost a member a wall: solid is heeded whatever this says, so a wall it never asked
+    /// to hear about still stops it, and being stopped by it still reports it.
+    pub fn heeding(self, heeds: impl Into<BitFlags<SpriteFlag>>) -> Self {
+        self.world.records[self.slot].heeds = heeds.into().bits();
+
+        self
+    }
+
+    /// The same member, never let out of `confines`.
+    ///
+    /// The edge of the world, which is not a wall and is nowhere on the map: nothing else stops a
+    /// member walking off the last tile and falling for ever.
+    /// [`Bounds::screen`](super::Bounds::screen) is what most carts that want one mean; a level
+    /// bigger than the screen hands over the level. The sides it is held at arrive in the same
+    /// [`Contacts`](super::Contacts) as the walls, so a hold at the bottom of the level reads
+    /// [`below`](super::Contacts::below) as a floor tile does.
+    ///
+    /// Saying nothing — the default — is a member free to leave, which is what a bullet or a spent
+    /// enemy wants: it walks off the map, and the cart retires it when
+    /// [`Bounds::on_screen`](super::Bounds::on_screen) says it has gone. A room the player walks
+    /// into changes the limits with [`set_confines`](World::set_confines).
+    pub fn confined_to(self, confines: Bounds) -> Self {
+        let record = &mut self.world.records[self.slot];
+        record.meta |= wire::CONFINED;
+        (record.cx, record.cy) = (confines.x(), confines.y());
+        (record.cw, record.ch) = (confines.width(), confines.height());
+
+        self
+    }
+
+    /// The same member, with its rectangle sitting `dx`, `dy` pixels from the pixel it draws at.
+    ///
+    /// For a hurtbox narrower than the sprite: the member is drawn from one corner and judged from
+    /// another. The rectangle keeps that seat on the body wherever the step carries it, so what
+    /// stops the member stops the rectangle, exactly where a cart drew it.
+    ///
+    /// `(0, 0)` — the default — is the rectangle over the sprite, which is what most of a cast
+    /// wants.
+    pub fn offset(self, dx: i16, dy: i16) -> Self {
+        self.world.offsets[self.slot] = (dx, dy);
+        let record = &mut self.world.records[self.slot];
+        (record.bx, record.by) = corner((record.rx, record.ry), (dx, dy));
+
+        self
+    }
+
+    /// The same member as a prop: in the cast to be met, never to be moved.
+    ///
+    /// A prop stands in everybody's way exactly as any member does — the rectangle it covers and
+    /// the flags on the cell it wears — and is otherwise left alone: no force reaches it, nothing
+    /// resolves it, and its contacts are never written. The cart drives it wherever it likes, on
+    /// whatever rails it likes, with [`set_pos`](World::set_pos) before the world steps. A hazard
+    /// patrolling a fixed beat, a lift on a track, a door: things the world must know about without
+    /// being asked to drive them.
+    pub fn prop(self) -> Self {
+        self.world.records[self.slot].meta |= wire::PROP;
+
+        self
+    }
+
+    /// The same member, weighing `mass`.
+    ///
+    /// How hard it is to push, relative to everything else in the scene: `1.0` is the default
+    /// nobody has to think about, `4.0` takes four times the shove for the same movement and `0.25`
+    /// a quarter of it. What to make of it is each [`Force`]'s business — [`Wind`](super::Wind) and
+    /// [`Atmosphere`](super::Atmosphere) divide their grip by it, and [`Gravity`](super::Gravity)
+    /// never reads it at all. See the [module docs](super#mass).
+    pub fn weighing(self, mass: f32) -> Self {
+        self.world.masses[self.slot] = mass;
+
+        self
+    }
+
+    /// The member as the cart will know it from here: the seat, and the right to ask about whoever
+    /// is in it.
+    ///
+    /// The end of the description and the only way out of it — the seat has been taken since
+    /// [`enlist`](World::enlist) claimed it, and a handle nobody keeps is a seat nobody can ever
+    /// [retire](World::retire).
+    #[must_use = "the handle is the only way the seat is ever asked about or given back"]
+    pub fn member(self) -> Member {
+        let member = Member {
+            slot: self.slot as u8,
+            generation: self.world.generations[self.slot],
+        };
+        // The enlistment stands: the claim must not be rolled back as the chain ends.
+        core::mem::forget(self);
+
+        member
+    }
+}
+
+/// A chain abandoned before [`member`](Enlisting::member) never happened: the claim is rolled
+/// back, so no seat is ever held by nothing. `member` forgets the guard, which is how a finished
+/// chain keeps its seat.
+impl<const N: usize, F: Force> Drop for Enlisting<'_, N, F> {
+    fn drop(&mut self) {
+        self.world.vacate(self.slot);
+    }
+}
+
+impl<const N: usize, F: Force> World<N, F> {
+    /// Empties `slot`, bookkeeping and all — what [`retire`](Self::retire) does short of ageing
+    /// the seat, and what an [`Enlisting`] abandoned mid-chain undoes its claim with: no handle
+    /// was ever handed out for it, so there is nothing to age.
+    fn vacate(&mut self, slot: usize) {
+        self.seated &= !(1 << slot);
+        self.own_solid &= !(1 << slot);
+        self.records[slot] = wire::VACANT;
+        self.masses[slot] = 1.0;
+        self.offsets[slot] = (0, 0);
+    }
+}
+
 /// How long a cast is snapshotted rather than walked.
 ///
-/// Thirty-two entities: 288 bytes of the shadow stack between the two arrays, under one percent of
+/// Thirty-two members: 288 bytes of the shadow stack between the two arrays, under one percent of
 /// a cart's 32 KiB default reserve, and reclaimed the moment the step returns. Room to spare rather
 /// than room measured out, because clearing them costs a bulk fill either way — a capacity of
 /// sixty-four measures the same as a capacity of sixteen — so the number is chosen for the scenes
 /// it covers and not for the stack it takes. More than thirty-two things moving at once on a
 /// 128x128 screen is a scene with bigger problems than this array, and one that has them anyway is
-/// answered exactly as it always was: the walk falls back to asking each entity through the cast's
+/// answered exactly as it always was: the walk falls back to asking each member through the cast's
 /// `dyn`.
 const SNAPSHOT: usize = 32;
 
 /// The rectangle a slot holds until something is written into it: nothing, which overlaps nothing.
 const EMPTY: Bounds = Bounds::new(0, 0, 0, 0);
 
-/// The world every cart starts with. See [`World::new`].
-impl Default for World {
+/// A world of `N` empty seats. See [`World::new`].
+impl<const N: usize> Default for World<N> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// One entity's update: the resolution, the movement, the edge of the world, and the answer
-/// written back into the entity's own slot. The forces have already had their say, over the whole
+/// One member's update: the resolution, the movement, the edge of the world, and the answer
+/// written back into the member's own slot. The forces have already had their say, over the whole
 /// cast at once, before anybody was stepped.
 ///
 /// The order is the whole of it. The resolution takes out of the velocity whatever ran into
-/// something; the body is moved by what is left; and only then is the entity held inside its
+/// something; the body is moved by what is left; and only then is the member held inside its
 /// limits, since it is the movement just made that carried it out there.
 #[inline(always)]
 fn step_entity(
@@ -608,18 +1314,18 @@ fn step_entity(
     worn: BitFlags<SpriteFlag>,
     neighbours: &impl Cast,
 ) {
-    // Everything the entity describes is read before anything of it moves — the limits along
-    // with the rest, so an answer worked out from where the entity stands means where the step
+    // Everything the member describes is read before anything of it moves — the limits along
+    // with the rest, so an answer worked out from where it stands means where the step
     // found it, on either side of the wire.
     let limits = entity.confines();
     // `Velocity` is `Copy`, so this reads out what the forces left behind without holding a borrow
-    // of the entity over the resolution below.
+    // of the member over the resolution below.
     let mut velocity = *entity.velocity_mut();
     let mut contacts = Contacts::empty();
-    // An entity covering no pixels has nothing to resolve — a hitbox switched off, a blast that has
+    // A member covering no pixels has nothing to resolve — a hitbox switched off, a blast that has
     // shrunk to nothing — and is only moved.
     //
-    // The scene's word for solid, unless this entity has one of its own.
+    // The scene's word for solid, unless this member has one of its own.
     let solid = entity.solid().unwrap_or(solid);
     let heeds = entity.heeds();
     if let Some(mut collider) = Collider::new(
@@ -631,12 +1337,12 @@ fn step_entity(
         reads_map,
     ) {
         // Out of anything standing on it first, so the resolution starts from a box that is clear
-        // — and only where there is something out there to be inside of. An entity that calls
+        // — and only where there is something out there to be inside of. A member that calls
         // nothing solid can stand in anything, and one no neighbour is a wall to has nothing to be
         // pushed out of, so most casts settle the whole separating question here, without placing
         // a box, walking anybody, or making the call.
         if collider.could_be_inside_something(neighbours) {
-            // Guarded like the hold below: `set_pos` re-snaps the drawn pixel, and an entity that
+            // Guarded like the hold below: `set_pos` re-snaps the drawn pixel, and a member that
             // was never overlapping anything must keep the coherent step `Body` is holding for it.
             let ((dx, dy), pushed) = collider.expel(neighbours);
             if (dx, dy) != (0.0, 0.0) {
@@ -653,9 +1359,9 @@ fn step_entity(
 
     entity.body_mut().move_by(velocity.dx, velocity.dy);
 
-    // The edge of the world, last: it is the movement just made that carried the entity out there,
+    // The edge of the world, last: it is the movement just made that carried the member out there,
     // and the sides it is held at read alongside the walls that stopped it. The velocity goes with
-    // it rather than being fetched back out of the entity, so what survives the whole step is
+    // it rather than being fetched back out of the member, so what survives the whole step is
     // stored once, at the bottom, however many places had a say in it.
     if let Some(limits) = limits {
         contacts |= hold(entity, limits, &mut velocity).into();
@@ -665,13 +1371,6 @@ fn step_entity(
     *entity.contacts_mut() = contacts;
 }
 
-/// The cast without the entity being stepped: everything already moved this update, and everything
-/// still to be.
-///
-/// Two slices rather than one, because the entity in the middle is the one holding the `&mut` — and
-/// that is the whole of how an entity comes to be skipped against itself. What each neighbour is
-/// worth is answered as the resolution reaches its slot: the rectangle it covers *now*, and the
-/// flags the cart wrote on the cell it says it wears.
 /// The snapshot's three answers about the whole cast, a slot each in cast order: the rectangle
 /// each member covers, the flags it carries, and the flags it is listening for.
 type Snapshot<'a> = (
@@ -680,16 +1379,23 @@ type Snapshot<'a> = (
     &'a [BitFlags<SpriteFlag>],
 );
 
+/// The cast without the member being stepped: everything already moved this update, and everything
+/// still to be.
+///
+/// Two slices rather than one, because the member in the middle is the one holding the `&mut` — and
+/// that is the whole of how a member comes to be skipped against itself. What each neighbour is
+/// worth is answered as the resolution reaches its slot: the rectangle it covers *now*, and the
+/// flags the cart wrote on the cell it says it wears.
 struct Neighbours<'a, 'cast, F> {
     /// Every cast member's rectangle, the flags it carries and the flags it is listening for, as
     /// they stand right now, a slot each in cast order — or nothing at all for a cast too long to
     /// have been snapshotted, which is walked through the `dyn` below instead.
     taken: Option<Snapshot<'a>>,
-    /// Everything anybody in the cast is wearing, the entity being stepped included — see
+    /// Everything anybody in the cast is wearing, the member being stepped included — see
     /// [`Cast::carried`]. Nothing at all for a cast too long to have been snapshotted, which
     /// answers every question the long way round.
     worn: BitFlags<SpriteFlag>,
-    /// Which slot is the entity being stepped, so the snapshot can leave it out.
+    /// Which slot is the member being stepped, so the snapshot can leave it out.
     mine: usize,
     before: &'a [&'cast mut dyn Kinetic],
     after: &'a [&'cast mut dyn Kinetic],
@@ -698,9 +1404,9 @@ struct Neighbours<'a, 'cast, F> {
     /// for a wall with — the long-cast fallback works a neighbour's listening out through the
     /// `dyn`, and needs the world's word to finish it.
     solid: BitFlags<SpriteFlag>,
-    /// One bit per cast slot: the neighbours this entity's step has [met](Cast::note) while they
+    /// One bit per cast slot: the neighbours this member's step has [met](Cast::note) while they
     /// were listening. A `Cell` because the walks hold the whole cast by `&self`; a `u64` because
-    /// the wire's ceiling is sixty-four, and the world's cannot exceed it.
+    /// the wire's ceiling is sixty-four, and a world's cannot exceed it.
     met: core::cell::Cell<u64>,
 }
 
@@ -712,7 +1418,7 @@ impl<F: Fn(SpriteId) -> BitFlags<SpriteFlag>> Cast for Neighbours<'_, '_, F> {
 
     fn note(&self, index: usize) {
         // The walk's index becomes the cast's slot: the snapshot indexes the whole cast, and the
-        // fallback indexes it with the entity being stepped taken out of the middle.
+        // fallback indexes it with the member being stepped taken out of the middle.
         let slot = match self.taken {
             Some(_) => index,
             None if index < self.mine => index,
@@ -724,7 +1430,7 @@ impl<F: Fn(SpriteId) -> BitFlags<SpriteFlag>> Cast for Neighbours<'_, '_, F> {
     #[inline(always)]
     fn len(&self) -> usize {
         // Nobody in the cast is wearing anything, so there is nobody in it to meet and no slot
-        // worth asking about: the two slices below hold entities the whole of whose part in this
+        // worth asking about: the two slices below hold members the whole of whose part in this
         // is that they are moved.
         if self.worn.is_empty() {
             return 0;
@@ -732,7 +1438,7 @@ impl<F: Fn(SpriteId) -> BitFlags<SpriteFlag>> Cast for Neighbours<'_, '_, F> {
 
         match self.taken {
             Some((boxes, ..)) => boxes.len(),
-            // The entity in the middle is in neither half, so there is no slot of its own here to
+            // The member in the middle is in neither half, so there is no slot of its own here to
             // count or to skip: the two slices are the cast without it already.
             None => self.before.len() + self.after.len(),
         }
@@ -791,32 +1497,32 @@ impl<F: Fn(SpriteId) -> BitFlags<SpriteFlag>> Neighbours<'_, '_, F> {
 
 /// Puts `entity` back inside `limits`, and answers with the sides it was held at.
 ///
-/// What the resolution does with walls, for the edge of the world: an entity whose
-/// [`bounds`](Kinetic::bounds) have left `limits` is put back against them, and the speed that took
-/// it there is spent rather than left to build up while it leans on the edge.
+/// What the resolution does with walls, for the edge of the world: a member whose rectangle has
+/// left `limits` is put back against them, and the speed that took it there is spent rather than
+/// left to build up while it leans on the edge.
 ///
-/// It is the rectangle that is held, wherever the entity put it, and the body follows by the same
+/// It is the rectangle that is held, wherever the member put it, and the body follows by the same
 /// amount — so a hurtbox inset into a sprite stops with its own edge against the limit. The exact
 /// sub-pixel position is what moves, not the drawn one, so something leaning on an edge sits at it
 /// precisely instead of being nudged a pixel at a time.
 ///
-/// Speed pointing back into `limits` is left alone: an entity that starts outside and is already
+/// Speed pointing back into `limits` is left alone: a member that starts outside and is already
 /// travelling home keeps what was bringing it. A rectangle with no room to fit — one wider than
 /// the `limits` it is given — is held against their near edge rather than pushed out the far one.
 ///
-/// `velocity` is the step's own, handed over and spent in place: the entity's slot is written once
+/// `velocity` is the step's own, handed over and spent in place: the member's slot is written once
 /// where the step ends rather than read back out and written again here.
 #[inline(always)]
 fn hold(entity: &mut dyn Kinetic, limits: Bounds, velocity: &mut Velocity) -> BitFlags<Contact> {
     let bounds = entity.bounds();
-    // One look at the body for both of what it is asked, since every question an entity is put
+    // One look at the body for both of what it is asked, since every question a member is put
     // through the cast's `dyn` costs a call the resolution used to have inlined.
     let body = entity.body();
     let (x, y) = body.pos();
 
     // The rectangle's own corner, in the exact sub-pixel coordinates the body keeps: the
     // whole-pixel offset of the rectangle from where the body draws, carried onto the position the
-    // body really has. Zero for a `Bounds::of`, which is most of them.
+    // body really has. Zero for a rectangle over the sprite, which is most of them.
     let (draw_x, draw_y) = body.draw_pos();
     let left = x + (bounds.x() - draw_x) as f32;
     let top = y + (bounds.y() - draw_y) as f32;
@@ -850,7 +1556,7 @@ fn hold(entity: &mut dyn Kinetic, limits: Bounds, velocity: &mut Velocity) -> Bi
         held = held | Contact::Below;
     }
 
-    // Only the speed that was carrying the entity out is spent. One already heading back in —
+    // Only the speed that was carrying the member out is spent. One already heading back in —
     // something spawned off the edge, or knocked there — keeps what is bringing it home.
     if !held.is_empty() {
         if (held.contains(Contact::Left) && velocity.dx < 0.0)
@@ -864,13 +1570,39 @@ fn hold(entity: &mut dyn Kinetic, limits: Bounds, velocity: &mut Velocity) -> Bi
             velocity.dy = 0.0;
         }
     }
-    // Guarded, because `set_pos` re-snaps the drawn pixel: an entity that was already inside would
+    // Guarded, because `set_pos` re-snaps the drawn pixel: a member that was already inside would
     // lose the coherent step `Body` is holding for it, and shimmer for it.
     if (dx, dy) != (0.0, 0.0) {
         entity.body_mut().set_pos(x + dx, y + dy);
     }
 
     held
+}
+
+/// Where a member's rectangle sits: the pixel it draws at, plus the offset it keeps from it.
+///
+/// Saturating at the ends of the coordinate space, exactly where a rectangle's own edges saturate
+/// — a corner past them was never a pixel anything could stand on — and worked out in the wider
+/// type, because a body drawn at one end of the space wearing a rectangle at the other is a
+/// strange member but a safe one, and must not wrap into a different geometry here.
+fn corner((rx, ry): (i16, i16), (dx, dy): (i16, i16)) -> (i16, i16) {
+    fn along(pixel: i16, offset: i16) -> i16 {
+        (pixel as i32 + offset as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16
+    }
+
+    (along(rx, dx), along(ry, dy))
+}
+
+/// The cold half of [`World::seat`]'s check: the panic a stale handle is answered with, out of
+/// every hot path so the check itself is a compare and nothing more.
+#[cold]
+#[inline(never)]
+fn stale(slot: u8, seats: usize) -> ! {
+    assert!(
+        (slot as usize) < seats,
+        "seat {slot} is no seat of this world: a member that was never enlisted is being asked about"
+    );
+    panic!("seat {slot} was retired: a member that has left the cast is still being asked about")
 }
 
 #[cfg(test)]
@@ -884,27 +1616,31 @@ mod tests {
     /// A level's pull, as an ordinary constant of the cart's own — `Gravity::new` is `const`.
     const GRAVITY: Gravity = Gravity::new();
 
-    /// The world every one of these tests is stepped by: there is only ever the one.
-    const WORLD: World = World::new();
+    /// The world the engine's own tests are stepped by: there is only ever the one, and it seats
+    /// nobody — the cast comes in through [`World::step_cast`], written down by the test itself.
+    const WORLD: World<0> = World::new();
 
-    /// A world with the walls declared on it, for the tests about the scene's own word. Spelled
-    /// as a function because a test wants it inline, and spelled with its type because a bare
-    /// `World::new()` in expression position has no cast ceiling to infer.
-    fn walled() -> World {
+    /// The update's context, which a native build answers out of the ABI's stubs: an empty map,
+    /// and a sheet with nothing flagged on it. What the tests about the world's own cast are
+    /// stepped with.
+    const CTX: Context = Context { _private: () };
+
+    /// A world with the walls declared on it, for the tests about the scene's own word.
+    fn walled() -> World<0> {
         World::new().with_solid(WALL)
     }
 
     #[test]
     #[should_panic(expected = "ceiling")]
     fn a_cast_past_the_wire_s_ceiling_is_refused_loudly() {
-        // A cast a cart hands `step` cannot overrun the wire — its capacity is compile-checked —
-        // so this pins the guard on the engine's own entry, which the console and the tests walk
-        // in through: one entity past the wire's sixty-four is refused where it happened, not
-        // quietly stepped some dearer way.
+        // A world's own cast cannot overrun the wire — its `N` is compile-checked — so this pins
+        // the guard on the engine's own entry, which the console and the tests walk in through:
+        // one member past the wire's sixty-four is refused where it happened, not quietly stepped
+        // some dearer way.
         let mut things: Vec<Thing> = (0..wire::CAP + 1)
             .map(|i| Thing::at(i as f32 * 100.0, 0.0))
             .collect();
-        let mut cast: Vec<&mut dyn Kinetic> = things.iter_mut().map(|t| t.as_kinetic()).collect();
+        let mut cast: Vec<&mut dyn Kinetic> = things.iter_mut().map(Thing::as_kinetic).collect();
         WORLD.step_cast(&mut cast, air, unflagged);
     }
 
@@ -995,7 +1731,7 @@ mod tests {
     #[test]
     fn a_meeting_reaches_both_parties_on_a_cast_too_long_to_snapshot() {
         // The same promise down the long-cast fallback, which walks the `dyn` instead of a
-        // snapshot and counts its neighbours with the stepped entity taken out of the middle —
+        // snapshot and counts its neighbours with the stepped member taken out of the middle —
         // both directions, so the slot arithmetic is pinned on either side of `mine`.
         let mut cast: Vec<Thing> = (0..SNAPSHOT + 2)
             .map(|i| Thing::at(3000.0 + i as f32 * 100.0, 0.0))
@@ -1004,7 +1740,7 @@ mod tests {
         cast[0] = Thing::at(12.0, 0.0).wearing(WALL_SPRITE).moving(-6.0, 0.0);
         let last = cast.len() - 1;
         cast[last] = Thing::at(0.0, 0.0).wearing(CRATE_SPRITE);
-        let mut handed: Vec<&mut dyn Kinetic> = cast.iter_mut().map(|t| t.as_kinetic()).collect();
+        let mut handed: Vec<&mut dyn Kinetic> = cast.iter_mut().map(Thing::as_kinetic).collect();
         WORLD.step_cast(&mut handed, air, flagged);
         assert!(cast[0].contacts.touches(CRATE));
         assert!(
@@ -1019,7 +1755,7 @@ mod tests {
         cast[0] = Thing::at(0.0, 0.0).wearing(CRATE_SPRITE);
         let last = cast.len() - 1;
         cast[last] = Thing::at(12.0, 0.0).wearing(WALL_SPRITE).moving(-6.0, 0.0);
-        let mut handed: Vec<&mut dyn Kinetic> = cast.iter_mut().map(|t| t.as_kinetic()).collect();
+        let mut handed: Vec<&mut dyn Kinetic> = cast.iter_mut().map(Thing::as_kinetic).collect();
         WORLD.step_cast(&mut handed, air, flagged);
         assert!(cast[last].contacts.touches(CRATE));
         assert!(cast[0].contacts.touches(WALL), "the stander before `mine`");
@@ -1047,82 +1783,11 @@ mod tests {
                     .moving(1.0, 1.0)
             })
             .collect();
-        let mut cast: Vec<&mut dyn Kinetic> = things.iter_mut().map(|t| t.as_kinetic()).collect();
+        let mut cast: Vec<&mut dyn Kinetic> = things.iter_mut().map(Thing::as_kinetic).collect();
         walled().step_cast(&mut cast, counted, unflagged);
 
         let map = u32::from(crate::MAP_WIDTH_TILES) * u32::from(crate::MAP_HEIGHT_TILES);
         assert_eq!(asked.get(), 64 * 2 * map);
-    }
-
-    #[test]
-    fn what_an_entity_describes_is_read_after_the_weather_has_had_its_say() {
-        // An entity whose sprite answer depends on its velocity — falling reads as flagged. The
-        // snapshot everyone else meets it through must be taken after the world's forces have
-        // bent the velocities: one defined moment, the same one the wire crossing samples at, so
-        // the two halves of `step` can never disagree about it.
-        struct Faller {
-            body: Body,
-            velocity: Velocity,
-            contacts: Contacts,
-        }
-
-        impl Kinetic for Faller {
-            fn body(&self) -> &Body {
-                &self.body
-            }
-
-            fn body_mut(&mut self) -> &mut Body {
-                &mut self.body
-            }
-
-            fn velocity_mut(&mut self) -> &mut Velocity {
-                &mut self.velocity
-            }
-
-            fn contacts(&self) -> &Contacts {
-                &self.contacts
-            }
-
-            fn contacts_mut(&mut self) -> &mut Contacts {
-                &mut self.contacts
-            }
-
-            fn bounds(&self) -> Bounds {
-                Bounds::of(&self.body, 8, 8)
-            }
-
-            // Wearing the crate cell exactly while it falls: a description worked out from the
-            // velocity, which is what pins when the velocity was read.
-            fn sprite(&self) -> Option<SpriteId> {
-                (self.velocity.dy > 0.0).then_some(CRATE_SPRITE)
-            }
-        }
-
-        let mut faller = Faller {
-            body: Body::new(0.0, 0.0),
-            velocity: Velocity::default(),
-            contacts: Contacts::default(),
-        };
-        let mut sensor = Thing::at(4.0, 0.0);
-        pulled().step_cast(
-            &mut [faller.as_kinetic(), sensor.as_kinetic()],
-            air,
-            flagged,
-        );
-        assert!(
-            sensor.contacts.touches(CRATE),
-            "the snapshot was taken before the pull made the faller a crate"
-        );
-    }
-
-    /// A world under the default pull, for the tests about what the weather does.
-    fn pulled() -> World<Gravity> {
-        World::new().with_forces(GRAVITY)
-    }
-
-    /// A world owning whatever weather a test composes.
-    fn weathered<F: Force>(forces: F) -> World<F> {
-        World::new().with_forces(forces)
     }
 
     #[test]
@@ -1136,30 +1801,43 @@ mod tests {
     }
 
     #[test]
-    fn the_world_s_forces_are_applied_to_every_entity_in_the_cast() {
-        let world = pulled();
-        let (mut one, mut two) = (Mob::new(), Mob::new());
-        world.step_cast(&mut [one.as_kinetic(), two.as_kinetic()], air, unflagged);
-        // One update's pull, both in the velocity each kept and in where each ended up.
-        for mob in [&one, &two] {
-            assert_eq!(mob.velocity, Velocity::new(0.0, Gravity::DEFAULT_STRENGTH));
-            assert_eq!(mob.body.pos(), (0.0, Gravity::DEFAULT_STRENGTH));
+    fn the_world_s_forces_are_applied_to_every_member_of_the_cast() {
+        let mut world: World<2, Gravity> = World::new().with_forces(GRAVITY);
+        let one = pebble(&mut world, 0.0, 0.0);
+        let two = pebble(&mut world, 40.0, 0.0);
+        world.step(&CTX);
+        // One update's pull, both in the velocity each kept and in how far each fell.
+        for (member, x) in [(one, 0.0), (two, 40.0)] {
+            assert_eq!(
+                world.velocity(member),
+                Velocity::new(0.0, Gravity::DEFAULT_STRENGTH)
+            );
+            assert_eq!(world.pos(member), (x, Gravity::DEFAULT_STRENGTH));
         }
 
         for _ in 0..1_000 {
-            world.step_cast(&mut [one.as_kinetic()], air, unflagged);
+            world.step(&CTX);
         }
-        assert_eq!(one.velocity.dy, Gravity::DEFAULT_TERMINAL_VELOCITY);
+        assert_eq!(
+            world.velocity(one).dy,
+            Gravity::DEFAULT_TERMINAL_VELOCITY,
+            "the pull never settled at its terminal velocity"
+        );
     }
 
     #[test]
     fn a_world_owning_no_forces_applies_none() {
-        // The weather belongs to the scene, not to the entity, so a cast stepped by a world that
+        // The weather belongs to the scene, not to the members, so a cast stepped by a world that
         // took none carries on at whatever it was already doing.
-        let mut mob = Mob::moving(0.0, 1.0);
-        step(&mut [mob.as_kinetic()]);
-        assert_eq!(mob.velocity, Velocity::new(0.0, 1.0));
-        assert_eq!(mob.body.pos(), (0.0, 1.0));
+        let mut world: World<1> = World::new();
+        let drifter = world
+            .enlist(0.0, 0.0, 8, 8)
+            .unwrap()
+            .moving(0.0, 1.0)
+            .member();
+        world.step(&CTX);
+        assert_eq!(world.velocity(drifter), Velocity::new(0.0, 1.0));
+        assert_eq!(world.pos(drifter), (0.0, 1.0));
     }
 
     #[test]
@@ -1167,37 +1845,42 @@ mod tests {
         const PULL: Gravity = Gravity::new().with_terminal_velocity(f32::MAX);
         const AIR: Atmosphere = Atmosphere::new();
 
-        let (mut pulled, mut aired) = (Mob::new(), Mob::new());
-        weathered((PULL, AIR)).step_cast(&mut [pulled.as_kinetic()], air, unflagged);
-        weathered((AIR, PULL)).step_cast(&mut [aired.as_kinetic()], air, unflagged);
+        let (pulled, pulled_first) = one_update_under((PULL, AIR));
+        let (aired, aired_first) = one_update_under((AIR, PULL));
 
         // The drag that runs before the pull has not felt it yet, so the first update — and every
         // one after it — differs by exactly that much.
-        assert_eq!(aired.velocity.dy, Gravity::DEFAULT_STRENGTH);
+        assert_eq!(aired.velocity(aired_first).dy, Gravity::DEFAULT_STRENGTH);
         assert!(
-            pulled.velocity.dy < aired.velocity.dy,
+            pulled.velocity(pulled_first).dy < aired.velocity(aired_first).dy,
             "the order made no difference: {} against {}",
-            pulled.velocity.dy,
-            aired.velocity.dy
+            pulled.velocity(pulled_first).dy,
+            aired.velocity(aired_first).dy
         );
     }
 
     #[test]
-    fn mass_is_read_off_the_entity_by_the_forces_the_world_runs() {
-        // The same wind on two entities that differ in nothing but what they weigh, and it is the
+    fn mass_is_read_off_the_seat_by_the_forces_the_world_runs() {
+        // The same wind on two members that differ in nothing but what they weigh, and it is the
         // world that carries the one to the other.
-        let (mut light, mut heavy) = (Mob::with_mass(0.5), Mob::with_mass(4.0));
-        weathered(Wind::new(2.0)).step_cast(
-            &mut [light.as_kinetic(), heavy.as_kinetic()],
-            air,
-            unflagged,
-        );
+        let mut world: World<2, Wind> = World::new().with_forces(Wind::new(2.0));
+        let light = world.enlist(0.0, 0.0, 8, 8).unwrap().weighing(0.5).member();
+        let heavy = world
+            .enlist(0.0, 40.0, 8, 8)
+            .unwrap()
+            .weighing(4.0)
+            .member();
+        world.step(&CTX);
         assert!(
-            light.velocity.dx > heavy.velocity.dx,
+            world.velocity(light).dx > world.velocity(heavy).dx,
             "the mass was not read: {} against {}",
-            light.velocity.dx,
-            heavy.velocity.dx
+            world.velocity(light).dx,
+            world.velocity(heavy).dx
         );
+
+        // And it is the seat's own, changed where it lives.
+        world.set_mass(heavy, 0.5);
+        assert_eq!(world.mass(heavy), 0.5);
     }
 
     #[test]
@@ -1205,19 +1888,420 @@ mod tests {
         struct Updraft;
 
         impl Force for Updraft {
-            fn apply(&self, entity: &mut dyn Kinetic) {
-                entity.velocity_mut().dy -= 0.5;
+            fn apply(&self, subject: &mut Subject) {
+                subject.velocity_mut().dy -= 0.5;
             }
         }
 
-        let mut mob = Mob::new();
-        weathered((GRAVITY, Wind::new(1.0), Updraft)).step_cast(
-            &mut [mob.as_kinetic()],
-            air,
-            unflagged,
+        let (world, member) = one_update_under((GRAVITY, Wind::new(1.0), Updraft));
+        assert_eq!(world.velocity(member).dx, 0.05);
+        assert_eq!(world.velocity(member).dy, Gravity::DEFAULT_STRENGTH - 0.5);
+    }
+
+    #[test]
+    fn no_force_reaches_a_prop_the_cart_drives_itself() {
+        // The pull handed to the step reaches everything but the prop, which is the cart's to
+        // move and the world's only to know about.
+        let mut world: World<2, Gravity> = World::new().with_forces(GRAVITY);
+        let faller = pebble(&mut world, 0.0, 0.0);
+        let lift = world.enlist(0.0, 40.0, 8, 8).unwrap().prop().member();
+        for _ in 0..8 {
+            world.step(&CTX);
+        }
+        assert!(world.pos(faller).1 > 0.0, "the pull missed the faller");
+        assert_eq!(world.pos(lift), (0.0, 40.0), "the prop was moved");
+        assert_eq!(world.velocity(lift), Velocity::default());
+    }
+
+    /// One update of `forces` over a single member, and the world it was stepped in.
+    fn one_update_under<F: Force>(forces: F) -> (World<1, F>, Member) {
+        let mut world: World<1, F> = World::new().with_forces(forces);
+        let member = pebble(&mut world, 0.0, 0.0);
+        world.step(&CTX);
+
+        (world, member)
+    }
+
+    /// A sprite-sized member seated at (`x`, `y`), saying nothing about itself — what most of a
+    /// cast is.
+    fn pebble<const N: usize, F: Force>(world: &mut World<N, F>, x: f32, y: f32) -> Member {
+        world.enlist(x, y, 8, 8).unwrap().member()
+    }
+
+    #[test]
+    fn a_member_takes_the_lowest_empty_seat_and_a_full_house_turns_one_away() {
+        let mut world: World<3> = World::new();
+        let seats: Vec<Member> = (0..3)
+            .map(|i| pebble(&mut world, i as f32 * 16.0, 0.0))
+            .collect();
+        assert_eq!(
+            seats.iter().map(Member::seat).collect::<Vec<_>>(),
+            [0, 1, 2],
+            "the seats were not filled in order"
         );
-        assert_eq!(mob.velocity.dx, 0.05);
-        assert_eq!(mob.velocity.dy, Gravity::DEFAULT_STRENGTH - 0.5);
+        assert!(
+            world.enlist(0.0, 0.0, 8, 8).is_none(),
+            "a fourth member was seated in a world of three"
+        );
+
+        // And a seat freed in the middle is the next one filled, so a cast seated in the order the
+        // scene works stays in it.
+        world.retire(seats[1]);
+        let understudy = pebble(&mut world, 64.0, 0.0);
+        assert_eq!(understudy.seat(), 1);
+        assert_eq!(world.pos(understudy), (64.0, 0.0));
+    }
+
+    #[test]
+    fn an_enlisting_abandoned_mid_chain_gives_its_seat_straight_back() {
+        // `#[must_use]` is a lint, and a lint can be shrugged off — `let _`, or an unwind out of
+        // the middle of a chain. The claim itself must not survive the shrug: a seat is held by a
+        // handle or by the chain still describing it, and never by nothing.
+        let mut world: World<1> = World::new();
+        let _ = world.enlist(10.0, 10.0, 8, 8);
+        let unfinished = world.enlist(5.0, 5.0, 8, 8).unwrap().wearing(CRATE_SPRITE);
+        drop(unfinished);
+
+        // The world of one has its one seat back — and nothing the abandoned chains wrote is
+        // waiting in it for whoever is seated next.
+        let member = world
+            .enlist(0.0, 0.0, 8, 8)
+            .expect("the seat was leaked")
+            .member();
+        assert!(world.seated(member));
+        assert_eq!(world.pos(member), (0.0, 0.0));
+        assert_eq!(world.sprite(member), None);
+    }
+
+    #[test]
+    fn a_bare_enlisting_is_a_whole_member_already() {
+        let mut world: World<1> = World::new();
+        let bare = world.enlist(4.5, -2.25, 8, 8).unwrap().member();
+        let record = &world.records[bare.seat()];
+        // Where it stands, exactly and as it draws: the position floored, as a fresh body's is.
+        assert_eq!((record.x, record.y), (4.5, -2.25));
+        assert_eq!((record.rx, record.ry), (4, -3));
+        // The rectangle over the sprite, and the whole of it.
+        assert_eq!((record.bx, record.by, record.bw, record.bh), (4, -3, 8, 8));
+        // Standing still, wearing nothing, told about everything, held nowhere, moved by the
+        // world.
+        assert_eq!((record.dx, record.dy), (0.0, 0.0));
+        assert_eq!(record.sprite, wire::UNWORN);
+        assert_eq!(record.heeds, BitFlags::<SpriteFlag>::all().bits());
+        assert_eq!(record.meta, 0);
+        // And of the weight nobody has to think about, with the rectangle over the sprite.
+        assert_eq!(world.mass(bare), 1.0);
+        assert_eq!(world.offsets[bare.seat()], (0, 0));
+    }
+
+    #[test]
+    fn the_scene_s_word_for_wall_is_a_member_s_unless_it_has_one_of_its_own() {
+        let mut world: World<3> = World::new().with_solid(WALL);
+
+        // Nothing said: the scene's word, whatever it is.
+        let scene = pebble(&mut world, 0.0, 0.0);
+        assert_eq!(
+            world.records[scene.seat()].solid,
+            BitFlags::from(WALL).bits()
+        );
+        assert_eq!(world.solid(scene), None);
+
+        // A rule of its own replaces it rather than adding to it — the empty one included.
+        let own = world
+            .enlist(0.0, 40.0, 8, 8)
+            .unwrap()
+            .stopped_by(CRATE)
+            .member();
+        assert_eq!(
+            world.records[own.seat()].solid,
+            BitFlags::from(CRATE).bits()
+        );
+        let ghost = world
+            .enlist(0.0, 80.0, 8, 8)
+            .unwrap()
+            .stopped_by(BitFlags::empty())
+            .member();
+        assert_eq!(world.records[ghost.seat()].solid, 0);
+        assert_eq!(world.solid(ghost), Some(BitFlags::empty()));
+    }
+
+    #[test]
+    fn everything_an_enlisting_says_reaches_the_seat_it_fills() {
+        const ROOM: Bounds = Bounds::new(-8, 4, 100, 64);
+
+        let mut world: World<1> = World::new();
+        let member = world
+            .enlist(10.0, 20.0, 6, 4)
+            .unwrap()
+            .moving(1.5, -0.5)
+            .wearing(SpriteId(9))
+            .heeding(CRATE)
+            .confined_to(ROOM)
+            .offset(1, 2)
+            .prop()
+            .weighing(3.0)
+            .member();
+
+        let record = &world.records[member.seat()];
+        assert_eq!((record.dx, record.dy), (1.5, -0.5));
+        assert_eq!(record.sprite, 9);
+        assert_eq!(record.heeds, BitFlags::from(CRATE).bits());
+        assert_eq!(
+            (record.cx, record.cy, record.cw, record.ch),
+            (-8, 4, 100, 64)
+        );
+        assert_eq!(record.meta, wire::PROP | wire::CONFINED);
+        // The rectangle sits where the offset put it, and is the size it was given.
+        assert_eq!((record.bx, record.by, record.bw, record.bh), (11, 22, 6, 4));
+        assert_eq!(world.mass(member), 3.0);
+    }
+
+    #[test]
+    fn a_rectangle_at_the_end_of_the_coordinate_space_is_held_rather_than_wrapped() {
+        assert_eq!(corner((i16::MAX, i16::MIN), (8, -8)), (i16::MAX, i16::MIN));
+        assert_eq!(corner((0, 0), (-4, 6)), (-4, 6));
+    }
+
+    #[test]
+    #[should_panic(expected = "seat 0 was retired")]
+    fn a_retired_member_s_handle_is_nobody() {
+        let mut world: World<2> = World::new();
+        let member = pebble(&mut world, 0.0, 0.0);
+        assert!(world.seated(member));
+        world.retire(member);
+        // The asking-first way round, for a cart that would rather not find out the hard way.
+        assert!(!world.seated(member));
+
+        world.pos(member);
+    }
+
+    #[test]
+    #[should_panic(expected = "seat 1 was retired")]
+    fn a_seat_let_again_does_not_answer_the_last_member_s_handle() {
+        let mut world: World<2> = World::new();
+        let _ = pebble(&mut world, 0.0, 0.0);
+        let gone = pebble(&mut world, 16.0, 0.0);
+        world.retire(gone);
+        let successor = pebble(&mut world, 32.0, 0.0);
+        // The same seat, and not the same member: the handle to whoever left it must not answer
+        // for whoever took it.
+        assert_eq!(successor.seat(), gone.seat());
+        assert_ne!(successor, gone);
+        assert_eq!(world.pos(successor), (32.0, 0.0));
+
+        world.set_velocity(gone, Velocity::new(1.0, 0.0));
+    }
+
+    #[test]
+    fn an_empty_seat_is_nothing_to_anybody() {
+        // The zero-ABI trick, pinned where it has to hold: an empty seat crosses the wire as
+        // `wire::VACANT` and is stepped by the *unmodified* engine, which has never heard of
+        // vacancy. So the two crates below must meet through the hole between them exactly as
+        // they meet with nothing there — the empty seat wears nothing, listens for nothing, is
+        // never moved and is never told anything.
+        let mut hole = wire::Recast::of(&wire::VACANT);
+        let mut left = Thing::at(0.0, 20.0).wearing(CRATE_SPRITE).stopped_by(CRATE);
+        let mut right = Thing::at(16.0, 20.0)
+            .wearing(CRATE_SPRITE)
+            .stopped_by(CRATE);
+        for _ in 0..3 {
+            left.velocity = Velocity::new(2.0, 0.0);
+            right.velocity = Velocity::new(-2.0, 0.0);
+            WORLD.step_cast(
+                &mut [left.as_kinetic(), &mut hole, right.as_kinetic()],
+                air,
+                flagged,
+            );
+        }
+
+        // The very answers the same pair gives with nobody between them.
+        assert_eq!(left.body.pos(), (4.0, 20.0));
+        assert_eq!(right.body.pos(), (12.0, 20.0));
+        assert!(left.contacts.right() && left.contacts.touches(CRATE));
+        assert!(right.contacts.left() && right.contacts.touches(CRATE));
+        // And the seat itself went nowhere and was told nothing.
+        assert_eq!(hole.body().pos(), (0.0, 0.0));
+        assert_eq!(*hole.contacts(), Contacts::empty());
+    }
+
+    #[test]
+    fn a_rectangle_keeps_its_seat_on_the_body_the_step_moved() {
+        // The step answers the body and leaves the rectangle's corner alone — the wire's in/out
+        // split — so it is the world that has to put it back, every step, offset and all.
+        let mut world: World<1> = World::new();
+        let inset = world
+            .enlist(0.0, 0.0, 4, 8)
+            .unwrap()
+            .offset(2, 0)
+            .moving(3.0, 1.0)
+            .member();
+        assert_eq!(world.bounds(inset), Bounds::new(2, 0, 4, 8));
+        world.step(&CTX);
+        assert_eq!(world.pos(inset), (3.0, 1.0));
+        assert_eq!(world.bounds(inset), Bounds::new(5, 1, 4, 8));
+
+        // And a rectangle re-cut mid-animation is met at its new size from the next step on.
+        world.resize(inset, 8, 4);
+        world.set_offset(inset, 0, 4);
+        assert_eq!(world.bounds(inset), Bounds::new(3, 5, 8, 4));
+    }
+
+    #[test]
+    fn a_teleport_re_snaps_the_drawn_pixel_and_takes_the_rectangle_with_it() {
+        let mut world: World<1> = World::new();
+        let prop = world
+            .enlist(0.0, 0.0, 8, 8)
+            .unwrap()
+            .offset(1, -1)
+            .prop()
+            .member();
+        world.set_pos(prop, 40.9, 12.2);
+        assert_eq!(world.pos(prop), (40.9, 12.2));
+        assert_eq!(world.draw_pos(prop), (40, 12));
+        assert_eq!(world.bounds(prop), Bounds::new(41, 11, 8, 8));
+    }
+
+    #[test]
+    fn what_a_member_is_told_after_it_is_seated_lands_in_its_seat() {
+        // The seat is where a member lives now, so everything an enlisting said once can be said
+        // again — and what is said reaches the very bytes the next step is read out of.
+        let mut world: World<1> = World::new().with_solid(WALL);
+        let walker = pebble(&mut world, 0.0, 0.0);
+        let seat = walker.seat();
+
+        world.set_sprite(walker, Some(CRATE_SPRITE));
+        assert_eq!(world.records[seat].sprite, CRATE_SPRITE.0 as u16);
+        world.set_sprite(walker, None);
+        assert_eq!(world.records[seat].sprite, wire::UNWORN);
+
+        world.set_heeds(walker, CRATE);
+        assert_eq!(world.records[seat].heeds, BitFlags::from(CRATE).bits());
+
+        // A rule of its own replaces the scene's; handing it back takes the scene's word as it
+        // stands now.
+        world.set_solid(walker, Some(CRATE.into()));
+        assert_eq!(world.records[seat].solid, BitFlags::from(CRATE).bits());
+        world.set_solid(walker, None);
+        assert_eq!(world.records[seat].solid, BitFlags::from(WALL).bits());
+
+        world.set_confines(walker, Some(Bounds::new(-8, 4, 100, 64)));
+        let record = &world.records[seat];
+        assert_eq!(record.meta & wire::CONFINED, wire::CONFINED);
+        assert_eq!(
+            (record.cx, record.cy, record.cw, record.ch),
+            (-8, 4, 100, 64)
+        );
+        world.set_confines(walker, None);
+        assert_eq!(world.records[seat].meta & wire::CONFINED, 0);
+    }
+
+    #[test]
+    fn what_a_member_is_described_as_reads_back_through_its_handle() {
+        // The world owns the description now, so the cart asks rather than remembers: whoever
+        // draws the member and whoever wonders what everybody else meets in it read the same
+        // answer, through the same handle — after the enlisting, and after every setter.
+        let mut world: World<1> = World::new().with_solid(WALL);
+        let walker = pebble(&mut world, 0.0, 0.0);
+
+        assert_eq!(world.sprite(walker), None);
+        assert_eq!(world.solid(walker), None, "no rule of its own yet");
+        assert_eq!(world.heeds(walker), BitFlags::all());
+        assert_eq!(world.confines(walker), None);
+
+        world.set_sprite(walker, Some(CRATE_SPRITE));
+        world.set_solid(walker, Some(WALL | CRATE));
+        world.set_heeds(walker, CRATE);
+        world.set_confines(walker, Some(Bounds::new(-8, 4, 100, 64)));
+        assert_eq!(world.sprite(walker), Some(CRATE_SPRITE));
+        assert_eq!(world.solid(walker), Some(WALL | CRATE));
+        assert_eq!(world.heeds(walker), CRATE.into());
+        assert_eq!(world.confines(walker), Some(Bounds::new(-8, 4, 100, 64)));
+
+        // Handed back to the scene's word, the member has no rule of its own to report — the
+        // scene's word is not its answer, however much it is stopped by it.
+        world.set_solid(walker, None);
+        assert_eq!(world.solid(walker), None);
+    }
+
+    #[test]
+    fn the_scene_s_word_for_wall_reaches_everybody_who_goes_by_it() {
+        // Said after the cast is seated, which a level that changes its mind does: the member with
+        // no rule of its own takes the new word, and the one that named the empty rule keeps it.
+        let mut world: World<2> = World::new();
+        let walker = pebble(&mut world, 0.0, 0.0);
+        let ghost = world
+            .enlist(0.0, 40.0, 8, 8)
+            .unwrap()
+            .stopped_by(BitFlags::empty())
+            .member();
+        let mut world = world.with_solid(WALL);
+        assert_eq!(
+            world.records[walker.seat()].solid,
+            BitFlags::from(WALL).bits()
+        );
+        assert_eq!(world.records[ghost.seat()].solid, 0);
+
+        // And said in place, which is how a world that was placed rather than built says it: the
+        // same word reaching the same seats.
+        world.declare_solid(CRATE);
+        assert_eq!(
+            world.records[walker.seat()].solid,
+            BitFlags::from(CRATE).bits()
+        );
+        assert_eq!(world.records[ghost.seat()].solid, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "seat 255 is no seat of this world")]
+    fn a_handle_to_nobody_is_nobody_in_any_world() {
+        // What a cart's placed state holds for an actor it has not enlisted yet: a seat no world
+        // has. Asking is the same bug as asking about somebody who left, and says which it was.
+        let mut world: World<2> = World::new();
+        assert!(!world.seated(Member::NOBODY));
+        let _ = pebble(&mut world, 0.0, 0.0);
+        assert!(!world.seated(Member::NOBODY));
+
+        world.pos(Member::NOBODY);
+    }
+
+    #[test]
+    fn a_whole_world_can_be_spelled_out_as_a_constant() {
+        // What the `game!` preset needs of this module: a world, weather and all, placed by the
+        // loader rather than built by anything that runs. A cast is seated in `Game::boot`, and
+        // the scene's word for a wall is said there too — the one thing the builder cannot be.
+        const LEVEL: World<2, Gravity> = World::new().with_forces(Gravity::new());
+        // And it really does initialize a `static`, which is where a cart's scene lives.
+        static SCENE: World<2, Gravity> = LEVEL;
+        assert_eq!(SCENE.high_water(), 0);
+
+        let mut world = LEVEL;
+        world.declare_solid(WALL);
+        let member = pebble(&mut world, 0.0, 0.0);
+        assert_eq!(
+            world.records[member.seat()].solid,
+            BitFlags::from(WALL).bits()
+        );
+    }
+
+    #[test]
+    fn a_member_is_held_inside_the_limits_it_is_confined_to() {
+        let mut world: World<1> = World::new();
+        let walker = world
+            .enlist(-4.0, 8.0, 8, 8)
+            .unwrap()
+            .moving(-2.0, 0.5)
+            .confined_to(Bounds::screen())
+            .member();
+        world.step(&CTX);
+        assert!(world.contacts(walker).left());
+        assert_eq!(world.pos(walker), (0.0, 8.5));
+
+        // And limits taken away are a member let go.
+        world.set_confines(walker, None);
+        world.set_velocity(walker, Velocity::new(-2.0, 0.0));
+        world.step(&CTX);
+        assert_eq!(world.pos(walker), (-2.0, 8.5));
+        assert_eq!(world.contacts(walker), Contacts::empty());
     }
 
     #[test]
@@ -1385,7 +2469,7 @@ mod tests {
             let mut cast: Vec<&mut dyn Kinetic> = Vec::with_capacity(padding + 2);
             cast.push(left.as_kinetic());
             cast.push(right.as_kinetic());
-            cast.extend(crowd.iter_mut().map(Kinetic::as_kinetic));
+            cast.extend(crowd.iter_mut().map(Thing::as_kinetic));
             WORLD.step_cast(&mut cast, air, flagged);
         }
 
@@ -1754,19 +2838,18 @@ mod tests {
     #[test]
     fn a_prop_is_met_where_the_cart_parked_it_and_never_moved() {
         // The patrolling hazard: the cart walks it on rails of its own, and the world only has to
-        // know it is there. The pull handed to the step reaches everything but the prop.
+        // know it is there.
         let mut hazard = Thing::at(16.0, 20.0).wearing(CRATE_SPRITE).parked();
         let mut walker = Thing::at(0.0, 20.0).stopped_by(CRATE);
-        let world = pulled();
         for _ in 0..8 {
             walker.velocity = Velocity::new(2.0, 0.0);
-            world.step_cast(
+            WORLD.step_cast(
                 &mut [hazard.as_kinetic(), walker.as_kinetic()],
                 air,
                 flagged,
             );
         }
-        // The prop has neither fallen nor drifted, and nothing was ever written on it.
+        // The prop has neither been moved nor written on.
         assert_eq!(hazard.body.pos(), (16.0, 20.0));
         assert_eq!(*hazard.velocity_mut(), Velocity::default());
         assert_eq!(hazard.contacts, Contacts::empty());
@@ -1872,14 +2955,14 @@ mod tests {
         // nothing, because nothing on it was ever asked.
         let mut walker = Thing::at(0.0, 0.0).stopped_by(WALL);
         walker.velocity = Velocity::new(4.0, 0.0);
-        let mapful: World = World::new();
+        let mapful: World<0> = World::new();
         mapful.step_cast(&mut [walker.as_kinetic()], map(&[".#"]), unflagged);
         assert_eq!(walker.body.pos().0, 0.0);
         assert!(walker.contacts.right() && walker.contacts.touches(WALL));
 
         let mut drifter = Thing::at(0.0, 0.0).stopped_by(WALL);
         drifter.velocity = Velocity::new(4.0, 0.0);
-        let scenery: World = World::mapless();
+        let scenery: World<0> = World::mapless();
         scenery.step_cast(&mut [drifter.as_kinetic()], map(&[".#"]), unflagged);
         assert_eq!(drifter.body.pos().0, 4.0);
         assert_eq!(drifter.contacts, Contacts::empty());
@@ -1894,7 +2977,7 @@ mod tests {
             .stopped_by(CRATE)
             .within(Bounds::new(0, 0, 64, 64));
         walker.velocity = Velocity::new(4.0, 0.0);
-        let scenery: World = World::mapless();
+        let scenery: World<0> = World::mapless();
         scenery.step_cast(
             &mut [crate_.as_kinetic(), walker.as_kinetic()],
             map(&["##"]),
@@ -2057,6 +3140,11 @@ mod tests {
         fn parked(mut self) -> Self {
             self.prop = true;
 
+            self
+        }
+
+        /// This one as the trait object the engine's cast is made of.
+        fn as_kinetic(&mut self) -> &mut dyn Kinetic {
             self
         }
     }

@@ -51,6 +51,17 @@ Each call runs under a fuel budget (~128K instructions; see LIMITS.md).
 Exhausting it traps with a "ran too long" error screen — infinite loops
 cannot hang the console.
 
+`pixel8_init` need not be where a cart's state comes from. Under the SDK's
+preset `game!` forms the state is placed by instantiation — the game lives in a
+`static` written into the module's data segment, already there by the time
+anything is called — and `pixel8_init` runs only what cannot be spelled as
+data: reading the store, asking the clock, handing a physics cast its seats
+(the SDK puts that in `Game::boot`, which `pixel8_init` calls). A cart built
+with the SDK's `defer` form, or a hand-written one, is equally free to construct
+its whole state inside `pixel8_init` instead; the ABI's contract is only that
+the call runs once, before the first update. It is fuel-metered like any other,
+so an init that never returns is an error screen rather than a hang.
+
 ## Guest exports (optional)
 
 | export             | signature   | called                                       |
@@ -61,7 +72,10 @@ cannot hang the console.
 `pixel8_fps` reports the cart's logical frame rate. The SDK emits it from
 every cart; `30` and `60` are honored, and `60` is the default. A missing
 export, or any other value, also means 60, so a hand-written cart that
-omits it still runs.
+omits it still runs. It is queried after `pixel8_init`, so it may depend on
+state init builds; until then the `fps` import answers the host default,
+which is why the SDK answers `Game::boot`'s `Context::fps` itself, from the
+cart's own declared rate.
 
 `pixel8_mem_used` reports the cart's committed-memory high-water in bytes — the
 highest its footprint (shadow-stack reserve + statics + heap) has ever reached.
@@ -129,12 +143,21 @@ camera), so set them in `pixel8_init` or each frame as needed.
 | `step_cast` | `(cast: *mut u8, len: u32, cfg: u32)` | step a whole physics cast in place; see the record layout below   |
 
 The one import behind the SDK's `physics::World::step` (the `physics` cargo feature): the cart
-writes its whole cast into a buffer — one 44-byte record per entity, up to 64 of them — and the
+hands over a buffer of its whole cast — one 44-byte record per member, up to 64 of them — and the
 console steps it natively in one call: forces excepted (they are cart code and run before the
 call), the whole of the resolution — walls on the map and in the cast, expulsion, confines, the
 contacts — happens host-side, over the console's own map and sprite-flag state, and costs the
 cart no fuel. `cfg` bit 0 is whether the map's tiles take part at all (`World::mapless` clears
 it); `len` past 64 or a range outside cart memory steps nothing.
+
+The buffer is the cart's own state rather than a snapshot of it: a `World<N>` *is* `N` of these
+records, so the step is a pointer to where the cast already lives and the answers land in it. A
+raw ABI client may do the same, and reuse its buffer across updates, because the host writes back
+only the output fields below. A seat nobody is in travels as an otherwise-empty record wearing
+nothing (`sprite = 0xffff`) with `meta` bit 0 set — a prop with no rectangle, heeding nothing —
+which the engine is inert against without knowing anything about vacancy: props are never moved and never given contacts,
+and a zero-size rectangle overlaps nothing. `len` is the high-water mark, one past the last seat
+taken.
 
 Each record, little-endian, offsets in bytes:
 
@@ -156,8 +179,8 @@ Each record, little-endian, offsets in bytes:
 | 43  | `u8`  | —             |           | padding                                                       |
 
 The engine that answers is the SDK's own `physics` code, compiled into the console, so the
-resolution itself cannot drift between the wire and the SDK's native path; what each side adds is
-marshalling — a snapshot of the cast in, the answers written back — and
+resolution itself cannot drift between the wire and the SDK's native path; what the host side adds
+is the decoding of these bytes and the writing back of the answers, and
 `pixel8/src/physics/wire.rs` is the layout's single source of truth for it.
 
 The host's work per call is bounded by what a cast can name, not by what a coordinate can: each
