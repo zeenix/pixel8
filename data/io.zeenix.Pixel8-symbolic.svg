@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="16px" viewBox="0 0 16 16" width="16px" xmlns="http://www.w3.org/2000/svg">
+    <path d="m 2 4 v 10 h 12 v -10 z m 3 5 h 2 v 3 h -2 z m 4 0 h 2 v 3 h -2 z m 0 0"/>
+    <path d="m 2 16 h 2 v -3 h -2 z m 0 0"/>
+    <path d="m 12 16 h 2 v -3 h -2 z m 0 0"/>
+    <path d="m 7 16 h 2 v -3 h -2 z m 0 0"/>
+    <path d="m 0 2 h 2 v -2 h -2 z m 0 0"/>
+    <path d="m 4 2 h 2 v -2 h -2 z m 0 0"/>
+    <path d="m 0 4 h 4 v -2 h -4 z m 0 0"/>
+    <path d="m 10 2 h 2 v -2 h -2 z m 0 0"/>
+    <path d="m 14 2 h 2 v -2 h -2 z m 0 0"/>
+    <path d="m 12 4 h 4 v -2 h -4 z m 0 0"/>
+</svg>
