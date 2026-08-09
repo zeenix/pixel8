@@ -232,4 +232,3 @@ cargo console -- examples/platformer
 ```
 
 then type `run`.
-
