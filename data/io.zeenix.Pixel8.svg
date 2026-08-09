@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="128px" viewBox="0 0 128 128" width="128px" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <linearGradient id="a" gradientUnits="userSpaceOnUse" x1="12.000265" x2="115.999741" y1="73.999863" y2="73.999863">
+        <stop offset="0" stop-color="#e5a50a"/>
+        <stop offset="0.0384592" stop-color="#f5c211"/>
+        <stop offset="0.0769209" stop-color="#e5a50a"/>
+        <stop offset="0.918319" stop-color="#e5a50a"/>
+        <stop offset="0.961541" stop-color="#f5c211"/>
+        <stop offset="1" stop-color="#e5a50a"/>
+    </linearGradient>
+    <path d="m 20 32 h 88 c 4.417969 0 8 3.582031 8 8 v 68 c 0 4.417969 -3.582031 8 -8 8 h -88 c -4.417969 0 -8 -3.582031 -8 -8 v -68 c 0 -4.417969 3.582031 -8 8 -8 z m 0 0" fill="url(#a)"/>
+    <path d="m 20 13 h 88 c 4.417969 0 8 3.582031 8 8 v 80 c 0 4.417969 -3.582031 8 -8 8 h -88 c -4.417969 0 -8 -3.582031 -8 -8 v -80 c 0 -4.417969 3.582031 -8 8 -8 z m 0 0" fill="#f8e45c"/>
+    <path d="m 20 18 h 88 c 2.210938 0 4 1.789062 4 4 v 46 c 0 2.210938 -1.789062 4 -4 4 h -88 c -2.210938 0 -4 -1.789062 -4 -4 v -46 c 0 -2.210938 1.789062 -4 4 -4 z m 0 0" fill="#3d3846"/>
+    <path d="m 84 43 h 9 v 8 h -9 z m 0 0" fill="#29adff"/>
+    <path d="m 96 39 h -6 v 16 h 6 z m 0 0" fill="#29adff"/>
+    <path d="m 96 36 h -3 v 22 h 3 z m 0 0" fill="#29adff"/>
+    <path d="m 105 43 h -3 v 8 h 3 z m 0 0" fill="#29adff"/>
+    <path d="m 102 40 h -3 v 3 h 3 z m 0 0" fill="#29adff"/>
+    <path d="m 99 50.859375 h 3 v 3 h -3 z m 0 0" fill="#29adff"/>
+    <path d="m 88 97 c 0 3.3125 -2.6875 6 -6 6 s -6 -2.6875 -6 -6 s 2.6875 -6 6 -6 s 6 2.6875 6 6 z m 0 0" fill="#a20031"/>
+    <path d="m 104 87 c 0 3.3125 -2.6875 6 -6 6 s -6 -2.6875 -6 -6 s 2.6875 -6 6 -6 s 6 2.6875 6 6 z m 0 0" fill="#0067a6"/>
+    <path d="m 88 94 c 0 3.3125 -2.6875 6 -6 6 s -6 -2.6875 -6 -6 s 2.6875 -6 6 -6 s 6 2.6875 6 6 z m 0 0" fill="#ff004d"/>
+    <path d="m 104 84 c 0 3.3125 -2.6875 6 -6 6 s -6 -2.6875 -6 -6 s 2.6875 -6 6 -6 s 6 2.6875 6 6 z m 0 0" fill="#29adff"/>
+    <path d="m 28 85 h 20 c 2.210938 0 4 1.789062 4 4 v 2 c 0 2.210938 -1.789062 4 -4 4 h -20 c -2.210938 0 -4 -1.789062 -4 -4 v -2 c 0 -2.210938 1.789062 -4 4 -4 z m 0 0" fill="#241f31"/>
+    <path d="m 42 90 v 11 c 0 2.210938 -1.789062 4 -4 4 s -4 -1.789062 -4 -4 v -11 c 0 -2.210938 1.789062 -4 4 -4 s 4 1.789062 4 4 z m 0 0" fill="#241f31"/>
+    <path d="m 28 83.953125 h 20 c 2.210938 0 4 1.789063 4 4 v 0.046875 c 0 2.210938 -1.789062 4 -4 4 h -20 c -2.210938 0 -4 -1.789062 -4 -4 v -0.046875 c 0 -2.210937 1.789062 -4 4 -4 z m 0 0" fill="#77767b"/>
+    <path d="m 42 78 v 20 c 0 2.210938 -1.789062 4 -4 4 s -4 -1.789062 -4 -4 v -20 c 0 -2.210938 1.789062 -4 4 -4 s 4 1.789062 4 4 z m 0 0" fill="#77767b"/>
+    <g fill="#f8e45c">
+        <path d="m 63 37 h 3 v 8 h -3 z m 0 0"/>
+        <path d="m 63 56 h 3 v -8 h -3 z m 0 0"/>
+        <path d="m 60 48 h 3 v -3 h -3 z m 0 0"/>
+        <path d="m 66 34 h 3 v 3 h -3 z m 0 0"/>
+        <path d="m 66 55.738281 h 3 v 3 h -3 z m 0 0"/>
+        <path d="m 78 37 h -3 v 8 h 3 z m 0 0"/>
+        <path d="m 78 56 h -3 v -8 h 3 z m 0 0"/>
+        <path d="m 81 48 h -3 v -3 h 3 z m 0 0"/>
+        <path d="m 75 34 h -3 v 3 h 3 z m 0 0"/>
+        <path d="m 75 55.738281 h -3 v 3 h 3 z m 0 0"/>
+    </g>
+    <path d="m 29 44 h 21 v 12 h -21 z m 0 0" fill="#ff004d"/>
+    <path d="m 29 59 h 3 v -3 h -3 z m 0 0" fill="#ff004d"/>
+    <path d="m 47 59 h 3 v -3 h -3 z m 0 0" fill="#ff004d"/>
+    <path d="m 41 59 h 3 v -3 h -3 z m 0 0" fill="#ff004d"/>
+    <path d="m 35 59 h 3 v -3 h -3 z m 0 0" fill="#ff004d"/>
+    <path d="m 32 41 h 15 v 15 h -15 z m 0 0" fill="#ff004d"/>
+    <path d="m 41 53 h 3 v -6 h -3 z m 0 0" fill="#ffffff"/>
+    <path d="m 34 53 h 3 v -6 h -3 z m 0 0" fill="#ffffff"/>
+    <path d="m 41 53 h 3 v -3 h -3 z m 0 0" fill="#3d3846"/>
+    <path d="m 34 53 h 3 v -3 h -3 z m 0 0" fill="#3d3846"/>
+    <path d="m 23 38 h 6 v 6 h -6 z m 0 0" fill="#ff004d"/>
+    <path d="m 20 35 h 3 v 3 h -3 z m 0 0" fill="#ff004d"/>
+    <path d="m 26 35 h 3 v 3 h -3 z m 0 0" fill="#ff004d"/>
+    <path d="m 56 38 h -6 v 6 h 6 z m 0 0" fill="#ff004d"/>
+    <path d="m 59 35 h -3 v 3 h 3 z m 0 0" fill="#ff004d"/>
+    <path d="m 53 35 h -3 v 3 h 3 z m 0 0" fill="#ff004d"/>
+</svg>

@@ -1,3 +1,6 @@
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/zeenix/pixel8/4df0e77aa1505bc214a6d6796d034ad0792cbd02/data/io.zeenix.Pixel8.svg"
+)]
 #![doc = include_str!("../README.md")]
 #![cfg_attr(not(feature = "std"), no_std)]
 
