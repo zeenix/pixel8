@@ -1,6 +1,24 @@
-# Pixel8
+<p align="center">
+  <a href="https://github.com/zeenix/pixel8/actions/workflows/ci.yml">
+    <img alt="Build Status" src="https://github.com/zeenix/pixel8/actions/workflows/ci.yml/badge.svg">
+  </a>
+  <a href="https://docs.rs/pixel8/">
+    <img alt="API Documentation" src="https://docs.rs/pixel8/badge.svg">
+  </a>
+  <a href="https://crates.io/crates/pixel8">
+    <img alt="crates.io" src="https://img.shields.io/crates/v/pixel8">
+  </a>
+</p>
 
-**A tiny fantasy console where the games are written in Rust.**
+<p align="center">
+  <img alt="Project icon" src="https://raw.githubusercontent.com/zeenix/pixel8/4df0e77aa1505bc214a6d6796d034ad0792cbd02/data/io.zeenix.Pixel8.svg">
+</p>
+
+<h1 align="center">Pixel8</h1>
+
+<p align="center">
+<b>A tiny fantasy console where the games are written in Rust.</b>
+</p>
 
 Pixel8 (pronounced "pixelate") is a tiny, self-contained game console that never existed: a 128x128
 screen, 16 fixed colors, a 4x6 pixel font, four audio channels, 256 sprites, a 128x64 tile map — and
