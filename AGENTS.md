@@ -140,6 +140,9 @@ Commit messages, atomic commits, and top-down module ordering are covered in
   `pixel8` binary and winit/wgpu). The console library must keep building with
   `--no-default-features` and with each feature alone — that featureless build is
   exactly what `pixel8-tui` depends on.
+- **Changelog-skip trailer**: end a commit message with a `Changelog: skip` git trailer to
+  keep it out of the user-facing changelog (use for AI-workflow artifacts such as design docs
+  and implementation plans).
 
 ## Docs index
 
