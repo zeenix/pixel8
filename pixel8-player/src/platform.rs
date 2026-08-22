@@ -1,13 +1,16 @@
 //! The platform seam: everything device-specific (display, input) lives behind this trait,
 //! so the picker and game loop are written once and tested headless.
 
-#[cfg(feature = "kms")]
+// The KMS backend compiles only when it is the backend `main::real_backend`
+// selects: `window` wins when both features are on, so a both-features build
+// would otherwise carry the whole KMS stack as dead code.
+#[cfg(all(feature = "kms", not(feature = "window")))]
 pub mod alsa;
 #[cfg(any(feature = "kms", feature = "window"))]
 pub mod blit;
-#[cfg(feature = "kms")]
+#[cfg(all(feature = "kms", not(feature = "window")))]
 pub mod evdev;
-#[cfg(feature = "kms")]
+#[cfg(all(feature = "kms", not(feature = "window")))]
 pub mod kms;
 pub mod null;
 #[cfg(feature = "window")]
