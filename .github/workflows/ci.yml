@@ -24,10 +24,12 @@ jobs:
           toolchain: nightly
           components: rustfmt
       - run: cargo fmt --all -- --check
-      - name: Check formatting of the example carts
+      # Standalone crates outside the workspace: the example carts and the
+      # runtime's fixture carts. `fmt --all` above never reaches them.
+      - name: Check formatting of the example and fixture carts
         run: |
           fail=0
-          for d in examples/*/; do
+          for d in examples/*/ pixel8-runtime/tests/carts/*/; do
             [ -f "$d/Cargo.toml" ] || continue
             echo "::group::fmt $d"
             (cd "$d" && cargo fmt --all -- --check) || fail=1
@@ -52,21 +54,36 @@ jobs:
           sudo apt-get install -y libasound2-dev
 
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo clippy -p pixel8-player --no-default-features --features kms --all-targets -- -D warnings
+      # `window` wins when both player backends are enabled, so the all-features
+      # shape must lint cleanly with the KMS stack deselected. (The pure-KMS
+      # shape lives in the no-alsa job: it must build without the headers.)
+      - run: cargo clippy -p pixel8-player --all-features --all-targets -- -D warnings
       # The SDK's effect features are off by default, so the workspace run above
-      # never sees them. Once with all of them and the tests, then each family on
-      # its own the way a cart links the SDK: `no_std`, one feature on. (The
-      # library only — the SDK's own tests need `std`.)
+      # never sees them. Once with all of them and the tests, then bare `no_std`
+      # and each family on its own the way a cart links the SDK: `no_std`, one
+      # feature on. (The library only — the SDK's own tests need `std`.)
       - run: cargo clippy -p pixel8 --all-features --all-targets -- -D warnings
+      - run: cargo clippy -p pixel8 --no-default-features -- -D warnings
       - run: cargo clippy -p pixel8 --no-default-features --features plume-effects -- -D warnings
       - run: cargo clippy -p pixel8 --no-default-features --features physics -- -D warnings
-      - name: Clippy the example carts
+      # The console with `audio` alone. Its other single-feature shape and
+      # every featureless one live in the no-alsa job: their promise is to
+      # build without the ALSA headers this job installs.
+      - run: cargo clippy -p pixel8-console --no-default-features --features audio --all-targets -- -D warnings
+      # The workspace run checks pixel8-web for the host (how its rlib half is
+      # tested); it ships as wasm, so lint it for its real target too.
+      - run: cargo clippy -p pixel8-web --target wasm32-unknown-unknown -- -D warnings
+      # Standalone crates outside the workspace: the example carts and the
+      # runtime's fixture carts, linted for the wasm target they build for.
+      # (Both default to it via their .cargo/config.toml; the explicit
+      # --target just spells the intent out uniformly.)
+      - name: Clippy the example and fixture carts
         run: |
           fail=0
-          for d in examples/*/; do
+          for d in examples/*/ pixel8-runtime/tests/carts/*/; do
             [ -f "$d/Cargo.toml" ] || continue
             echo "::group::clippy $d"
-            (cd "$d" && cargo clippy -- -D warnings) || fail=1
+            (cd "$d" && cargo clippy --target wasm32-unknown-unknown -- -D warnings) || fail=1
             echo "::endgroup::"
           done
           exit $fail
@@ -93,7 +110,6 @@ jobs:
           sudo apt-get install -y libasound2-dev
 
       - run: cargo test --workspace
-      - run: cargo test -p pixel8-player --no-default-features --features kms
       # Feature-gated SDK code, including its doc examples, is skipped by the
       # workspace run above. Once with all the families on, then each on its own
       # the way a cart links it: a family's docs and doctests may only mention
@@ -107,6 +123,52 @@ jobs:
       # runtime's dependency on the SDK resolves against the packaged copy
       # rather than whatever version crates.io last saw.
       - run: cargo package -p pixel8 -p pixel8-runtime
+
+  # The runtime, the frontends and the player all promise shapes that build on
+  # a machine without ALSA: everything with `audio` off, the player with no
+  # backend, and the KMS backend (raw-ioctl ALSA, no libasound). Lint and test
+  # those shapes on a runner that deliberately does NOT install the ALSA
+  # headers — with the headers present, as the clippy and test jobs have them,
+  # an accidental cpal or alsa-sys dependency in one of these trees would
+  # still come out green.
+  no-alsa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # wasm32 std for the runtime's cart-build tests, same as the test job.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      # Guard the premise: if the runner image ever starts shipping the ALSA
+      # headers, this job would prove nothing — fail loudly instead.
+      - name: Assert ALSA headers are absent
+        run: |
+          if pkg-config --exists alsa; then
+            echo "::error::ALSA headers found on the runner; this job exists to build without them" >&2
+            exit 1
+          fi
+
+      - run: cargo clippy -p pixel8-runtime --no-default-features --all-targets -- -D warnings
+      # The featureless console library is exactly the shape pixel8-tui depends
+      # on; `window` alone is its other promised single-feature shape (`audio`
+      # alone needs the headers, so it stays in the clippy job).
+      - run: cargo clippy -p pixel8-console --no-default-features --all-targets -- -D warnings
+      - run: cargo clippy -p pixel8-console --no-default-features --features window --all-targets -- -D warnings
+      - run: cargo clippy -p pixel8-tui --no-default-features --all-targets -- -D warnings
+      - run: cargo clippy -p pixel8-player --no-default-features --all-targets -- -D warnings
+      - run: cargo clippy -p pixel8-player --no-default-features --features kms --all-targets -- -D warnings
+      # And the shapes must not just lint but pass their tests. (The SDK is
+      # absent throughout: it never links audio, and without `std` its test
+      # harness cannot build, so its shapes stay in the clippy and test jobs.)
+      - run: cargo test -p pixel8-runtime --no-default-features
+      - run: cargo test -p pixel8-console --no-default-features
+      - run: cargo test -p pixel8-tui --no-default-features
+      - run: cargo test -p pixel8-player --no-default-features
+      - run: cargo test -p pixel8-player --no-default-features --features kms
 
   book:
     runs-on: ubuntu-latest
