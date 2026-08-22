@@ -668,7 +668,9 @@ fn rom_from_png(bytes: &[u8]) -> Result<Vec<u8>> {
         bail!("Not a PICO-8 cart PNG (expected {PICO8_PNG_W}x{PICO8_PNG_H}, got {w}x{h})");
     }
     let mut rom: Vec<u8> = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|p| ((p[3] & 3) << 6) | ((p[0] & 3) << 4) | ((p[1] & 3) << 2) | (p[2] & 3))
         .collect();
     if rom.len() < ROM_LEN {
@@ -1015,7 +1017,7 @@ mod tests {
     fn build_pico8_png(rom: &[u8]) -> Vec<u8> {
         let (w, h) = (PICO8_PNG_W, PICO8_PNG_H);
         let mut rgba = vec![0u8; w * h * 4];
-        for (i, px) in rgba.chunks_exact_mut(4).enumerate() {
+        for (i, px) in rgba.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let byte = rom.get(i).copied().unwrap_or(0);
             px[0] = byte >> 4 & 3; // r
             px[1] = byte >> 2 & 3; // g
