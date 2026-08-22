@@ -15,10 +15,9 @@
 //!   solid — said once, on the world, and neither crate says anything of its own. They walk into
 //!   each other and stop, which is the arrangement flags alone could never buy — the world skips
 //!   each of them against itself, so neither is ever its own wall.
-//! * the *sensor* is stopped by a rule of its own — the empty one, stopped by
-//!   nothing whatever the world declares — and walks right through it all, and the *hazard* stands
-//!   still wearing a flagged cell. The sensor is never stopped and is told exactly when it reached
-//!   the hazard.
+//! * the *sensor* is stopped by a rule of its own — the empty one, stopped by nothing whatever the
+//!   world declares — and walks right through it all, and the *hazard* stands still wearing a
+//!   flagged cell. The sensor is never stopped and is told exactly when it reached the hazard.
 //!
 //! Nothing is drawn but the report. What a member is made of is the cell it wears and what the
 //! cart flagged that cell with in the sprite editor — never
