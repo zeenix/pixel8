@@ -84,8 +84,9 @@ impl Framebuffer {
         for (i, entry) in lut.iter_mut().enumerate() {
             *entry = palette::rgba(self.display_pal[i]);
         }
-        for (chunk, &c) in out.chunks_exact_mut(4).zip(self.pixels.iter()) {
-            chunk.copy_from_slice(&lut[(c & 0x0f) as usize]);
+        let (chunks, _) = out.as_chunks_mut::<4>();
+        for (chunk, &c) in chunks.iter_mut().zip(self.pixels.iter()) {
+            *chunk = lut[(c & 0x0f) as usize];
         }
     }
 
