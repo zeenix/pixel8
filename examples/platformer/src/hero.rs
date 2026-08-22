@@ -153,7 +153,7 @@ impl Hero {
 
     pub fn draw(&self, gfx: &mut Graphics, scene: &Scene, frame: u32, mode: &GameMode) {
         let is_alt_frame = (frame / 4).is_multiple_of(2);
-        if self.dead && is_alt_frame {
+        if self.dead && !is_alt_frame {
             // If hero dies, we show them flashing in & out of existence.
             return;
         }
