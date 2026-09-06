@@ -1185,8 +1185,10 @@ mod tests {
         ed.view_y = 16;
         ed.tool = Tool::Pan;
         ed.tick(&press(CANVAS.0, CANVAS.1), &mut a); // grab the window.
-                                                     // Drag the grabbed point right 4 px: the window follows the hand, so its
-                                                     // origin scrolls left by one sheet pixel (same sign as the map editor).
+                                                     // Drag the grabbed point right 4 px: the
+                                                     // window follows the hand, so its
+                                                     // origin scrolls left by one sheet pixel (same
+                                                     // sign as the map editor).
         ed.tick(&held(CANVAS.0 + 4, CANVAS.1), &mut a);
         assert_eq!((ed.view_x, ed.view_y), (15, 16));
         // Re-derived from the press anchor each frame: 8 px right -> 2 px left.

@@ -3,10 +3,14 @@
 use crate::platform::{InputSnapshot, Platform};
 use anyhow::Result;
 use pixel8_runtime::fb::Framebuffer;
+#[cfg(test)]
+use std::{cell::RefCell, rc::Rc};
 
 pub struct NullPlatform {
     scripted: std::collections::VecDeque<InputSnapshot>,
     presented: u32,
+    #[cfg(test)]
+    captured: Option<Rc<RefCell<Vec<Vec<u8>>>>>,
 }
 
 impl NullPlatform {
@@ -14,6 +18,8 @@ impl NullPlatform {
         NullPlatform {
             scripted: Default::default(),
             presented: 0,
+            #[cfg(test)]
+            captured: None,
         }
     }
 
@@ -22,12 +28,30 @@ impl NullPlatform {
         NullPlatform {
             scripted: frames.into(),
             presented: 0,
+            captured: None,
         }
     }
 
     #[cfg(test)]
     pub fn frames_presented(&self) -> u32 {
         self.presented
+    }
+
+    /// Like [`scripted`](Self::scripted), and also records every presented frame's pixels,
+    /// in order, into the returned buffer.
+    #[cfg(test)]
+    pub fn scripted_with_capture(
+        frames: Vec<InputSnapshot>,
+    ) -> (NullPlatform, Rc<RefCell<Vec<Vec<u8>>>>) {
+        let captured = Rc::new(RefCell::new(Vec::new()));
+        (
+            NullPlatform {
+                scripted: frames.into(),
+                presented: 0,
+                captured: Some(captured.clone()),
+            },
+            captured,
+        )
     }
 }
 
@@ -40,6 +64,10 @@ impl Default for NullPlatform {
 impl Platform for NullPlatform {
     fn present(&mut self, _fb: &Framebuffer) -> Result<()> {
         self.presented += 1;
+        #[cfg(test)]
+        if let Some(captured) = &self.captured {
+            captured.borrow_mut().push(_fb.pixels().to_vec());
+        }
         Ok(())
     }
 

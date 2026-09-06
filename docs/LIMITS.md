@@ -68,10 +68,13 @@ What the budget counts is the cart's own work. The console's side of a draw
 call is not charged: `circle_fill` costs the same whether it paints one pixel
 or twelve thousand, and drawing the whole tilemap costs the same as drawing
 one tile. Only the call itself is billed, and at a flat one unit of the
-128 K — the same price whether it takes ten arguments or none. What actually
-sets the ceiling is the cart-side code around each call, so a `draw` written
-in normal Rust fits something like ten thousand of them, and a tight loop
-that does nothing else roughly thirty thousand.
+128 K — the same price whether it takes ten arguments or none. A unit is one
+instruction that does work: arithmetic, a memory access, a branch, a call.
+Reading or writing a local variable and loading a constant are free, so what
+is counted is the work a line of Rust does, not how many operands it moves to
+do it. What actually sets the ceiling is the cart-side code around each call,
+so a `draw` written in normal Rust fits something like ten thousand of them,
+and a tight loop that does nothing else roughly thirty thousand.
 
 The meter is therefore not a measure of how hard the console is working. It
 measures the thing you can do something about — your own code — while the
