@@ -365,6 +365,75 @@ mod controls_tests {
 mod app_tests {
     use super::*;
     use crate::platform::{null::NullPlatform, InputSnapshot};
+    use pixel8_runtime::input::Button;
+    use std::process::Command;
+
+    #[test]
+    fn stress_cart_cpu_quota_trips_entering_level_five() {
+        // The shipped stress cart ramps its CPU probe one level per Right press, and a fuel
+        // budget of 128 K instructions runs out on the fifth: level 4 is the last one drawn,
+        // and the frame that enters level 5 is the quota error screen. That trip point is
+        // what a cart author sees of the budget, so it is pinned through the real player loop
+        // and the real cart, exactly as a handheld runs them. Moving it — a wasmi re-pricing,
+        // a budget change — is a documented change to docs/LIMITS.md, not a test to loosen.
+        let cart = stress_cart("trip");
+        let mut right = InputSnapshot::default();
+        right.buttons[Button::Right as usize] = true;
+        // Press-and-release edges, since the cart ramps on the press, not the hold.
+        let input: Vec<InputSnapshot> = (0..6)
+            .flat_map(|_| [right, InputSnapshot::default()])
+            .collect();
+        let frames = input.len() as u32;
+        let (platform, presented) = NullPlatform::scripted_with_capture(input);
+        let mut app = App::new(Box::new(platform), AudioHandle::dummy(), Some(frames));
+
+        assert!(matches!(app.play(cart.path()).unwrap(), Flow::Quit));
+        let presented = presented.borrow();
+        assert_eq!(presented.len(), frames as usize);
+        let quota_error = cpu_quota_error_screen();
+        let tripped_at = presented
+            .iter()
+            .position(|frame| frame.as_slice() == quota_error.pixels())
+            .map(|frame| frame / 2 + 1);
+        assert_eq!(
+            tripped_at,
+            Some(5),
+            "the stress cart's CPU quota tripped entering level {tripped_at:?}, not level 5"
+        );
+    }
+
+    #[test]
+    fn stress_cart_level_four_uses_most_of_the_budget() {
+        // The companion to the trip point above: level 4 must fit, but not by so much that
+        // level 5 could ever fit too, and not so barely that a small re-pricing would tip it.
+        // Measured: 85.5% — 4 levels of 4,000 iterations at 7 fuel each, of 131,072.
+        let cart = stress_cart("margin");
+        let cart = cart::load_png(cart.path()).expect("the generated stress cart loads");
+        let mut vm = GameVm::load(
+            &cart.wasm,
+            &cart.assets,
+            AudioHandle::dummy(),
+            Storage::default(),
+        )
+        .expect("the generated stress cart starts");
+        for level in 1..=4 {
+            for pressed in [true, false] {
+                vm.state_mut()
+                    .input
+                    .set_button(Button::Right as usize, pressed);
+                vm.call_update()
+                    .unwrap_or_else(|error| panic!("updating CPU level {level}: {error}"));
+                vm.call_draw()
+                    .unwrap_or_else(|error| panic!("drawing CPU level {level}: {error}"));
+            }
+        }
+        let cpu = vm.cpu_update();
+        assert!(
+            (0.82..=0.90).contains(&cpu),
+            "CPU level 4 used {:.1}% of the budget (measured: 85.5%)",
+            cpu * 100.0
+        );
+    }
 
     #[test]
     fn smoke_picker_presents_then_quits() {
@@ -493,5 +562,71 @@ mod app_tests {
             "genuine press after release must launch the selected cart"
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The frame `play` presents once a cart's `update` overruns its fuel budget.
+    fn cpu_quota_error_screen() -> Framebuffer {
+        let mut fb =
+            ui::error_screen("Runtime error in update:\nupdate() ran too long\n(infinite loop?)");
+        fb.print("hold o+x to exit", 2, HEIGHT - 7, col::LIGHT_GREY);
+        fb
+    }
+
+    /// `examples/stress`, built for wasm in release like `cargo console` builds it, and
+    /// packaged as a PNG cart the player can load. `name` keeps concurrent tests' carts apart.
+    fn stress_cart(name: &str) -> TempCart {
+        let player = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let project = player.join("../examples/stress");
+        let target = player.join("../target/tests/stress-cart-headless");
+        let build = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
+            .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
+            .current_dir(&project)
+            .env("CARGO_TARGET_DIR", &target)
+            .env("CARGO_TERM_COLOR", "never")
+            .output()
+            .expect("cargo runs");
+        assert!(
+            build.status.success(),
+            "building the stress cart failed:\n{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+
+        let wasm = target.join("wasm32-unknown-unknown/release/stress.wasm");
+        let wasm = std::fs::read(&wasm)
+            .unwrap_or_else(|error| panic!("reading {}: {error}", wasm.display()));
+        let dir = std::env::temp_dir().join(format!(
+            "pixel8-player-stress-cart-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("stress.png");
+        cart::save_png(
+            &cart::Cart {
+                wasm,
+                assets: Default::default(),
+                source: None,
+            },
+            &path,
+        )
+        .unwrap();
+        TempCart { dir, path }
+    }
+
+    struct TempCart {
+        dir: PathBuf,
+        path: PathBuf,
+    }
+
+    impl TempCart {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempCart {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
     }
 }

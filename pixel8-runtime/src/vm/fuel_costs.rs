@@ -23,7 +23,7 @@ use crate::{assets::Assets, audio::AudioHandle, storage::Storage};
 /// unit of the 128 K — the same price whether it takes ten arguments or none".
 const HOST_CALL_FUEL: u64 = 1;
 
-/// Generous ceiling on what an empty `update` or `draw` may cost. Measured: 2 fuel, i.e. 0.0015%
+/// Generous ceiling on what an empty `update` or `draw` may cost. Measured: 1 fuel, i.e. 0.0008%
 /// of the budget.
 const EMPTY_FRAME_CEILING: u64 = 8;
 
@@ -39,7 +39,7 @@ fn an_empty_frame_costs_next_to_nothing() {
         update, draw,
         "update and draw must cost the same to enter: {update} vs {draw} fuel"
     );
-    // Ranged: the exact floor (2) is not promised anywhere, but "real game logic uses a tiny
+    // Ranged: the exact floor (1) is not promised anywhere, but "real game logic uses a tiny
     // fraction of the budget" (docs/LIMITS.md) needs the fixed overhead to round to nothing. If
     // this trips, entering a frame acquired a real cost and the doc's framing needs revisiting.
     assert!(

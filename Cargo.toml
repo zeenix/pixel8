@@ -32,8 +32,14 @@ anyhow = "1"
 # particles in. (Example carts are outside the workspace and pin their own.)
 heapless = "0.9.3"
 serde = { version = "1", features = ["derive"] }
-# No `wat`: carts are always binary wasm (text format is test-only).
-wasmi = { version = "0.51", default-features = false, features = ["std"] }
+# No `wat` or `memory64`: carts are validated, binary 32-bit wasm.
+# Auto-dispatch keeps the nested web runtime on portable dispatch.
+wasmi = { version = "2.0", default-features = false, features = [
+    "stable",
+    "std",
+    "validate",
+    "auto-dispatch",
+] }
 winit = "0.30"
 # Default minus `webgpu`: that backend only exists for wasm targets,
 # and the console never compiles to wasm (the web player uses no GPU).
