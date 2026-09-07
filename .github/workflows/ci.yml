@@ -169,6 +169,11 @@ jobs:
       - run: cargo test -p pixel8-tui --no-default-features
       - run: cargo test -p pixel8-player --no-default-features
       - run: cargo test -p pixel8-player --no-default-features --features kms
+      # `cargo console` and shipped players are optimized builds, and wasmi picks
+      # its dispatch backend by opt-level: pin the stress cart's trip point there too.
+      - run: >-
+          cargo test --release -p pixel8-player --no-default-features
+          stress_cart_cpu_quota_trips_entering_level_five
 
   book:
     runs-on: ubuntu-latest

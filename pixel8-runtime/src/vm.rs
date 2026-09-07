@@ -15,8 +15,8 @@ use crate::{
 };
 use anyhow::{anyhow, Context as _, Result};
 use wasmi::{
-    Caller, Config, Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
-    TypedFunc,
+    Caller, Config, Engine, Instance, Linker, Module, OperatorCost, Store, StoreLimits,
+    StoreLimitsBuilder, TypedFunc,
 };
 
 /// A cart's logical frames per second when it doesn't say otherwise.
@@ -26,11 +26,12 @@ pub const DEFAULT_FPS: u32 = 60;
 /// of the cart rate, which the cart chooses via `pixel8_fps`.
 pub const UI_FPS: u32 = 30;
 
-/// Fuel budget for a single lifecycle call. wasmi charges ~1 fuel per
-/// instruction, so this is a hard cap of 131,072 (128 K) wasm instructions
-/// per call — one number shared with the memory and cart-size limits. A real
-/// frame uses a few thousand; exceeding this means the cart is stuck or doing
-/// far too much, and surfaces as a friendly error screen.
+/// Fuel budget for a single lifecycle call: a hard cap of 131,072 (128 K)
+/// wasm instructions per call — one number shared with the memory and
+/// cart-size limits. What counts as an instruction is set by
+/// [`GameVm::operator_cost`]. A real frame uses a few thousand; exceeding this
+/// means the cart is stuck or doing far too much, and surfaces as a friendly
+/// error screen.
 const FUEL_PER_CALL: u64 = 131_072;
 
 /// Hard cap on a cart's total linear memory: 128 K, the same number as the
@@ -89,6 +90,7 @@ impl GameVm {
         // millisecond in a release build, well inside one frame, so there is nothing
         // here for a hostile cart to stretch.
         config.compilation_mode(wasmi::CompilationMode::Eager);
+        config.operator_cost(Self::operator_cost());
         let engine = Engine::new(&config);
         let module = Module::new(&engine, wasm).map_err(|e| anyhow!("Invalid cart wasm: {e}"))?;
 
@@ -601,6 +603,38 @@ impl GameVm {
 
     pub fn state_mut(&mut self) -> &mut HostState {
         self.store.data_mut()
+    }
+
+    /// What one unit of fuel buys, as a price per wasm operator.
+    ///
+    /// wasmi meters the cart's input operators, and by default charges one
+    /// fuel for every one of them except a few free structural markers
+    /// (`block`, `loop`, `end`, `nop`...). Counted that way, reading a local
+    /// costs the same as a multiply, so a loop like `acc = acc * 31 + i`
+    /// costs 18 fuel an iteration for 6 operations of real work, and a host
+    /// call with ten arguments costs eleven times a call with none.
+    ///
+    /// wasmi 0.51, which this budget was calibrated against, was a register
+    /// machine and priced translated instructions instead. Locals and
+    /// constants were operands there, not instructions, and cost nothing;
+    /// that loop cost 7 fuel, and every host call one. Zero-pricing the same
+    /// operand plumbing here keeps "one fuel, one instruction" true, and with
+    /// it the stress cart's trip point and every figure in `docs/LIMITS.md`.
+    ///
+    /// Nothing that does work or repeats work is free: arithmetic, memory
+    /// access, globals, `select`, every branch and every call still cost one,
+    /// so a runaway loop cannot iterate without spending fuel.
+    fn operator_cost() -> OperatorCost {
+        OperatorCost {
+            local_get: 0,
+            local_set: 0,
+            local_tee: 0,
+            i32_const: 0,
+            i64_const: 0,
+            f32_const: 0,
+            f64_const: 0,
+            ..Default::default()
+        }
     }
 }
 

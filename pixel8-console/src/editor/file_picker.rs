@@ -363,7 +363,8 @@ mod tests {
         p.open(&files, "", None);
         p.key(Key::Down, Mods::default(), &files); // -> "+ new file"
         p.key(Key::Enter, Mods::default(), &files); // -> NewFile mode
-                                                    // Default mouse sits off-screen (-16, -16), outside the overlay.
+                                                    // Default mouse sits off-screen (-16, -16),
+                                                    // outside the overlay.
         let outside = Mouse {
             left_pressed: true,
             ..Default::default()
