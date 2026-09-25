@@ -7,7 +7,7 @@
 //! between them. An import renamed, a flag word packed one way and unpacked the other, and both
 //! halves stay green while every cart in the world goes dark.
 //!
-//! One [`World`] of four seats and no forces at all, shipped as a constant and seated in
+//! One [`World`] of five seats and no forces at all, shipped as a constant and seated in
 //! [`Game::boot`]: what moves the cast is a velocity written afresh every update, so a member
 //! stopped by something goes on leaning into it instead of settling down and reporting nothing.
 //!
@@ -19,9 +19,15 @@
 //!   world declares — and walks right through it all, and the *hazard* stands still wearing a
 //!   flagged cell. The sensor is never stopped and is told exactly when it reached the hazard.
 //!
-//! Nothing is drawn but the report. What a member is made of is the cell it wears and what the
-//! cart flagged that cell with in the sprite editor — never
-//! what was painted where — so a cart that draws nothing at all still collides.
+//! Besides the report, the cart draws its cast: [`World::draw`] carries the whole of it to the
+//! console in the one crossing `draw` spends, and each member is there to prove something about
+//! what comes back over it. The crates are drawn at the pixel the world moved them to, the right
+//! one mirrored across; the hazard wears a flagged cell of its own but is left out by the layer
+//! the cart draws; the sensor wears no cell at all and so has nothing to be drawn from; and the
+//! ghost wears the very cell the crates do, standing inside that same layer, and is left out only
+//! by being hidden. None of that is what collision runs on: a member is made of the cell it wears
+//! and what the cart flagged that cell with in the sprite editor, never what is painted where — a
+//! cart that drew nothing at all would still collide exactly the same.
 //!
 //! The answers go back to the host as pixels, since the framebuffer is the one thing a headless
 //! test can read out of a running cart: a lit pixel at a member's x on a row of its own, and a row
@@ -65,6 +71,9 @@ const SENSOR_AT: f32 = 20.0;
 const SENSOR_SPEED: f32 = 4.0;
 const HAZARD_AT: f32 = 40.0;
 
+/// Where the ghost stands: far enough from the rest of the cast that nothing ever meets it.
+const GHOST_AT: (f32, f32) = (100.0, 60.0);
+
 /// The rows each member's position is reported on, as the one lit pixel in the row: the left
 /// crate's x, the right crate's x, the left crate's y — which says whether it was ever mistaken for
 /// itself and shoved off its own row — and the sensor's x.
@@ -81,9 +90,9 @@ const MET_HAZARD: i16 = 4;
 game!(Probe = Probe::new());
 
 struct Probe {
-    /// The one thing that holds or moves any of them. Four seats — the cast this fixture pins is
-    /// one a cart actually configures — and the crossing carries all four.
-    world: World<4>,
+    /// The one thing that holds or moves any of them. Five seats — the cast this fixture pins is
+    /// one a cart actually configures — and the crossing carries all five.
+    world: World<5>,
     /// The two of one kind, walking into each other. Seat order is stepping order, and this is
     /// the order `boot` enlists them in.
     left: Member,
@@ -91,14 +100,18 @@ struct Probe {
     /// And the one that is stopped by nothing, walking into the one that stops nobody.
     sensor: Member,
     hazard: Member,
+    /// Enlisted last, standing where nothing else in the cast ever reaches it and wearing the
+    /// very cell the crates do: what pins the hidden bit, since a member shown despite it would
+    /// land on exactly the crates' own pixels.
+    ghost: Member,
     /// What each of them means to do, written back into its velocity every update: a step that
     /// ran into something spends the speed that carried it there, so a member that did not renew
     /// it would stop reporting the wall it is leaning on.
-    pushes: [Velocity; 4],
+    pushes: [Velocity; 5],
 }
 
 impl Probe {
-    /// The state the cart ships in: an empty world and four actors with no seats yet. All of it a
+    /// The state the cart ships in: an empty world and five actors with no seats yet. All of it a
     /// constant, so the module's memory image *is* the opening state and nothing runs to build it.
     const fn new() -> Self {
         Self {
@@ -107,10 +120,12 @@ impl Probe {
             right: Member::NOBODY,
             sensor: Member::NOBODY,
             hazard: Member::NOBODY,
+            ghost: Member::NOBODY,
             pushes: [
                 Velocity::new(CRATE_SPEED, 0.0),
                 Velocity::new(-CRATE_SPEED, 0.0),
                 Velocity::new(SENSOR_SPEED, 0.0),
+                Velocity::new(0.0, 0.0),
                 Velocity::new(0.0, 0.0),
             ],
         }
@@ -120,20 +135,23 @@ impl Probe {
 impl Game for Probe {
     fn boot(&mut self, _ctx: &mut Context) {
         // What a constant cannot say: the scene's word for a wall, worked out through `Into`, and
-        // the four seats, which only the world can hand out.
+        // the five seats, which only the world can hand out.
         self.world.declare_solid(CRATE);
         // A crate: wearing the crate cell, and stopped by whatever the world calls solid —
         // anything wearing that same cell, its own kind, which is only safe because the world
-        // knows which crate this is.
-        let crated = |world: &mut World<4>, x: f32| {
+        // knows which crate this is. `flip` is the one way the two differ: the crates are
+        // otherwise identical, so a mirrored right crate is what carries the flip bit over the
+        // wire.
+        let crated = |world: &mut World<5>, x: f32, flip: bool| {
             world
                 .enlist(x, CRATE_ROW, SIDE, SIDE)
                 .unwrap()
                 .wearing(CRATE_SPRITE)
+                .flipped(flip, false)
                 .member()
         };
-        self.left = crated(&mut self.world, LEFT_CRATE_AT);
-        self.right = crated(&mut self.world, RIGHT_CRATE_AT);
+        self.left = crated(&mut self.world, LEFT_CRATE_AT, false);
+        self.right = crated(&mut self.world, RIGHT_CRATE_AT, true);
         // The sensor: wearing nothing, told everything, and stopped by nothing — a rule of its
         // own, held against a world that declares otherwise.
         self.sensor = self
@@ -150,11 +168,23 @@ impl Game for Probe {
             .wearing(HAZARD_SPRITE)
             .stopped_by(BitFlags::<SpriteFlag>::empty())
             .member();
+        // And the ghost: propped far from the rest of the cast, wearing the very cell the crates
+        // do — inside the layer `draw` asks for — and hidden, so a hidden bit lost in the
+        // crossing would show up drawn on exactly the crates' own pixels.
+        self.ghost = self
+            .world
+            .enlist(GHOST_AT.0, GHOST_AT.1, SIDE, SIDE)
+            .unwrap()
+            .wearing(CRATE_SPRITE)
+            .stopped_by(BitFlags::<SpriteFlag>::empty())
+            .prop()
+            .hidden()
+            .member();
     }
 
     fn update(&mut self, ctx: &mut Context) {
         // The cast in the order it was seated, every push renewed.
-        let cast = [self.left, self.right, self.sensor, self.hazard];
+        let cast = [self.left, self.right, self.sensor, self.hazard, self.ghost];
         for (member, push) in cast.into_iter().zip(self.pushes) {
             self.world.set_velocity(member, push);
         }
@@ -166,8 +196,9 @@ impl Game for Probe {
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::BLACK);
+        self.world.draw(gfx, CRATE);
 
-        // The report, and nothing else: the cast collided with no help from anything drawn.
+        // The report: rows and columns of its own, over the cast the world just drew.
         let (left_x, left_y) = self.world.draw_pos(self.left);
         gfx.pset(left_x, LEFT_CRATE_ROW, Color::WHITE);
         gfx.pset(
