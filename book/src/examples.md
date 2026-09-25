@@ -45,8 +45,9 @@ here, in a few hundred lines split into small modules:
   badie is a badie — keeping the **[`Member`]** handle the chain ends in beside
   its own game data. A single **[`step`]** an update pulls the hero down, stops
   it at the solid tiles, holds it inside the level, patrols the badie and tells
-  each of them what it met; the hero draws at the world's **[`draw_pos`]**, so
-  running jumps climb clean staircases;
+  each of them what it met; one **[`draw`]** a frame puts both on screen where
+  the step moved them (so running jumps climb clean staircases), each in the
+  look its update gave it — the cell it wears, which way it faces;
 - nothing walks a pair of casts: the badie's sprites are flagged, so the hero's
   **[`contacts`]** report having met one in **[`touches`]** and the cart only
   decides whether that was a ram or a stomp — same frame, so a stomped badie is
@@ -123,7 +124,7 @@ candle, point it another way for an exhaust trail.
 [`Member`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Member.html
 [`enlist`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.enlist
 [`retire`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.retire
-[`draw_pos`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.draw_pos
+[`draw`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.draw
 [`confined_to`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Enlisting.html#method.confined_to
 [`wearing`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Enlisting.html#method.wearing
 [`contacts`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.contacts

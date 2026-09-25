@@ -28,7 +28,6 @@ pub struct Hero {
     /// drawn from. Not the velocity: the step zeroes an axis that ran into a wall, and a
     /// hero leaning on one is still walking as far as the animation is concerned.
     walking: bool,
-    flip: bool,
     dead: bool,
 }
 
@@ -39,7 +38,6 @@ impl Hero {
         Self {
             member: Member::NOBODY,
             walking: false,
-            flip: false,
             dead: false,
         }
     }
@@ -51,8 +49,9 @@ impl Hero {
     /// level's edges hold. The last column has nothing but sky past it, and the level's edges are
     /// no tiles at all, so the level itself is what holds the hero in.
     ///
-    /// Its sprites carry no flags, so there is nothing in it for the badie to meet; the walls it
-    /// stops at are the ones `lib.rs` declares on the world.
+    /// It wears `HERO_SPRITE`, the cell the world draws it from, and that cell carries no flags in
+    /// the sprite editor, so there is nothing in it for the badie to meet; the walls it stops at
+    /// are the ones `lib.rs` declares on the world.
     pub fn new(scene: &mut Scene) -> Self {
         Self {
             member: scene
@@ -60,9 +59,9 @@ impl Hero {
                 .expect("a seat for the hero")
                 .confined_to(LEVEL)
                 .heeding(BADIE)
+                .wearing(HERO_SPRITE)
                 .member(),
             walking: false,
-            flip: false,
             dead: false,
         }
     }
@@ -96,10 +95,10 @@ impl Hero {
         // the step walks into zeroes it, and the buttons put it straight back.
         if ctx.is_button_down(Button::Left) {
             velocity.dx = -HERO_SPEED;
-            self.flip = true;
+            scene.set_flip(self.member, true, false);
         } else if ctx.is_button_down(Button::Right) {
             velocity.dx = HERO_SPEED;
-            self.flip = false;
+            scene.set_flip(self.member, false, false);
         } else {
             velocity.dx = 0.0;
         }
@@ -151,13 +150,9 @@ impl Hero {
         gfx.camera(cam as i16, 0);
     }
 
-    pub fn draw(&self, gfx: &mut Graphics, scene: &Scene, frame: u32, mode: &GameMode) {
+    /// What the hero looks like this frame, written into its seat for the world to draw.
+    pub fn animate(&self, scene: &mut Scene, frame: u32, mode: &GameMode) {
         let is_alt_frame = (frame / 4).is_multiple_of(2);
-        if self.dead && !is_alt_frame {
-            // If hero dies, we show them flashing in & out of existence.
-            return;
-        }
-
         let sprite = if !self.grounded(scene) || (self.walking && is_alt_frame) {
             match mode {
                 GameMode::Ended { won, .. } if *won => HERO_HAPPY_SPRITE,
@@ -166,10 +161,9 @@ impl Hero {
         } else {
             HERO_SPRITE
         };
-        // The world's coherent pixel — a running jump climbs cleanly, no zigzag.
-        let (x, y) = scene.draw_pos(self.member);
-        gfx.sprite_ext(sprite, x, y, 8, 8, self.flip, false)
-            .unwrap();
+        scene.set_sprite(self.member, Some(sprite));
+        // If hero dies, we show them flashing in & out of existence.
+        scene.set_hidden(self.member, self.dead && !is_alt_frame);
     }
 
     pub fn die(&mut self) {

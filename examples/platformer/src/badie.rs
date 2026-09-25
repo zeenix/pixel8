@@ -1,4 +1,4 @@
-use pixel8::{physics::Member, BitFlags, Graphics, SpriteFlag};
+use pixel8::{physics::Member, BitFlags, SpriteFlag};
 
 use crate::{
     constants::{
@@ -12,7 +12,6 @@ use crate::{
 pub struct Badie {
     /// The badie's seat in the scene.
     member: Member,
-    flip: bool,
 }
 
 impl Badie {
@@ -30,7 +29,6 @@ impl Badie {
                 .wearing(BADIE_SPRITE)
                 .heeding(BitFlags::<SpriteFlag>::empty())
                 .member(),
-            flip: false,
         }
     }
 
@@ -46,25 +44,35 @@ impl Badie {
 
     /// Our badie patrols horizontally back and forth between two points, turning at each end.
     /// What it means to do goes into its velocity, exactly like the hero's steering.
-    pub fn patrol(&mut self, scene: &mut Scene) {
+    pub fn patrol(&self, scene: &mut Scene) {
+        // The badie faces the way it walks; the world's flip is the one copy of that fact,
+        // so the patrol reads it back instead of keeping one of its own.
+        let (mut heading_right, _) = scene.flip(self.member);
         let x = scene.pos(self.member).0;
         if x < BADIE_END_X {
-            self.flip = true;
+            heading_right = true;
         } else if x > BADIE_START_X {
-            self.flip = false;
+            heading_right = false;
         }
+        scene.set_flip(self.member, heading_right, false);
         let mut velocity = scene.velocity(self.member);
-        velocity.dx = if self.flip { BADIE_SPEED } else { -BADIE_SPEED };
+        velocity.dx = if heading_right {
+            BADIE_SPEED
+        } else {
+            -BADIE_SPEED
+        };
         scene.set_velocity(self.member, velocity);
     }
 
-    pub fn draw(&self, gfx: &mut Graphics, scene: &Scene, frame: u32, mode: &GameMode) {
+    /// What the badie looks like this frame, written into its seat for the world to draw.
+    ///
+    /// Both cells carry the `BADIE` flag in the sprite editor, so switching between them never
+    /// changes what the hero meets.
+    pub fn animate(&self, scene: &mut Scene, frame: u32, mode: &GameMode) {
         let sprite = match mode {
             GameMode::InGame { .. } if (frame / 4).is_multiple_of(2) => BADIE_ALT_SPRITE,
             GameMode::Ended { .. } | GameMode::InGame { .. } => BADIE_SPRITE,
         };
-        let (x, y) = scene.draw_pos(self.member);
-        gfx.sprite_ext(sprite, x, y, 8, 8, self.flip, false)
-            .unwrap();
+        scene.set_sprite(self.member, Some(sprite));
     }
 }
