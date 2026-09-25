@@ -138,9 +138,10 @@ camera), so set them in `pixel8_init` or each frame as needed.
 
 ### Physics
 
-| function    | signature                             | notes                                                             |
-| ----------- | ------------------------------------- | ----------------------------------------------------------------- |
-| `step_cast` | `(cast: *mut u8, len: u32, cfg: u32)` | step a whole physics cast in place; see the record layout below   |
+| function    | signature                                  | notes                                                           |
+| ----------- | ------------------------------------------ | --------------------------------------------------------------- |
+| `step_cast` | `(cast: *mut u8, len: u32, cfg: u32)`      | step a whole physics cast in place; see the record layout below |
+| `draw_cast` | `(cast: *const u8, len: u32, layers: u32)` | draw a whole physics cast; the same records `step_cast` takes   |
 
 The one import behind the SDK's `physics::World::step` (the `physics` cargo feature): the cart
 hands over a buffer of its whole cast — one 44-byte record per member, up to 64 of them — and the
@@ -159,6 +160,17 @@ which the engine is inert against without knowing anything about vacancy: props 
 and a zero-size rectangle overlaps nothing. `len` is the high-water mark, one past the last seat
 taken.
 
+`physics::World::draw` is the step's drawing twin, and `draw_cast` is the one import behind it:
+the same buffer, handed over the same way, is drawn natively in one call — the host only reads
+it, and nothing goes back. Every record wearing a cell (`sprite != 0xffff`) and not hidden (`meta`
+bit 4) is drawn the way `sprite` would draw it — from its worn cell, `(span & 0x0f) + 1` cells
+across and `(span >> 4) + 1` down, at (`rx`, `ry`), mirrored left-to-right by `meta` bit 2 and
+top-to-bottom by bit 3, through the camera, the clip, the transparency and the draw palette — in
+buffer order, so a later record is drawn over an earlier one at the same spot. `layers` filters
+exactly as `map`'s does: 0 draws every such record, and otherwise only the ones whose worn cell's
+flags intersect it. `len` past 64 or a range outside cart memory draws nothing, and however long
+the cast, drawing it costs the cart one host call.
+
 Each record, little-endian, offsets in bytes:
 
 | off | type  | field         | direction | meaning                                                       |
@@ -173,10 +185,14 @@ Each record, little-endian, offsets in bytes:
 | 36  | `u16` | `sprite`      | in        | the cell the entity wears; `0xFFFF` = nothing                 |
 | 38  | `u8`  | `solid`       | in        | the flags that stop it, already settled with the world's      |
 | 39  | `u8`  | `heeds`       | in        | the flags it cares to be told about                           |
-| 40  | `u8`  | `meta`        | in        | bit 0: a prop (met, never moved); bit 1: confines are set     |
+| 40  | `u8`  | `meta`        | in        | bit 0: a prop; bit 1: confines are set; bits 2–4: the look    |
 | 41  | `u8`  | `sides`       | out       | the contact sides (left/right/above/below)                    |
 | 42  | `u8`  | `touched`     | out       | the flags of everything met                                   |
-| 43  | `u8`  | —             |           | padding                                                       |
+| 43  | `u8`  | `span`        | in        | the cells drawn: across − 1 (low 4 bits), down − 1 (high 4)   |
+
+`meta` bits 2 and 3 draw the member mirrored left to right and top to bottom, and bit 4 hides it
+— met like anybody else, never drawn. The step reads none of the three, nor `span`, and writes
+back neither, so a member's look survives every step exactly as the cart set it.
 
 The engine that answers is the SDK's own `physics` code, compiled into the console, so the
 resolution itself cannot drift between the wire and the SDK's native path; what the host side adds

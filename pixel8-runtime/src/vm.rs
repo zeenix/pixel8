@@ -14,6 +14,7 @@ use crate::{
     storage::Storage,
 };
 use anyhow::{anyhow, Context as _, Result};
+use pixel8::physics::wire::{Record, CAP, EMPTY, RECORD};
 use wasmi::{
     Caller, Config, Engine, Instance, Linker, Module, OperatorCost, Store, StoreLimits,
     StoreLimitsBuilder, TypedFunc,
@@ -248,6 +249,13 @@ impl GameVm {
             "step_cast",
             |mut c: Caller<'_, HostState>, ptr: u32, len: u32, config: u32| {
                 step_the_cast(&mut c, ptr, len, config)
+            }
+        );
+        link!(
+            linker,
+            "draw_cast",
+            |mut c: Caller<'_, HostState>, ptr: u32, len: u32, layers: u32| {
+                draw_the_cast(&mut c, ptr, len, layers)
             }
         );
         link!(linker, "sprite_flags", |c: Caller<'_, HostState>,
@@ -750,39 +758,14 @@ impl std::fmt::Display for RuntimeError {
 /// steps nothing, exactly as the rest of the ABI shrugs off bad arguments rather than trapping.
 fn step_the_cast(caller: &mut Caller<'_, HostState>, ptr: u32, len: u32, config: u32) {
     use pixel8::{
-        physics::{
-            wire::{Recast, Record, CAP, EMPTY, RECORD},
-            Kinetic, World,
-        },
+        physics::{wire::Recast, Kinetic, World},
         BitFlags, SpriteFlag,
     };
 
-    let members = len as usize;
-    if members > CAP {
+    let Some(mut records) = read_cast(caller, ptr, len) else {
         return;
-    }
-    // The records out of cart memory first, so the memory borrow is over before the engine runs.
-    let mut records = [EMPTY; CAP];
-    {
-        let Some(memory) = caller
-            .get_export("memory")
-            .and_then(wasmi::Extern::into_memory)
-        else {
-            return;
-        };
-        let data = memory.data(&*caller);
-        let start = ptr as usize;
-        let Some(end) = start.checked_add(members * RECORD) else {
-            return;
-        };
-        if end > data.len() {
-            return;
-        }
-        for (slot, record) in records[..members].iter_mut().enumerate() {
-            let at = start + slot * RECORD;
-            *record = Record::read(data[at..at + RECORD].try_into().expect("sized just above"));
-        }
-    }
+    };
+    let members = len as usize;
 
     let mut cast: Vec<Recast> = records[..members].iter().map(Recast::of).collect();
     {
@@ -844,6 +827,73 @@ fn step_the_cast(caller: &mut Caller<'_, HostState>, ptr: u32, len: u32, config:
     }
 }
 
+/// The console's half of the SDK's `World::draw` — the `draw_cast` import.
+///
+/// The very same records `step_cast` answers into, read the same way and never written back — a
+/// draw has nothing to report. What each one shows, and in which order, is the SDK's own
+/// `wire::looks`; every look it walks over goes through the very blit the `sprite` import uses, so
+/// the camera, the clip, the transparency and the draw palette hold for a cast exactly as they do
+/// for a sprite drawn by hand.
+///
+/// Anything malformed draws nothing, exactly as `step_cast` steps nothing.
+fn draw_the_cast(caller: &mut Caller<'_, HostState>, ptr: u32, len: u32, layers: u32) {
+    use pixel8::{physics::wire::looks, BitFlags, SpriteFlag, SpriteId};
+
+    let Some(records) = read_cast(caller, ptr, len) else {
+        return;
+    };
+    // Every one of the eight bits names a flag, so the raw mask always converts — `map` takes its
+    // layers the very same way.
+    let layers = BitFlags::<SpriteFlag>::from_bits(layers as u8)
+        .expect("all eight sprite-flag bits are flags");
+
+    let HostState { fb, sprites, .. } = caller.data_mut();
+    let sheet = &*sprites;
+    let carried = |sprite: SpriteId| {
+        BitFlags::<SpriteFlag>::from_bits(sheet.flags(sprite.0 as u32))
+            .expect("all eight sprite-flag bits are flags")
+    };
+    for look in looks(&records[..len as usize], layers, carried) {
+        fb.spr(
+            sheet,
+            u32::from(look.sprite.0),
+            i32::from(look.x),
+            i32::from(look.y),
+            i32::from(look.width),
+            i32::from(look.height),
+            look.flip_x,
+            look.flip_y,
+        );
+    }
+}
+
+/// The records out of cart memory, decoded: the read half `step_the_cast` and `draw_the_cast`
+/// share, so what counts as a malformed call can never differ between the two imports.
+///
+/// `None` for a length past `CAP`, a missing `memory` export, or a range off the end of it —
+/// nothing rather than a trap, exactly as the rest of the ABI answers a malformed call.
+fn read_cast(caller: &Caller<'_, HostState>, ptr: u32, len: u32) -> Option<[Record; CAP]> {
+    let members = len as usize;
+    if members > CAP {
+        return None;
+    }
+    let memory = caller
+        .get_export("memory")
+        .and_then(wasmi::Extern::into_memory)?;
+    let data = memory.data(caller);
+    let start = ptr as usize;
+    let end = start.checked_add(members * RECORD)?;
+    if end > data.len() {
+        return None;
+    }
+    let mut records = [EMPTY; CAP];
+    for (slot, record) in records[..members].iter_mut().enumerate() {
+        let at = start + slot * RECORD;
+        *record = Record::read(data[at..at + RECORD].try_into().expect("sized just above"));
+    }
+    Some(records)
+}
+
 fn read_guest_str(caller: &Caller<'_, HostState>, ptr: u32, len: u32) -> String {
     let Some(mem) = caller
         .get_export("memory")
@@ -886,6 +936,7 @@ mod fuel_costs;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pixel8::physics::wire::{FLIP_X, FLIP_Y, HIDDEN, UNWORN};
 
     /// A minimal hand-written cart exercising the ABI from WAT.
     const TEST_CART: &str = r#"
@@ -1086,6 +1137,58 @@ mod tests {
         )
     }
 
+    /// One record's wire bytes, touching only what a draw reads — `rx`/`ry` at 16/18 (`i16` LE),
+    /// `sprite` at 36 (`u16` LE), `meta` at 40, `span` at 43 — and zero everywhere else, the way
+    /// a raw client that only ever sets a member's look would leave it.
+    fn draw_record(rx: i16, ry: i16, sprite: u16, meta: u8, span: u8) -> [u8; RECORD] {
+        let mut bytes = [0u8; RECORD];
+        bytes[16..18].copy_from_slice(&rx.to_le_bytes());
+        bytes[18..20].copy_from_slice(&ry.to_le_bytes());
+        bytes[36..38].copy_from_slice(&sprite.to_le_bytes());
+        bytes[40] = meta;
+        bytes[43] = span;
+        bytes
+    }
+
+    /// A raw ABI client of `draw_cast`: `records`' bytes concatenated into one data segment at
+    /// address 64, drawn every frame with `layers`. `camera_xy`, given, is set with one `camera`
+    /// call right before the draw.
+    fn draw_cast_wat(
+        records: &[[u8; RECORD]],
+        layers: u32,
+        camera_xy: Option<(i32, i32)>,
+    ) -> String {
+        let data: String = records
+            .iter()
+            .flatten()
+            .map(|b| format!("\\{b:02x}"))
+            .collect();
+        let camera_call = match camera_xy {
+            Some((x, y)) => format!("(call $camera (i32.const {x}) (i32.const {y}))"),
+            None => String::new(),
+        };
+        format!(
+            r#"(module
+              (import "pixel8" "draw_cast" (func $draw (param i32 i32 i32)))
+              (import "pixel8" "camera" (func $camera (param i32 i32)))
+              (memory (export "memory") 1)
+              (data (i32.const 64) "{data}")
+              (func (export "pixel8_init"))
+              (func (export "pixel8_update"))
+              (func (export "pixel8_draw")
+                {camera_call}
+                (call $draw (i32.const 64) (i32.const {count}) (i32.const {layers}))))"#,
+            count = records.len(),
+        )
+    }
+
+    /// Like [`load_test_vm`], but with a caller-supplied `Assets` (a painted or flagged sheet)
+    /// instead of the all-blank default.
+    fn load_draw_vm(wat_src: &str, assets: &Assets) -> GameVm {
+        let wasm = wat::parse_str(wat_src).unwrap();
+        GameVm::load(&wasm, assets, AudioHandle::dummy(), Storage::default()).unwrap()
+    }
+
     #[test]
     fn parity_imports_link_and_run() {
         let mut vm = load_test_vm(PARITY_CART).unwrap();
@@ -1114,6 +1217,238 @@ mod tests {
         assert_eq!(fb.pget(1, 0), 9, "sprite was not preserved");
         assert_eq!(fb.pget(2, 0), 3, "solid was not preserved");
         assert_eq!(fb.pget(3, 0), 1, "meta was not preserved");
+    }
+
+    #[test]
+    fn a_record_draws_its_cell_at_its_drawn_pixel() {
+        let mut assets = Assets::default();
+        assets.sprites.set(3, 4, 7); // cell 0's local (3, 4)
+        let record = draw_record(50, 60, 0, 0, 0);
+        let mut vm = load_draw_vm(&draw_cast_wat(&[record], 0, None), &assets);
+        vm.call_draw().unwrap();
+        assert_eq!(
+            vm.state().fb.pget(53, 64),
+            7,
+            "the painted pixel landed at rx+3, ry+4"
+        );
+        assert_eq!(
+            vm.state().fb.pget(50, 60),
+            0,
+            "an unpainted pixel of the cell stayed clear"
+        );
+    }
+
+    #[test]
+    fn flip_x_and_flip_y_mirror_the_cell() {
+        // An asymmetric cell: only diagonal corners painted, so a flip is unmistakable.
+        let mut assets = Assets::default();
+        assets.sprites.set(8, 0, 8); // cell 1's local (0, 0)
+        assets.sprites.set(15, 7, 12); // cell 1's local (7, 7)
+
+        let flipped_x = draw_record(0, 0, 1, FLIP_X, 0);
+        let mut vm = load_draw_vm(&draw_cast_wat(&[flipped_x], 0, None), &assets);
+        vm.call_draw().unwrap();
+        assert_eq!(
+            vm.state().fb.pget(7, 0),
+            8,
+            "FLIP_X moved local (0,0) to the right edge"
+        );
+        assert_eq!(
+            vm.state().fb.pget(0, 7),
+            12,
+            "FLIP_X moved local (7,7) to the left edge"
+        );
+
+        let flipped_y = draw_record(0, 0, 1, FLIP_Y, 0);
+        let mut vm = load_draw_vm(&draw_cast_wat(&[flipped_y], 0, None), &assets);
+        vm.call_draw().unwrap();
+        assert_eq!(
+            vm.state().fb.pget(0, 7),
+            8,
+            "FLIP_Y moved local (0,0) to the bottom edge"
+        );
+        assert_eq!(
+            vm.state().fb.pget(7, 0),
+            12,
+            "FLIP_Y moved local (7,7) to the top edge"
+        );
+    }
+
+    #[test]
+    fn a_span_of_one_extra_column_draws_the_neighbour_to_the_right() {
+        let mut assets = Assets::default();
+        assets.sprites.set(8, 0, 6); // cell 1's local (0, 0), immediately right of cell 0
+        let record = draw_record(0, 0, 0, 0, 0x01);
+        let mut vm = load_draw_vm(&draw_cast_wat(&[record], 0, None), &assets);
+        vm.call_draw().unwrap();
+        assert_eq!(
+            vm.state().fb.pget(8, 0),
+            6,
+            "the block's second column is cell 1"
+        );
+    }
+
+    #[test]
+    fn a_span_of_one_extra_row_draws_the_neighbour_below() {
+        let mut assets = Assets::default();
+        assets.sprites.set(0, 8, 6); // cell 16's local (0, 0), immediately below cell 0
+        let record = draw_record(0, 0, 0, 0, 0x10);
+        let mut vm = load_draw_vm(&draw_cast_wat(&[record], 0, None), &assets);
+        vm.call_draw().unwrap();
+        assert_eq!(
+            vm.state().fb.pget(0, 8),
+            6,
+            "the block's second row is cell 16"
+        );
+    }
+
+    #[test]
+    fn hidden_and_unworn_records_draw_nothing() {
+        let mut assets = Assets::default();
+        assets.sprites.set(0, 0, 9); // cell 0's local (0, 0): would be visible if drawn
+                                     // And the cell an unworn record's `0xFFFF` would wrap to, were
+                                     // it ever taken for a cell:
+                                     // the blit reads its index modulo the sheet, which lands on
+                                     // cell 255.
+        assets.sprites.set(120, 120, 9);
+        let hidden = draw_record(10, 10, 0, HIDDEN, 0);
+        let unworn = draw_record(20, 20, UNWORN, 0, 0);
+        let mut vm = load_draw_vm(&draw_cast_wat(&[hidden, unworn], 0, None), &assets);
+        vm.call_draw().unwrap();
+        assert_eq!(
+            vm.state().fb.pget(10, 10),
+            0,
+            "a hidden record is never drawn"
+        );
+        assert_eq!(
+            vm.state().fb.pget(20, 20),
+            0,
+            "an unworn record is never drawn"
+        );
+    }
+
+    #[test]
+    fn layers_zero_draws_everything_and_a_mask_only_flagged_cells() {
+        let mut assets = Assets::default();
+        assets.sprites.set(0, 0, 4); // cell 0: unflagged
+        assets.sprites.set(8, 0, 5); // cell 1: flagged
+        assets.sprites.set_flag(1, 0, true);
+        let plain = draw_record(0, 0, 0, 0, 0);
+        let flagged = draw_record(20, 0, 1, 0, 0);
+
+        let mut all = load_draw_vm(&draw_cast_wat(&[plain, flagged], 0, None), &assets);
+        all.call_draw().unwrap();
+        assert_eq!(
+            all.state().fb.pget(0, 0),
+            4,
+            "layers 0 draws the unflagged cell too"
+        );
+        assert_eq!(
+            all.state().fb.pget(20, 0),
+            5,
+            "layers 0 draws the flagged cell too"
+        );
+
+        let mut masked = load_draw_vm(&draw_cast_wat(&[plain, flagged], 1, None), &assets);
+        masked.call_draw().unwrap();
+        assert_eq!(
+            masked.state().fb.pget(0, 0),
+            0,
+            "an unflagged cell is never picked by a mask"
+        );
+        assert_eq!(
+            masked.state().fb.pget(20, 0),
+            5,
+            "the flagged cell survives the mask"
+        );
+    }
+
+    #[test]
+    fn a_later_record_is_drawn_over_an_earlier_one() {
+        let mut assets = Assets::default();
+        for py in 0..8 {
+            for px in 0..8 {
+                assets.sprites.set(16 + px, py, 5); // cell 2: solid color 5
+            }
+        }
+        assets.sprites.set(24, 0, 9); // cell 3's local (0, 0); the rest of cell 3 stays 0
+        let under = draw_record(40, 40, 2, 0, 0);
+        let over = draw_record(40, 40, 3, 0, 0);
+        let mut vm = load_draw_vm(&draw_cast_wat(&[under, over], 0, None), &assets);
+        vm.call_draw().unwrap();
+        assert_eq!(
+            vm.state().fb.pget(40, 40),
+            9,
+            "the later record's opaque pixel wins"
+        );
+        assert_eq!(
+            vm.state().fb.pget(41, 40),
+            5,
+            "the earlier record shows through elsewhere"
+        );
+    }
+
+    #[test]
+    fn the_camera_offsets_the_whole_cast() {
+        let mut assets = Assets::default();
+        assets.sprites.set(0, 0, 6);
+        let record = draw_record(20, 20, 0, 0, 0);
+        let mut vm = load_draw_vm(&draw_cast_wat(&[record], 0, Some((5, 5))), &assets);
+        vm.call_draw().unwrap();
+        assert_eq!(
+            vm.state().fb.pget(15, 15),
+            6,
+            "the camera shifted the whole block"
+        );
+        assert_eq!(
+            vm.state().fb.pget(20, 20),
+            0,
+            "nothing was drawn at the unshifted position"
+        );
+    }
+
+    #[test]
+    fn a_malformed_cast_draws_nothing_without_trapping() {
+        // A drawable record leads the buffer, so a host that clamped the length instead of
+        // refusing it would draw it.
+        let mut assets = Assets::default();
+        assets.sprites.set(0, 0, 9);
+        let data: String = draw_record(10, 10, 0, 0, 0)
+            .iter()
+            .map(|b| format!("\\{b:02x}"))
+            .collect();
+        let bad_len = format!(
+            r#"(module
+              (import "pixel8" "draw_cast" (func $draw (param i32 i32 i32)))
+              (memory (export "memory") 1)
+              (data (i32.const 64) "{data}")
+              (func (export "pixel8_init"))
+              (func (export "pixel8_update"))
+              (func (export "pixel8_draw")
+                (call $draw (i32.const 64) (i32.const 65) (i32.const 0))))"#
+        );
+        let mut vm = load_draw_vm(&bad_len, &assets);
+        assert!(vm.call_draw().is_ok(), "a length past CAP must not trap");
+        assert_eq!(
+            vm.state().fb.pget(10, 10),
+            0,
+            "a length past CAP must draw nothing, not the records that would fit"
+        );
+
+        // 1 page = 65536 bytes; a record is 44, so a pointer with fewer than 44 bytes left is a
+        // range off the end of memory.
+        let bad_ptr = r#"(module
+              (import "pixel8" "draw_cast" (func $draw (param i32 i32 i32)))
+              (memory (export "memory") 1)
+              (func (export "pixel8_init"))
+              (func (export "pixel8_update"))
+              (func (export "pixel8_draw")
+                (call $draw (i32.const 65500) (i32.const 1) (i32.const 0))))"#;
+        let mut vm = load_draw_vm(bad_ptr, &Assets::default());
+        assert!(
+            vm.call_draw().is_ok(),
+            "a range off the end of memory must not trap"
+        );
     }
 
     #[test]
