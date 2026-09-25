@@ -4,17 +4,18 @@ use super::{
     collider::{far, Cast, Collider, Neighbour},
     wire, Bounds, Contact, Contacts, Force, Kinetic, Member, Subject, Velocity,
 };
-use crate::{motion::floor_i16, BitFlags, Context, SpriteFlag, SpriteId};
+use crate::{motion::floor_i16, BitFlags, Context, Graphics, SpriteFlag, SpriteId};
 
-/// The thing that moves everything, and the thing that holds it: `N` seats of cast, the scene's
-/// weather, and one call an update.
+/// The thing that moves everything, holds it and draws it: `N` seats of cast, the scene's weather,
+/// one call an update and one a frame.
 ///
 /// A cart makes one, [enlists](Self::enlist) everybody its scene is played by, and calls
 /// [`step`](Self::step). What that does, for each member in turn, is what an update of a moving
 /// thing has always had to do — run the forces over its velocity, stop whatever ran into the map's
 /// tiles or into the rest of the cast, keep it inside the rectangle it may not leave, move it by
 /// what survived, and write down what it met — except that nothing else in the cart does any of
-/// it, and nothing else in the cart holds any of it.
+/// it, and nothing else in the cart holds any of it. And once a frame, [`draw`](Self::draw) puts
+/// the whole cast on screen where the step left it.
 ///
 /// ```no_run
 /// use pixel8::{
@@ -24,6 +25,7 @@ use crate::{motion::floor_i16, BitFlags, Context, SpriteFlag, SpriteId};
 ///
 /// # const SPIKES: SpriteFlag = SpriteFlag::Flag2;
 /// # const BADIE_SPRITE: SpriteId = SpriteId(6);
+/// # const HERO_SPRITE: SpriteId = SpriteId(1);
 /// struct Level {
 ///     /// The scene: three seats under the level's pull, and every one of them a member the
 ///     /// handles below are the cart's grip on.
@@ -48,6 +50,7 @@ use crate::{motion::floor_i16, BitFlags, Context, SpriteFlag, SpriteId};
 ///         let hero = world
 ///             .enlist(16.0, 80.0, 8, 8)
 ///             .expect("a seat for the hero")
+///             .wearing(HERO_SPRITE)
 ///             .confined_to(Bounds::screen())
 ///             .member();
 ///
@@ -72,19 +75,21 @@ use crate::{motion::floor_i16, BitFlags, Context, SpriteFlag, SpriteId};
 ///
 ///     fn draw(&self, gfx: &mut Graphics) {
 ///         gfx.clear(Color::BLACK);
-///         let (x, y) = self.world.draw_pos(self.hero);
-///         gfx.sprite(SpriteId(1), x, y);
+///         // The whole cast, where the step left it: the badies, and the hero seated after them
+///         // drawn over them.
+///         self.world.draw(gfx, BitFlags::empty());
 ///     }
 /// }
 /// ```
 ///
 /// # What the world owns
 ///
-/// Everything about a member that moves or is collided with: the exact sub-pixel position and the
-/// coherent pixel it draws at, the velocity, the rectangle it covers, the cell it wears, what
-/// stops it, what it cares to hear about, how far it may go, what it weighs, and what its last
-/// step ran into. A cart keeps a [`Member`] — two bytes — and its own game data beside it, and
-/// asks the world for the rest.
+/// Everything about a member that moves, is collided with or is drawn: the exact sub-pixel
+/// position and the coherent pixel it draws at, the velocity, the rectangle it covers, the cell it
+/// wears and the rest of its look — which way round, how many cells, whether it is shown at all —
+/// what stops it, what it cares to hear about, how far it may go, what it weighs, and what its
+/// last step ran into. A cart keeps a [`Member`] — two bytes — and its own game data beside it,
+/// and asks the world for the rest.
 ///
 /// It is not a saving in bytes and does not pretend to be one. A seat is the forty-four bytes of
 /// its record plus nine the world keeps alongside, `N` of them for as long as the world lives,
@@ -103,10 +108,12 @@ use crate::{motion::floor_i16, BitFlags, Context, SpriteFlag, SpriteId};
 /// refused at compile time, so a world that builds is a world that steps.
 ///
 /// Members are stepped one at a time, in seat order, and each of them is resolved against the
-/// others *where they now stand*. That is the one thing worth ordering a cast for: enlist a lift
+/// others *where they now stand*. That is the first thing worth ordering a cast for: enlist a lift
 /// before its rider and the rider is carried up the moment the lift moves; enlist it after, and
-/// the rider spends the update on last update's platform. [`enlist`](Self::enlist) fills the lowest
-/// empty seat, so a cast seated once in the order the scene works stays in it.
+/// the rider spends the update on last update's platform. The other is what is drawn over what:
+/// [`draw`](Self::draw) goes in seat order too, so a later seat lands on top of an earlier one.
+/// [`enlist`](Self::enlist) fills the lowest empty seat, so a cast seated once in the order the
+/// scene works stays in it.
 ///
 /// An empty seat is nothing to anybody: it goes over the wire as a prop covering no pixels, which
 /// no force reaches, nothing is stopped by and nobody is told about. Retiring a member costs the
@@ -434,10 +441,11 @@ impl<const N: usize, F: Force> World<N, F> {
 
     /// The coherent pixel `member` draws at.
     ///
-    /// The one to hand [`Graphics::sprite`](crate::Graphics::sprite). It is
-    /// [`Body`](crate::Body)'s phase-coherent pixel — a sub-pixel diagonal climbs a clean staircase
-    /// through it instead of shimmering — and the step keeps it coherent across the wire, so a
-    /// running jump reads the same as it always did.
+    /// Where [`draw`](Self::draw) puts the member — the top left of the block it is drawn from —
+    /// and the pixel for anything a cart draws at it on its own: a rotor, a shadow, a name over its
+    /// head. It is [`Body`](crate::Body)'s phase-coherent pixel — a sub-pixel diagonal climbs a
+    /// clean staircase through it instead of shimmering — and the step keeps it coherent across the
+    /// wire, so a running jump reads the same as it always did.
     pub fn draw_pos(&self, member: Member) -> (i16, i16) {
         let record = &self.records[self.seat(member)];
 
@@ -565,9 +573,9 @@ impl<const N: usize, F: Force> World<N, F> {
 
     /// The cell `member` wears, if any — see [`Enlisting::wearing`].
     ///
-    /// The one answer for whoever draws the member and for whoever asks what everybody else
-    /// meets in it: the world owns the worn cell, so what is drawn and what is met can never
-    /// be two different sprites.
+    /// One cell for both halves of a member's part in the scene: [`draw`](Self::draw) draws the
+    /// member from it and [`step`](Self::step) steps it by the flags on it, so what is drawn and
+    /// what is met can never be two different sprites.
     pub fn sprite(&self, member: Member) -> Option<SpriteId> {
         let record = &self.records[self.seat(member)];
         match record.sprite {
@@ -578,14 +586,69 @@ impl<const N: usize, F: Force> World<N, F> {
 
     /// Sets the cell `member` wears, or takes it off — see [`Enlisting::wearing`].
     ///
-    /// A member whose look changes with its state: two walk-cycle cells carrying the same flag make
-    /// this moot, and a badie that turns into a puff of smoke does not.
+    /// How an animation is shown: the next frame of a walk cycle, written in the update that took
+    /// the step. Cells carrying the same flags change how the member looks and nothing about what
+    /// everybody meets, which is what a walk cycle wants; a badie that turns into a puff of smoke
+    /// changes both.
     pub fn set_sprite(&mut self, member: Member, sprite: Option<SpriteId>) {
         let record = &mut self.records[self.seat(member)];
         record.sprite = match sprite {
             Some(sprite) => sprite.0 as u16,
             None => wire::UNWORN,
         };
+    }
+
+    /// Which way round `member` is drawn: mirrored across, and mirrored up and down — see
+    /// [`Enlisting::flipped`].
+    pub fn flip(&self, member: Member) -> (bool, bool) {
+        let meta = self.records[self.seat(member)].meta;
+
+        (meta & wire::FLIP_X != 0, meta & wire::FLIP_Y != 0)
+    }
+
+    /// Sets which way round `member` is drawn — see [`Enlisting::flipped`].
+    ///
+    /// The walker turning round: written in the update that turned it, beside the velocity that
+    /// sends it back the way it came.
+    pub fn set_flip(&mut self, member: Member, flip_x: bool, flip_y: bool) {
+        let record = &mut self.records[self.seat(member)];
+        record.meta = mirrored(record.meta, flip_x, flip_y);
+    }
+
+    /// How many cells `member` is drawn from, across and down — see [`Enlisting::spanning`].
+    pub fn span(&self, member: Member) -> (u8, u8) {
+        let span = self.records[self.seat(member)].span;
+
+        ((span & 0x0f) + 1, (span >> 4) + 1)
+    }
+
+    /// Sets how many cells `member` is drawn from, across and down — see [`Enlisting::spanning`].
+    ///
+    /// The pose that needs more room than the rest: a sword swung out a cell in front, a stretch a
+    /// cell taller. It is the look alone — the rectangle the member is met by is
+    /// [`resize`](Self::resize)'s, if it changes at all — and a block no sheet holds panics here as
+    /// it does in [`spanning`](Enlisting::spanning).
+    pub fn set_span(&mut self, member: Member, width: u8, height: u8) {
+        let record = &mut self.records[self.seat(member)];
+        record.span = span_byte(width, height);
+    }
+
+    /// Whether `member` is left off the screen — see [`Enlisting::hidden`].
+    pub fn hidden(&self, member: Member) -> bool {
+        self.records[self.seat(member)].meta & wire::HIDDEN != 0
+    }
+
+    /// Hides `member`, or shows it again — see [`Enlisting::hidden`].
+    ///
+    /// The blink: a hero flickering through the frames after a hit is hidden on every other one
+    /// of them, and stepped, met and told on all of them alike.
+    pub fn set_hidden(&mut self, member: Member, hidden: bool) {
+        let record = &mut self.records[self.seat(member)];
+        if hidden {
+            record.meta |= wire::HIDDEN;
+        } else {
+            record.meta &= !wire::HIDDEN;
+        }
     }
 
     /// The member's own answer to what means *wall* to it, where it gave one — see
@@ -700,6 +763,10 @@ impl<const N: usize, F: Force> World<N, F> {
     /// still walking. A member driven by the buttons writes its sideways speed afresh every update
     /// and never notices; one carrying its own momentum does, which is the point.
     ///
+    /// How a member looks is none of the step's business: the cell it wears is read for the flags
+    /// on it and nothing more, and which way round it is drawn, how many cells it spans and whether
+    /// it is shown at all pass through every step untouched.
+    ///
     /// The weather is the world's own — one value, handed over once in
     /// [`with_forces`](Self::with_forces) — so a step asks for nothing but the update's context. A
     /// gust the whole scene is bent by lives on the world and is [driven](Self::forces_mut) between
@@ -727,6 +794,99 @@ impl<const N: usize, F: Force> World<N, F> {
 
         #[cfg(not(target_arch = "wasm32"))]
         self.step_natively(ctx);
+    }
+
+    /// Draws the whole cast, in seat order, where the last step left it.
+    ///
+    /// Each member is drawn from the cell it [wears](Enlisting::wearing), at the pixel it draws at
+    /// ([`draw_pos`](Self::draw_pos)), as many cells as it [spans](Enlisting::spanning), and
+    /// mirrored the way it is [flipped](Enlisting::flipped). A member that wears nothing is not
+    /// drawn, nor is one that is [hidden](Enlisting::hidden), and an empty seat is nothing here as
+    /// it is nothing everywhere else. Seat order is drawing order as it is stepping order: a later
+    /// seat is drawn over an earlier one.
+    ///
+    /// `layers` is the very filter [`Graphics::map`] takes. An empty set draws everybody; anything
+    /// else draws only the members whose worn cell carries one of those flags, so a member wearing
+    /// a flagless cell is drawn only by an empty `layers`. A scene drawn in layers is one call a
+    /// layer, and whatever draw state a layer needs — a transparency, a palette swap for a hurt
+    /// flash — is set around its call, as it would be around a `map`:
+    ///
+    /// ```no_run
+    /// # use pixel8::{physics::World, *};
+    /// # const AIRCRAFT: SpriteFlag = SpriteFlag::Flag0;
+    /// # const SHOT: SpriteFlag = SpriteFlag::Flag1;
+    /// # fn f(sky: &World<32>, gfx: &mut Graphics) {
+    /// gfx.clear(Color::DARK_BLUE);
+    /// // The shots first, so that every one of them is under the aircraft, whichever seats they
+    /// // were fired into.
+    /// sky.draw(gfx, SHOT);
+    /// // Then the aircraft, whose black outlines are drawn black rather than seen through.
+    /// gfx.set_transparent_color(Color::BLACK, false);
+    /// sky.draw(gfx, AIRCRAFT);
+    /// gfx.reset_transparency();
+    /// # }
+    /// ```
+    ///
+    /// The look is the update's to decide — [`set_sprite`](Self::set_sprite),
+    /// [`set_flip`](Self::set_flip) and the rest are written beside the velocity — and
+    /// [`Game::draw`](crate::Game::draw) holds the game by `&self`, so nothing about the world can
+    /// change here. What is set on the screen is honoured as it is for any sprite: the camera, the
+    /// clip, the transparency and the palette. Anything that is not a member — the HUD, a particle
+    /// effect, the line of a rotor — is the cart's, drawn before this call or after it.
+    ///
+    /// What a draw costs a cart is one crossing. The world's own seats are handed to the console
+    /// where they stand, exactly as [`step`](Self::step) hands them, and drawn natively, so a cast
+    /// of sixty-four costs a cart's draw the one call a cast of one does.
+    pub fn draw(&self, gfx: &mut Graphics, layers: impl Into<BitFlags<SpriteFlag>>) {
+        let layers = layers.into();
+        // Everything up to the last seat taken, exactly as the step sends it: an empty seat in the
+        // middle of it travels as `wire::VACANT`, which wears nothing and so shows nothing.
+        let taken = self.high_water();
+
+        // In the console, the whole draw is one crossing of the ABI and the console's own blits;
+        // on the native builds the tests are, the SDK walks the very same looks itself.
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = gfx;
+            // SAFETY: the pointer and the length name the first `taken` of the world's own `N`
+            // records, each `#[repr(C)]` and `wire::RECORD` bytes long — `high_water` never counts
+            // past `N` — and the console only reads those `taken * wire::RECORD` bytes, while
+            // `&self` keeps them unchanged for the length of the call.
+            unsafe {
+                crate::ffi::draw_cast(
+                    self.records.as_ptr().cast(),
+                    taken as u32,
+                    u32::from(layers.bits()),
+                );
+            }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // What the sheet says a cell carries, asked of the ABI the way
+            // `Context::sprite_flags` asks it: a draw has no context to ask through.
+            let carried = |sprite: SpriteId| {
+                // SAFETY: `sprite_flags` takes the cell by value and reaches no memory of the
+                // cart's; off the console it is the ABI's stub, which reads nothing at all.
+                let bits = unsafe { crate::ffi::sprite_flags(u32::from(sprite.0)) };
+                BitFlags::from_bits(bits as u8).expect(
+                    "sprite_flags returned an unknown sprite-flag bit \
+                     (pixel8 host/SDK ABI mismatch)",
+                )
+            };
+            for look in wire::looks(&self.records[..taken], layers, carried) {
+                gfx.sprite_ext(
+                    look.sprite,
+                    look.x,
+                    look.y,
+                    look.width,
+                    look.height,
+                    look.flip_x,
+                    look.flip_y,
+                )
+                .expect("a look is at least one cell each way");
+            }
+        }
     }
 
     /// One update's worth of the world's own forces, over every member the world moves.
@@ -1094,7 +1254,8 @@ impl<const N: usize, F: Force> Enlisting<'_, N, F> {
         self
     }
 
-    /// The same member, wearing `sprite`: the cell whose flags everybody else meets in it.
+    /// The same member, wearing `sprite`: the cell whose flags everybody else meets in it, and the
+    /// cell the world draws it from.
     ///
     /// The other side of [`stopped_by`](Self::stopped_by). That says which flags stop *me*; this
     /// says which flags I carry, and they are the flags the cart wrote on that cell in the sprite
@@ -1102,13 +1263,49 @@ impl<const N: usize, F: Force> Enlisting<'_, N, F> {
     /// because its cell is flagged `BADIE`, and everything that meets it is told `BADIE` in
     /// [`Contacts::touched`](super::Contacts::touched).
     ///
-    /// Wearing nothing — the default — is a member nobody is stopped by and nobody is told about.
-    /// It is still stopped by everything, and still told everything: a sensor needs no flag of its
-    /// own. A member whose look changes with its state changes what it wears with
-    /// [`set_sprite`](World::set_sprite); two walk-cycle cells carrying the same flag make the
-    /// question moot, which is the usual case.
+    /// It is the member's look as well: [`World::draw`] draws it from this very cell, mirrored or
+    /// spanning more cells as the builders below say, so what is drawn and what is met are one
+    /// sprite.
+    ///
+    /// Wearing nothing — the default — is a member nobody is stopped by, nobody is told about, and
+    /// nobody sees. It is still stopped by everything, and still told everything: a sensor needs no
+    /// flag of its own. A member whose look changes with its state changes what it wears with
+    /// [`set_sprite`](World::set_sprite); two walk-cycle cells carrying the same flag change
+    /// nothing anybody meets, which is the usual case.
     pub fn wearing(self, sprite: SpriteId) -> Self {
         self.world.records[self.slot].sprite = sprite.0 as u16;
+
+        self
+    }
+
+    /// The same member, drawn mirrored: across for `flip_x`, and up and down for `flip_y`.
+    ///
+    /// Which way a member faces is part of how it looks, and the world [draws](World::draw) it
+    /// that way. Nothing about the step reads it: the rectangle stays where it is, and the flags
+    /// everybody else meets are the worn cell's either way round. A member that turns as it walks
+    /// turns with [`set_flip`](World::set_flip), in the update that turned it.
+    pub fn flipped(self, flip_x: bool, flip_y: bool) -> Self {
+        let record = &mut self.world.records[self.slot];
+        record.meta = mirrored(record.meta, flip_x, flip_y);
+
+        self
+    }
+
+    /// The same member, drawn from a block of `width` x `height` cells of the sheet, with the cell
+    /// it wears at its top left.
+    ///
+    /// The way [`Graphics::sprite_ext`] draws a block: a 16x16 hero is `spanning(2, 2)`, wearing
+    /// the cell at the top left of its picture. One cell is the default, and what most of a cast
+    /// is drawn from.
+    ///
+    /// It is the look and only the look. The rectangle the member is stepped by is still the one
+    /// [`enlist`](World::enlist) gave it, and what everybody meets in it is still the flags of the
+    /// one cell it wears.
+    ///
+    /// One to sixteen cells each way, the sheet being sixteen cells across; anything else is a bug
+    /// in the cart, and panics saying so.
+    pub fn spanning(self, width: u8, height: u8) -> Self {
+        self.world.records[self.slot].span = span_byte(width, height);
 
         self
     }
@@ -1215,9 +1412,23 @@ impl<const N: usize, F: Force> Enlisting<'_, N, F> {
     /// resolves it, and its contacts are never written. The cart drives it wherever it likes, on
     /// whatever rails it likes, with [`set_pos`](World::set_pos) before the world steps. A hazard
     /// patrolling a fixed beat, a lift on a track, a door: things the world must know about without
-    /// being asked to drive them.
+    /// being asked to drive them. It is [drawn](World::draw) like anybody else, wherever the cart
+    /// last put it.
     pub fn prop(self) -> Self {
         self.world.records[self.slot].meta |= wire::PROP;
+
+        self
+    }
+
+    /// The same member, hidden: in the cast to be met, never to be drawn.
+    ///
+    /// The other half of what a [prop](Self::prop) is: a prop is met and never moved, and a hidden
+    /// member is met and never drawn. It is in the cast like anybody else — stepped, stopping
+    /// whoever its cell is a wall to, and told what it meets — and [`World::draw`] leaves it off
+    /// the screen. An invisible wall, a trigger wearing a flagged cell, a hero blinking through the
+    /// frames after a hit, with [`set_hidden`](World::set_hidden) on every other one of them.
+    pub fn hidden(self) -> Self {
+        self.world.records[self.slot].meta |= wire::HIDDEN;
 
         self
     }
@@ -1593,6 +1804,36 @@ fn corner((rx, ry): (i16, i16), (dx, dy): (i16, i16)) -> (i16, i16) {
     (along(rx, dx), along(ry, dy))
 }
 
+/// `meta` with its two mirror bits set for `flip_x` and `flip_y`, and every other bit — what the
+/// step reads, and whether the member is shown — as it was.
+fn mirrored(meta: u8, flip_x: bool, flip_y: bool) -> u8 {
+    let mut mirrored = meta & !(wire::FLIP_X | wire::FLIP_Y);
+    if flip_x {
+        mirrored |= wire::FLIP_X;
+    }
+    if flip_y {
+        mirrored |= wire::FLIP_Y;
+    }
+
+    mirrored
+}
+
+/// The wire's `span` byte for a block of `width` x `height` cells — or a panic, for a block no
+/// sheet holds.
+///
+/// A nibble each way, holding the cells less one: the single cell is zero, which is what every
+/// seat starts as, and the whole sheet is `0xff`. Nothing outside one to sixteen fits a nibble
+/// that way, and a cart asking for it has made a mistake better heard about where it was made
+/// than drawn from some other block of the sheet.
+fn span_byte(width: u8, height: u8) -> u8 {
+    assert!(
+        (1..=16).contains(&width) && (1..=16).contains(&height),
+        "a member is drawn from one to sixteen cells each way, not {width}x{height}"
+    );
+
+    (width - 1) | ((height - 1) << 4)
+}
+
 /// The cold half of [`World::seat`]'s check: the panic a stale handle is answered with, out of
 /// every hot path so the check itself is a compare and nothing more.
 #[cold]
@@ -1959,11 +2200,17 @@ mod tests {
         // handle or by the chain still describing it, and never by nothing.
         let mut world: World<1> = World::new();
         let _ = world.enlist(10.0, 10.0, 8, 8);
-        let unfinished = world.enlist(5.0, 5.0, 8, 8).unwrap().wearing(CRATE_SPRITE);
+        let unfinished = world
+            .enlist(5.0, 5.0, 8, 8)
+            .unwrap()
+            .wearing(CRATE_SPRITE)
+            .flipped(true, true)
+            .spanning(2, 2)
+            .hidden();
         drop(unfinished);
 
         // The world of one has its one seat back — and nothing the abandoned chains wrote is
-        // waiting in it for whoever is seated next.
+        // waiting in it for whoever is seated next, the look included.
         let member = world
             .enlist(0.0, 0.0, 8, 8)
             .expect("the seat was leaked")
@@ -1971,6 +2218,9 @@ mod tests {
         assert!(world.seated(member));
         assert_eq!(world.pos(member), (0.0, 0.0));
         assert_eq!(world.sprite(member), None);
+        assert_eq!(world.flip(member), (false, false));
+        assert_eq!(world.span(member), (1, 1));
+        assert!(!world.hidden(member));
     }
 
     #[test]
@@ -2302,6 +2552,267 @@ mod tests {
         world.step(&CTX);
         assert_eq!(world.pos(walker), (-2.0, 8.5));
         assert_eq!(world.contacts(walker), Contacts::empty());
+    }
+
+    #[test]
+    fn a_bare_member_is_drawn_from_one_cell_unflipped_and_shown() {
+        let mut world: World<1> = World::new();
+        let bare = pebble(&mut world, 4.5, -2.25);
+        assert_eq!(world.flip(bare), (false, false));
+        assert_eq!(world.span(bare), (1, 1));
+        assert!(!world.hidden(bare));
+        let record = &world.records[bare.seat()];
+        assert_eq!(
+            record.meta & (wire::FLIP_X | wire::FLIP_Y | wire::HIDDEN),
+            0
+        );
+        assert_eq!(record.span, 0);
+
+        // And it wears nothing, so for all its look there is nothing of it to draw.
+        let taken = &world.records[..world.high_water()];
+        assert_eq!(wire::looks(taken, BitFlags::empty(), unflagged).count(), 0);
+    }
+
+    #[test]
+    fn everything_an_enlisting_says_about_the_look_reaches_the_seat() {
+        let mut world: World<1> = World::new();
+        let member = world
+            .enlist(0.0, 0.0, 8, 8)
+            .unwrap()
+            .wearing(CRATE_SPRITE)
+            .flipped(true, false)
+            .spanning(2, 3)
+            .hidden()
+            .member();
+
+        let record = &world.records[member.seat()];
+        assert_eq!(record.meta, wire::FLIP_X | wire::HIDDEN);
+        // Two across less one in the low nibble, three down less one in the high.
+        assert_eq!(record.span, 0x21);
+        assert_eq!(world.flip(member), (true, false));
+        assert_eq!(world.span(member), (2, 3));
+        assert!(world.hidden(member));
+    }
+
+    #[test]
+    fn what_a_member_looks_like_can_be_changed_after_it_is_seated() {
+        // A prop held to the screen, so the bits the step reads are set all along and every
+        // change to the look has to leave them standing.
+        let mut world: World<1> = World::new();
+        let door = world
+            .enlist(0.0, 0.0, 8, 8)
+            .unwrap()
+            .wearing(CRATE_SPRITE)
+            .confined_to(Bounds::screen())
+            .prop()
+            .member();
+        let seat = door.seat();
+        let steps_by = wire::PROP | wire::CONFINED;
+
+        world.set_flip(door, true, false);
+        assert_eq!(world.records[seat].meta, steps_by | wire::FLIP_X);
+        assert_eq!(world.flip(door), (true, false));
+        // Turned the other way round: across cleared, up and down set.
+        world.set_flip(door, false, true);
+        assert_eq!(world.records[seat].meta, steps_by | wire::FLIP_Y);
+        assert_eq!(world.flip(door), (false, true));
+
+        world.set_span(door, 16, 16);
+        assert_eq!(world.records[seat].span, 0xff);
+        assert_eq!(world.span(door), (16, 16));
+
+        world.set_hidden(door, true);
+        assert_eq!(
+            world.records[seat].meta,
+            steps_by | wire::FLIP_Y | wire::HIDDEN
+        );
+        assert!(world.hidden(door));
+        assert_eq!(world.records[seat].look(), None);
+        world.set_hidden(door, false);
+        assert_eq!(world.records[seat].meta, steps_by | wire::FLIP_Y);
+        assert!(!world.hidden(door));
+        assert!(
+            world.records[seat].look().is_some(),
+            "it was never shown again"
+        );
+    }
+
+    #[test]
+    fn the_cast_is_drawn_where_it_stands_in_seat_order() {
+        // Three members wearing three cells — one plain, one hidden, one turned round and drawn
+        // from a block — and a seat retired from under the middle of them.
+        let mut world: World<4> = World::new();
+        let plain = world
+            .enlist(3.5, 7.25, 8, 8)
+            .unwrap()
+            .wearing(SpriteId(5))
+            .member();
+        let gone = world
+            .enlist(20.0, 0.0, 8, 8)
+            .unwrap()
+            .wearing(SpriteId(6))
+            .member();
+        let _ghost = world
+            .enlist(40.0, 0.0, 8, 8)
+            .unwrap()
+            .wearing(WALL_SPRITE)
+            .hidden()
+            .member();
+        let turned = world
+            .enlist(60.5, 30.0, 8, 8)
+            .unwrap()
+            .wearing(CRATE_SPRITE)
+            .flipped(true, false)
+            .spanning(2, 3)
+            .member();
+        world.retire(gone);
+
+        // Only the two that show, in the order they are seated, each at the pixel it draws at.
+        let taken = &world.records[..world.high_water()];
+        let (plain_x, plain_y) = world.draw_pos(plain);
+        let (turned_x, turned_y) = world.draw_pos(turned);
+        let shown: Vec<wire::Look> = wire::looks(taken, BitFlags::empty(), unflagged).collect();
+        assert_eq!(
+            shown,
+            [
+                wire::Look {
+                    sprite: SpriteId(5),
+                    x: plain_x,
+                    y: plain_y,
+                    width: 8,
+                    height: 8,
+                    flip_x: false,
+                    flip_y: false,
+                },
+                wire::Look {
+                    sprite: CRATE_SPRITE,
+                    x: turned_x,
+                    y: turned_y,
+                    width: 16,
+                    height: 24,
+                    flip_x: true,
+                    flip_y: false,
+                },
+            ]
+        );
+
+        // A layer draws only the member whose cell carries it: not the one wearing a flagless
+        // cell, and not the hidden one, whatever its own cell carries.
+        let layered: Vec<SpriteId> = wire::looks(taken, WALL | CRATE, flagged)
+            .map(|look| look.sprite)
+            .collect();
+        assert_eq!(layered, [CRATE_SPRITE]);
+    }
+
+    #[test]
+    fn a_step_moves_the_look_with_the_body_and_leaves_the_rest_of_it_alone() {
+        let mut world: World<1> = World::new();
+        let runner = world
+            .enlist(0.0, 0.0, 8, 8)
+            .unwrap()
+            .moving(3.0, 2.0)
+            .wearing(CRATE_SPRITE)
+            .flipped(true, true)
+            .spanning(2, 1)
+            .hidden()
+            .member();
+        world.step(&CTX);
+        assert_eq!(world.draw_pos(runner), (3, 2), "the step never moved it");
+
+        // Nothing of the look went into the step, and nothing of it came back changed.
+        assert_eq!(world.flip(runner), (true, true));
+        assert_eq!(world.span(runner), (2, 1));
+        assert!(world.hidden(runner));
+
+        // And shown again, it is drawn where the step left the body.
+        world.set_hidden(runner, false);
+        let look = world.records[runner.seat()]
+            .look()
+            .expect("a member wearing a cell and shown has a look");
+        assert_eq!((look.x, look.y), world.draw_pos(runner));
+    }
+
+    #[test]
+    fn a_retired_seat_shows_nothing_and_the_next_member_in_it_starts_plain() {
+        let mut world: World<1> = World::new();
+        let showy = world
+            .enlist(0.0, 0.0, 8, 8)
+            .unwrap()
+            .wearing(CRATE_SPRITE)
+            .flipped(true, true)
+            .spanning(3, 2)
+            .member();
+        let seat = showy.seat();
+        assert!(world.records[seat].look().is_some());
+        world.retire(showy);
+        assert_eq!(world.records[seat].look(), None, "a retired seat was drawn");
+
+        // Whoever is seated there next wears a cell of its own and nothing else of the last one's.
+        let successor = world
+            .enlist(8.0, 16.0, 8, 8)
+            .unwrap()
+            .wearing(CRATE_SPRITE)
+            .member();
+        assert_eq!(world.flip(successor), (false, false));
+        assert_eq!(world.span(successor), (1, 1));
+        assert!(!world.hidden(successor));
+        assert_eq!(
+            world.records[seat].look(),
+            Some(wire::Look {
+                sprite: CRATE_SPRITE,
+                x: 8,
+                y: 16,
+                width: 8,
+                height: 8,
+                flip_x: false,
+                flip_y: false,
+            })
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "one to sixteen cells")]
+    fn a_member_drawn_from_no_cells_at_all_is_refused_loudly() {
+        let mut world: World<1> = World::new();
+        let _ = world
+            .enlist(0.0, 0.0, 8, 8)
+            .unwrap()
+            .spanning(0, 1)
+            .member();
+    }
+
+    #[test]
+    #[should_panic(expected = "one to sixteen cells")]
+    fn a_member_drawn_from_past_the_edge_of_the_sheet_is_refused_loudly() {
+        let mut world: World<1> = World::new();
+        let member = pebble(&mut world, 0.0, 0.0);
+        world.set_span(member, 1, 17);
+    }
+
+    #[test]
+    fn a_draw_walks_the_seats_natively_whatever_the_layers() {
+        // Off the console the draw walks the very looks the console would and blits each through
+        // the ABI's stubs: nothing to see, and nothing on the way that may panic — not a gap in
+        // the cast, not the widest block there is, and not a layer.
+        let mut world: World<3> = World::new();
+        let _shown = world
+            .enlist(0.0, 0.0, 8, 8)
+            .unwrap()
+            .wearing(CRATE_SPRITE)
+            .member();
+        let gone = pebble(&mut world, 16.0, 0.0);
+        let _sheet = world
+            .enlist(32.0, 0.0, 8, 8)
+            .unwrap()
+            .wearing(WALL_SPRITE)
+            .flipped(true, true)
+            .spanning(16, 16)
+            .member();
+        world.retire(gone);
+
+        let mut gfx = Graphics { _private: () };
+        world.draw(&mut gfx, BitFlags::empty());
+        world.draw(&mut gfx, WALL);
     }
 
     #[test]

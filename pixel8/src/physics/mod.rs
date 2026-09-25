@@ -13,7 +13,10 @@
 //! Forces act on velocity, never on position, and no member moves itself. One [`step`](World::step)
 //! an update runs the scene's weather over every velocity, stops whatever ran into the map's tiles
 //! or into the rest of the cast, holds each member inside the rectangle it may not leave, moves the
-//! bodies by what survived, and writes down what everybody met. One call a scene, an update.
+//! bodies by what survived, and writes down what everybody met. One call a scene, an update. And
+//! one [`draw`](World::draw) a frame puts the whole cast on screen, where the step left it and
+//! looking the way the update said, so a cart's `draw` is one call and whatever it paints of its
+//! own.
 //!
 //! The weather belongs to the scene rather than to the things in it: the same gust that bends the
 //! whole cast is one [`Wind`] the world [owns](World::with_forces), driven where it lives.
@@ -35,8 +38,8 @@
 //!     // pull, the air, and a wind that gusts and so cannot be a constant.
 //!     world: World<16, (Gravity, Atmosphere, Wind)>,
 //!     leaves: [Member; 16],
-//!     // The cart's own, which the world has never heard of: which way each leaf is facing.
-//!     turned: [bool; 16],
+//!     // The cart's own, which the world has never heard of: how many leaves the player caught.
+//!     caught: u16,
 //! }
 //!
 //! impl Autumn {
@@ -47,6 +50,7 @@
 //!             world
 //!                 .enlist(i as f32 * 8.0, 0.0, 4, 4)
 //!                 .expect("a seat apiece for sixteen leaves")
+//!                 .wearing(SpriteId(1))
 //!                 // A leaf weighs next to nothing, so the wind has three times the grip on it —
 //!                 // and the still air three times the drag. Gravity does not read this:
 //!                 // everything falls alike.
@@ -54,7 +58,7 @@
 //!                 .member()
 //!         });
 //!
-//!         Self { world, leaves, turned: [false; 16] }
+//!         Self { world, leaves, caught: 0 }
 //!     }
 //! }
 //!
@@ -67,10 +71,7 @@
 //!
 //!     fn draw(&self, gfx: &mut Graphics) {
 //!         gfx.clear(Color::BLACK);
-//!         for leaf in self.leaves {
-//!             let (x, y) = self.world.draw_pos(leaf);
-//!             gfx.sprite(SpriteId(1), x, y);
-//!         }
+//!         self.world.draw(gfx, BitFlags::empty());
 //!     }
 //! }
 //! ```
@@ -274,7 +275,10 @@
 //!   the ones stepped before it where they have *just* moved to. So a lift enlisted before its
 //!   rider carries the rider with no lag at all, and one enlisted after it is a frame behind.
 //!   Enlist the cast the way the scene works. A seat freed by `retire` is the next one filled, so
-//!   the order a scene is seated in is the order it keeps.
+//!   the order a scene is seated in is the order it keeps. It is the order the cast is
+//!   [drawn](World::draw) in, too: a later seat over an earlier one. Where the two orders pull
+//!   apart — a shot takes whatever seat is free, yet belongs under the aircraft whichever it was —
+//!   [layers](#drawing) are the way out.
 //! * **Never itself.** The world knows who is who — a member is simply left out of its own
 //!   questions — so a member's own kind is a wall like anybody else's. Two crates whose
 //!   [`wearing`](Enlisting::wearing) cell carries `CRATE`, each with `CRATE`
@@ -382,6 +386,74 @@
 //! enemy wants: it walks off the map, and the cart [retires](World::retire) it when
 //! [`Bounds::on_screen`] says it has gone.
 //!
+//! # Drawing
+//!
+//! The world draws its cast as it steps it. One [`World::draw`] a frame puts every member on
+//! screen where the last step left it, and what it draws is the member's *look*, which is the
+//! world's like everything else about it: the cell it [wears](Enlisting::wearing), which way round
+//! it faces ([`flipped`](Enlisting::flipped), [`set_flip`](World::set_flip)), how many cells of
+//! the sheet it spans ([`spanning`](Enlisting::spanning), [`set_span`](World::set_span)), and
+//! whether it is shown at all ([`hidden`](Enlisting::hidden), [`set_hidden`](World::set_hidden)).
+//! A member that wears nothing is not drawn: nobody is stopped by it, nobody is told about it, and
+//! nobody sees it either.
+//!
+//! The look is decided in the update, beside the velocity, by the code that knows why it changed:
+//! a walker turns round in the update that turned it, and puts on the next cell of its walk in the
+//! update that carried it there. By the time [`Game::draw`](crate::Game::draw) runs — holding the
+//! game by `&self` — there is nothing left to decide, and only the showing to do:
+//!
+//! ```no_run
+//! # use pixel8::{physics::{Member, World}, *};
+//! /// Two cells of a walk, flagged alike on the sheet: which one is worn changes how the walker
+//! /// looks and nothing about what it is met as.
+//! const WALK: [SpriteId; 2] = [SpriteId(16), SpriteId(17)];
+//!
+//! struct Stroll {
+//!     world: World<1>,
+//!     walker: Member,
+//! }
+//!
+//! impl Game for Stroll {
+//!     fn update(&mut self, ctx: &mut Context) {
+//!         let mut velocity = self.world.velocity(self.walker);
+//!         velocity.dx = if ctx.is_button_down(Button::Left) {
+//!             -1.0
+//!         } else if ctx.is_button_down(Button::Right) {
+//!             1.0
+//!         } else {
+//!             0.0
+//!         };
+//!         self.world.set_velocity(self.walker, velocity);
+//!         // How it looks, said beside how it moves: facing the way it was last sent, and a step
+//!         // of the walk for every four pixels it has come.
+//!         if velocity.dx != 0.0 {
+//!             self.world.set_flip(self.walker, velocity.dx < 0.0, false);
+//!         }
+//!         let (x, _) = self.world.draw_pos(self.walker);
+//!         let stride = WALK[(x / 4).rem_euclid(2) as usize];
+//!         self.world.set_sprite(self.walker, Some(stride));
+//!
+//!         self.world.step(ctx);
+//!     }
+//!
+//!     fn draw(&self, gfx: &mut Graphics) {
+//!         gfx.clear(Color::BLACK);
+//!         self.world.draw(gfx, BitFlags::empty());
+//!     }
+//! }
+//! ```
+//!
+//! Seat order is drawing order, as it is stepping order: a later seat is drawn over an earlier
+//! one. A scene that wants it otherwise draws in layers, and `draw`'s `layers` is the very filter
+//! [`Graphics::map`](crate::Graphics::map) takes — an empty set draws everybody, and anything else
+//! only the members whose worn cell carries one of those flags. It is one call a layer, and
+//! whatever draw state a layer needs — a transparency, a palette swap for a hurt flash — is set
+//! around its call, as it would be around a `map`.
+//!
+//! Everything that is not a member is the cart's, drawn before the cast or after it: the map
+//! behind it, the HUD over it, a particle effect, the line of a rotor at a member's
+//! [`draw_pos`](World::draw_pos).
+//!
 //! # Forces of your own
 //!
 //! A [`Force`] is one method, so a cart's own force fields — a current, a magnet, the drag of deep
@@ -434,7 +506,8 @@
 //! single ownership buys is that nothing is ever copied: the step hands the console the world's own
 //! array and the console answers into it, so a cart pays for one call an update and not for a
 //! marshalling loop over its cast. The collisions themselves are the console's native work and cost
-//! a cart no fuel at all.
+//! a cart no fuel at all. The same array goes across again to be drawn, and the console draws it
+//! natively too: one call a frame, however long the cast.
 
 mod atmosphere;
 mod bounds;

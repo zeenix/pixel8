@@ -4,9 +4,9 @@
 /// in it.
 ///
 /// What [`enlist`](super::World::enlist) hands back and the cart keeps beside its own game data.
-/// Two bytes, [`Copy`], and nothing else: the position, the velocity, the rectangle and the
-/// contacts are all the world's, and every one of them is asked for with this — `world.pos(hero)`,
-/// `world.contacts(hero)`, `world.set_velocity(hero, v)`.
+/// Two bytes, [`Copy`], and nothing else: the position, the velocity, the rectangle, the contacts
+/// and the look are all the world's, and every one of them is asked for with this —
+/// `world.pos(hero)`, `world.contacts(hero)`, `world.set_velocity(hero, v)`.
 ///
 /// ```no_run
 /// # use pixel8::physics::{Member, World};

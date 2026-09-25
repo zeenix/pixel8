@@ -202,8 +202,8 @@ against, and the console that builds and runs it.
   cart. Optional features add ready-made effect families, each in a module of its own —
   `plume-effects` brings `plume`, with the `Fire`, `SmokingFire` and `Smoke` particle plumes and
   the `Explosion` burst in it, and `physics` brings `physics`, with `Gravity`, `Atmosphere`,
-  `Wind`, collision against the map and between entities, and the `Force` trait a cart writes its
-  own against.
+  `Wind`, collision against the map and between entities, the `Force` trait a cart writes its own
+  against, and a `World` that owns a scene's cast and steps and draws it.
 - **[`pixel8-console`](https://crates.io/crates/pixel8-console)** — the desktop console and
   toolchain. `cargo install pixel8-console` gives you the `pixel8` command: the boot prompt, the
   five editors (code, sprite, map, sfx, music), the build-and-hot-reload loop and every headless
