@@ -1,8 +1,8 @@
 //! The engine's view of one cast member: what it is, and nothing about what it does.
 //!
 //! Not a cart's business, and no longer anything a cart writes. A cart describes its members once
-//! as it [enlists](super::World::enlist) them and the [`World`](super::World) keeps them; this
-//! trait is the seam the engine is written against, so that the same
+//! as it [enlists](super::MemberBuilder::enlist) them and the [`World`](super::World) keeps them;
+//! this trait is the seam the engine is written against, so that the same
 //! [`step_cast`](super::World::step_hosted) can be run over the world's own
 //! [`Recast`](super::wire::Recast)s on the console's side of the wire and over whatever the
 //! module's own tests write down. It is `pub` because the console reaches it

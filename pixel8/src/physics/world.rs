@@ -4,16 +4,16 @@ use super::{
     collider::{far, Cast, Collider, Neighbour},
     wire, Bounds, Contact, Contacts, Force, Kinetic, Member, Subject, Velocity,
 };
-use crate::{motion::floor_i16, BitFlags, Context, Graphics, SpriteFlag, SpriteId};
+use crate::{BitFlags, Context, Graphics, SpriteFlag, SpriteId};
 
 /// The thing that moves everything, holds it and draws it: `N` seats of cast, the scene's weather,
 /// one call an update and one a frame.
 ///
-/// A cart makes one, [enlists](Self::enlist) everybody its scene is played by, and calls
-/// [`step`](Self::step). What that does, for each member in turn, is what an update of a moving
-/// thing has always had to do — run the forces over its velocity, stop whatever ran into the map's
-/// tiles or into the rest of the cast, keep it inside the rectangle it may not leave, move it by
-/// what survived, and write down what it met — except that nothing else in the cart does any of
+/// A cart makes one, [enlists](super::MemberBuilder::enlist) everybody its scene is played by, and
+/// calls [`step`](Self::step). What that does, for each member in turn, is what an update of a
+/// moving thing has always had to do — run the forces over its velocity, stop whatever ran into the
+/// map's tiles or into the rest of the cast, keep it inside the rectangle it may not leave, move it
+/// by what survived, and write down what it met — except that nothing else in the cart does any of
 /// it, and nothing else in the cart holds any of it. And once a frame, [`draw`](Self::draw) puts
 /// the whole cast on screen where the step left it.
 ///
@@ -41,18 +41,16 @@ use crate::{motion::floor_i16, BitFlags, Context, Graphics, SpriteFlag, SpriteId
 ///         let mut world = World::new().with_solid(SpriteFlag::Flag0).with_forces(Gravity::new());
 ///         // Seat order is stepping order, so the badies go on before the hero that meets them.
 ///         let badies = [40.0, 90.0].map(|x| {
-///             world
-///                 .enlist(x, 96.0, 8, 8)
-///                 .expect("a seat apiece for the badies")
+///             Member::builder(x, 96.0, 8, 8)
 ///                 .wearing(BADIE_SPRITE)
-///                 .member()
+///                 .enlist(&mut world)
+///                 .expect("a seat apiece for the badies")
 ///         });
-///         let hero = world
-///             .enlist(16.0, 80.0, 8, 8)
-///             .expect("a seat for the hero")
+///         let hero = Member::builder(16.0, 80.0, 8, 8)
 ///             .wearing(HERO_SPRITE)
 ///             .confined_to(Bounds::screen())
-///             .member();
+///             .enlist(&mut world)
+///             .expect("a seat for the hero");
 ///
 ///         Self { world, hero, badies, score: 0 }
 ///     }
@@ -62,15 +60,15 @@ use crate::{motion::floor_i16, BitFlags, Context, Graphics, SpriteFlag, SpriteId
 ///     fn update(&mut self, ctx: &mut Context) {
 ///         // Whatever each of them means to do this update — read the buttons, turn a patrol
 ///         // round — is written into its velocity first. Then the world moves the lot.
-///         let mut velocity = self.world.velocity(self.hero);
+///         let mut velocity = self.hero.velocity(&self.world);
 ///         velocity.dx = if ctx.is_button_down(Button::Right) { 0.7 } else { 0.0 };
-///         self.world.set_velocity(self.hero, velocity);
+///         self.hero.set_velocity(&mut self.world, velocity);
 ///
 ///         self.world.step(ctx);
 ///
 ///         // And the answers are waiting in the seats.
-///         let grounded = self.world.contacts(self.hero).below();
-///         let hurt = self.world.contacts(self.hero).touches(SPIKES);
+///         let grounded = self.hero.contacts(&self.world).below();
+///         let hurt = self.hero.contacts(&self.world).touches(SPIKES);
 ///     }
 ///
 ///     fn draw(&self, gfx: &mut Graphics) {
@@ -89,7 +87,7 @@ use crate::{motion::floor_i16, BitFlags, Context, Graphics, SpriteFlag, SpriteId
 /// wears and the rest of its look — which way round, how many cells, whether it is shown at all —
 /// what stops it, what it cares to hear about, how far it may go, what it weighs, and what its
 /// last step ran into. A cart keeps a [`Member`] — two bytes — and its own game data beside it,
-/// and asks the world for the rest.
+/// and asks the member, handed the world, for the rest.
 ///
 /// It is not a saving in bytes and does not pretend to be one. A seat is the forty-four bytes of
 /// its record plus nine the world keeps alongside, `N` of them for as long as the world lives,
@@ -112,8 +110,8 @@ use crate::{motion::floor_i16, BitFlags, Context, Graphics, SpriteFlag, SpriteId
 /// before its rider and the rider is carried up the moment the lift moves; enlist it after, and
 /// the rider spends the update on last update's platform. The other is what is drawn over what:
 /// [`draw`](Self::draw) goes in seat order too, so a later seat lands on top of an earlier one.
-/// [`enlist`](Self::enlist) fills the lowest empty seat, so a cast seated once in the order the
-/// scene works stays in it.
+/// [`enlist`](super::MemberBuilder::enlist) fills the lowest empty seat, so a cast seated once in
+/// the order the scene works stays in it.
 ///
 /// An empty seat is nothing to anybody: it goes over the wire as a prop covering no pixels, which
 /// no force reaches, nothing is stopped by and nobody is told about. Retiring a member costs the
@@ -124,29 +122,29 @@ pub struct World<const N: usize, F: Force = ()> {
     reads_map: bool,
     /// What the scene calls a wall, for every member that has no rule of its own. See
     /// [`with_solid`](Self::with_solid).
-    solid: BitFlags<SpriteFlag>,
+    pub(super) solid: BitFlags<SpriteFlag>,
     /// The scene's weather, the world's own. See [`with_forces`](Self::with_forces).
     forces: F,
     /// The cast itself, stored once and in the very layout the step crosses the ABI in. A seat
     /// nobody is in holds [`wire::VACANT`].
-    records: [wire::Record; N],
+    pub(super) records: [wire::Record; N],
     /// What each member weighs — the forces' business, and nobody's on the other side of the wire,
     /// so it never crosses it.
-    masses: [f32; N],
+    pub(super) masses: [f32; N],
     /// Where each member's rectangle sits relative to the pixel it draws at. The step moves the
     /// body and, honouring the wire's in/out split, leaves the rectangle's corner alone, so this
     /// is what puts it back on the body afterwards.
-    offsets: [(i16, i16); N],
+    pub(super) offsets: [(i16, i16); N],
     /// How many times each seat has been emptied, so a handle to somebody who has left can be told
     /// from a handle to whoever was seated there next.
-    generations: [u8; N],
+    pub(super) generations: [u8; N],
     /// Which seats are taken, a bit apiece. A `u64` covers every `N` there can be, the wire's
     /// ceiling being sixty-four.
     seated: u64,
     /// And which of those members answered what is solid with a rule of their own, so that the
     /// scene changing its word ([`with_solid`](Self::with_solid)) reaches the members who go by it
     /// and leaves the others theirs.
-    own_solid: u64,
+    pub(super) own_solid: u64,
 }
 
 impl<const N: usize> World<N> {
@@ -199,10 +197,10 @@ impl<const N: usize> World<N> {
     /// This is how a cart says not to bother. Shoot-'em-ups whose level scrolls past behind the
     /// fight are the case it is for; so is anything whose collisions are all between moving things.
     ///
-    /// Nothing else changes. The cast still meets itself, [confines](Enlisting::confined_to) still
-    /// hold, and *solid* — the scene's ([`with_solid`](Self::with_solid)) and anybody's
-    /// [own](Enlisting::stopped_by) — still means what it meant; there is simply nothing on the map
-    /// for it to mean it against.
+    /// Nothing else changes. The cast still meets itself, its
+    /// [confines](super::MemberBuilder::confined_to) still hold, and *solid* — the scene's
+    /// ([`with_solid`](Self::with_solid)) and anybody's [own](super::MemberBuilder::stopped_by) —
+    /// still means what it meant; there is simply nothing on the map for it to mean it against.
     ///
     /// `const`, like [`new`](Self::new), so a level's world is spelled out where it is made:
     ///
@@ -277,8 +275,8 @@ impl<const N: usize, F: Force> World<N, F> {
     /// What stops a member is usually a fact about the scene rather than about anybody in it: one
     /// flag on the level's walls and floors, and everything that moves stops at them. So it is said
     /// once, here, and every member is stopped by these flags — on a tile or on a neighbour —
-    /// unless it named [rules of its own](Enlisting::stopped_by), which replace the scene's for
-    /// that member alone.
+    /// unless it named [rules of its own](super::MemberBuilder::stopped_by), which replace the
+    /// scene's for that member alone.
     ///
     /// A scene that changes its mind mid-game — a level where the water turns to ice — says so
     /// here too, and the new word reaches everybody already seated who goes by the scene's.
@@ -327,46 +325,18 @@ impl<const N: usize, F: Force> World<N, F> {
         }
     }
 
-    /// Takes somebody into the cast at (`x`, `y`), covering `width` x `height` pixels from the
-    /// pixel they draw at, and hands back the [`Enlisting`] the rest of them is described through.
-    ///
-    /// The position is exact and sub-pixel, like everything else that moves here; the rectangle is
-    /// whole pixels, and it is the one rectangle a member has — what the walls stop, what the rest
-    /// of the cast meets, and what the edge of the world holds. A hurtbox narrower than the sprite
-    /// says so with [`offset`](Enlisting::offset).
-    ///
-    /// That is a whole member already: standing still, wearing nothing, stopped by whatever the
-    /// scene calls solid, told about everything it meets, free to walk off the map and of the
-    /// weight nobody has to think about. [`Enlisting`]'s builders say the rest, and
-    /// [`member`](Enlisting::member) closes the description and hands over the handle the cart
-    /// asks about the seat with.
-    ///
-    /// The lowest empty seat, always: a cast seated once, in the order the scene works, keeps that
-    /// order — and it is the order the step goes in, so a lift enlisted before its rider carries it
-    /// the same update. A seat freed by [`retire`](Self::retire) is the next one filled.
-    ///
-    /// `None` is a full house: all `N` seats are taken, and the scene has to make room before it
-    /// can take anybody else on. A cart that spawns as it goes — bullets, sparks — either sizes `N`
-    /// for its worst frame or takes `None` as *not this frame*.
-    ///
-    /// ```no_run
-    /// # use pixel8::physics::World;
-    /// # fn f(world: &mut World<8>) {
-    /// let Some(spark) = world.enlist(64.0, 64.0, 2, 2) else {
-    ///     // Every seat is taken; this one waits for the next explosion.
-    ///     return;
-    /// };
-    /// let spark = spark.moving(0.0, -1.5).member();
-    /// # }
-    /// ```
-    #[must_use = "the claim is rolled back unless `member` is called and its handle kept"]
-    pub fn enlist(
+    /// Claims the lowest empty seat for a whole description — the `record` a
+    /// [`MemberBuilder`](super::MemberBuilder) built up, its own rule for solid if it gave one, its
+    /// mass and its rectangle's offset — and hands back the [`Member`] handle, or `None` for a
+    /// full house: the world's half of [`enlist`](super::MemberBuilder::enlist), since the seats
+    /// are the world's to hand out.
+    pub(super) fn claim(
         &mut self,
-        x: f32,
-        y: f32,
-        width: u16,
-        height: u16,
-    ) -> Option<Enlisting<'_, N, F>> {
+        mut record: wire::Record,
+        solid: Option<BitFlags<SpriteFlag>>,
+        mass: f32,
+        offset: (i16, i16),
+    ) -> Option<Member> {
         // The lowest empty seat. Past `N` the mask reads as empty, so a full house answers here
         // rather than needing a count of its own.
         let slot = (!self.seated).trailing_zeros() as usize;
@@ -375,366 +345,53 @@ impl<const N: usize, F: Force> World<N, F> {
         }
 
         self.seated |= 1 << slot;
-        // Everything a member is until it says otherwise, written straight into the seat: the
-        // builders below change it where it now lives rather than describing it somewhere else
-        // first.
-        let (rx, ry) = (floor_i16(x), floor_i16(y));
-        self.records[slot] = wire::Record {
-            x,
-            y,
-            rx,
-            ry,
-            bx: rx,
-            by: ry,
-            bw: width,
-            bh: height,
-            solid: self.solid.bits(),
-            heeds: BitFlags::<SpriteFlag>::all().bits(),
-            ..wire::EMPTY
-        };
-        self.masses[slot] = 1.0;
-        self.offsets[slot] = (0, 0);
-        self.own_solid &= !(1 << slot);
-
-        Some(Enlisting { world: self, slot })
-    }
-
-    /// Empties `member`'s seat: it leaves the cast, and its handle goes stale on the spot.
-    ///
-    /// What a cart does with a bullet that has left the screen, a badie that has been stomped, an
-    /// explosion that has burned out. The seat is the next one [`enlist`](Self::enlist) fills, and
-    /// until it is filled it is nothing to anybody — the step carries it as a prop covering no
-    /// pixels, which nothing meets and no force reaches.
-    ///
-    /// The member is gone the moment this returns, so the meeting it died of has already been
-    /// reported to whoever it met: the whole cast is stepped where it stands, and nothing is
-    /// waiting on a picture of it.
-    ///
-    /// Retiring a member twice, or asking the world anything with the handle afterwards, is a bug
-    /// in the cart and panics saying so.
-    pub fn retire(&mut self, member: Member) {
-        let slot = self.seat(member);
-        self.vacate(slot);
-        // The seat is let again to somebody else, and the handle to whoever has just left it must
-        // not answer for them.
-        self.generations[slot] = self.generations[slot].wrapping_add(1);
-    }
-
-    /// Whether `member` is still in the cast.
-    ///
-    /// The question to ask instead of finding out the hard way: everything else here panics on a
-    /// handle whose member has [retired](Self::retire), because a stale handle is a cart holding on
-    /// to somebody who left. A cart that would rather ask asks here.
-    pub fn seated(&self, member: Member) -> bool {
-        self.holds(member)
-    }
-
-    /// Where `member` is: its exact sub-pixel position.
-    ///
-    /// The truth for a cart's own arithmetic — which tile it is over, how far it is from something.
-    /// What to *draw* at is [`draw_pos`](Self::draw_pos).
-    pub fn pos(&self, member: Member) -> (f32, f32) {
-        let record = &self.records[self.seat(member)];
-
-        (record.x, record.y)
-    }
-
-    /// The coherent pixel `member` draws at.
-    ///
-    /// Where [`draw`](Self::draw) puts the member — the top left of the block it is drawn from —
-    /// and the pixel for anything a cart draws at it on its own: a rotor, a shadow, a name over its
-    /// head. It is [`Body`](crate::Body)'s phase-coherent pixel — a sub-pixel diagonal climbs a
-    /// clean staircase through it instead of shimmering — and the step keeps it coherent across the
-    /// wire, so a running jump reads the same as it always did.
-    pub fn draw_pos(&self, member: Member) -> (i16, i16) {
-        let record = &self.records[self.seat(member)];
-
-        (record.rx, record.ry)
-    }
-
-    /// Puts `member` at (`x`, `y`) — a teleport, not a movement.
-    ///
-    /// The drawn pixel is re-snapped to the floor of the new position rather than eased towards it,
-    /// because this is a jump: a respawn, a room the player has walked into, the rails a
-    /// [prop](Enlisting::prop) is driven along. The rectangle goes with it, keeping whatever
-    /// [offset](Enlisting::offset) it was given.
-    ///
-    /// Ordinary movement is not this. A member is moved by having a velocity
-    /// ([`set_velocity`](Self::set_velocity)) and being stepped: that is what is stopped by walls,
-    /// held inside limits and reported in contacts, and none of it happens here.
-    pub fn set_pos(&mut self, member: Member, x: f32, y: f32) {
-        let slot = self.seat(member);
-        let offset = self.offsets[slot];
-        let record = &mut self.records[slot];
-        (record.x, record.y) = (x, y);
-        (record.rx, record.ry) = (floor_i16(x), floor_i16(y));
-        (record.bx, record.by) = corner((record.rx, record.ry), offset);
-    }
-
-    /// What `member` is travelling at, in pixels per update.
-    ///
-    /// After a step, what survived it: an axis that ran into something has been spent, so a fall
-    /// that landed reads zero and something that walked into a wall is not still walking.
-    pub fn velocity(&self, member: Member) -> Velocity {
-        let record = &self.records[self.seat(member)];
-
-        Velocity::new(record.dx, record.dy)
-    }
-
-    /// Sets what `member` is travelling at: what the cart means it to do this update.
-    ///
-    /// Where the buttons, the patrol and the jump all end up. It is written before
-    /// [`step`](Self::step), which is what turns it into movement — and written afresh every
-    /// update by anything that leans on a wall, since the step spends the speed that ran into one.
-    pub fn set_velocity(&mut self, member: Member, velocity: Velocity) {
-        let record = &mut self.records[self.seat(member)];
-        (record.dx, record.dy) = (velocity.dx, velocity.dy);
-    }
-
-    /// What `member`'s last step ran into: the sides it was stopped at, and the flags of everything
-    /// it met.
-    ///
-    /// The whole answer, walls and the edge of the world together, so a cart standing a member on
-    /// the bottom of the level, on a floor tile and on a moving platform reads all three the same
-    /// way. A [prop](Enlisting::prop) is never given contacts: the cart drives it, and there is
-    /// nobody home to tell.
-    pub fn contacts(&self, member: Member) -> Contacts {
-        let record = &self.records[self.seat(member)];
-
-        Contacts::from_wire(record.sides, record.touched)
-    }
-
-    /// The rectangle `member` covers, where it now stands.
-    ///
-    /// The one rectangle a member has: what the walls stopped, what the rest of the cast met, and
-    /// what the edge of the world held. It follows the body through every step, so this is always
-    /// the rectangle that was collided with.
-    ///
-    /// The step says *the hero met a badie*; which badie, and what that costs, is the cart's, and
-    /// this is what it settles it with — a stomp told from a ram by comparing two rectangles the
-    /// world has just moved.
-    ///
-    /// ```no_run
-    /// # use pixel8::physics::{Member, World};
-    /// # fn f(world: &World<4>, hero: Member, badie: Member) -> bool {
-    /// // Level with the badie is a ram; anything else is the hero coming down on it.
-    /// world.bounds(hero).y() == world.bounds(badie).y()
-    /// # }
-    /// ```
-    pub fn bounds(&self, member: Member) -> Bounds {
-        let record = &self.records[self.seat(member)];
-
-        Bounds::new(record.bx, record.by, record.bw, record.bh)
-    }
-
-    /// Sets how big `member`'s rectangle is.
-    ///
-    /// For a hitbox that follows the animation — a crouch, a blast that grows, a hurtbox switched
-    /// off by giving it no size at all, which is a member nothing resolves and everything lets
-    /// through. Where the rectangle sits on the body is [`set_offset`](Self::set_offset).
-    pub fn resize(&mut self, member: Member, width: u16, height: u16) {
-        let record = &mut self.records[self.seat(member)];
-        (record.bw, record.bh) = (width, height);
-    }
-
-    /// Sets where `member`'s rectangle sits relative to the pixel it draws at — see
-    /// [`Enlisting::offset`].
-    pub fn set_offset(&mut self, member: Member, dx: i16, dy: i16) {
-        let slot = self.seat(member);
-        self.offsets[slot] = (dx, dy);
-        let record = &mut self.records[slot];
-        (record.bx, record.by) = corner((record.rx, record.ry), (dx, dy));
-    }
-
-    /// The rectangle `member` may not leave, if it named one — see [`Enlisting::confined_to`].
-    pub fn confines(&self, member: Member) -> Option<Bounds> {
-        let record = &self.records[self.seat(member)];
-
-        (record.meta & wire::CONFINED != 0)
-            .then(|| Bounds::new(record.cx, record.cy, record.cw, record.ch))
-    }
-
-    /// Sets the rectangle `member` may not leave, or takes its limits away — see
-    /// [`Enlisting::confined_to`].
-    ///
-    /// The room the player has just walked into, an arena closing in, a level that grows. `None`
-    /// is a member let go: free to walk off the map, which is what a bullet or a spent enemy wants.
-    pub fn set_confines(&mut self, member: Member, confines: Option<Bounds>) {
-        let record = &mut self.records[self.seat(member)];
-        match confines {
-            Some(limits) => {
-                record.meta |= wire::CONFINED;
-                (record.cx, record.cy) = (limits.x(), limits.y());
-                (record.cw, record.ch) = (limits.width(), limits.height());
-            }
-            None => record.meta &= !wire::CONFINED,
-        }
-    }
-
-    /// The cell `member` wears, if any — see [`Enlisting::wearing`].
-    ///
-    /// One cell for both halves of a member's part in the scene: [`draw`](Self::draw) draws the
-    /// member from it and [`step`](Self::step) steps it by the flags on it, so what is drawn and
-    /// what is met can never be two different sprites.
-    pub fn sprite(&self, member: Member) -> Option<SpriteId> {
-        let record = &self.records[self.seat(member)];
-        match record.sprite {
-            wire::UNWORN => None,
-            id => Some(SpriteId(id as u8)),
-        }
-    }
-
-    /// Sets the cell `member` wears, or takes it off — see [`Enlisting::wearing`].
-    ///
-    /// How an animation is shown: the next frame of a walk cycle, written in the update that took
-    /// the step. Cells carrying the same flags change how the member looks and nothing about what
-    /// everybody meets, which is what a walk cycle wants; a badie that turns into a puff of smoke
-    /// changes both.
-    pub fn set_sprite(&mut self, member: Member, sprite: Option<SpriteId>) {
-        let record = &mut self.records[self.seat(member)];
-        record.sprite = match sprite {
-            Some(sprite) => sprite.0 as u16,
-            None => wire::UNWORN,
-        };
-    }
-
-    /// Which way round `member` is drawn: mirrored across, and mirrored up and down — see
-    /// [`Enlisting::flipped`].
-    pub fn flip(&self, member: Member) -> (bool, bool) {
-        let meta = self.records[self.seat(member)].meta;
-
-        (meta & wire::FLIP_X != 0, meta & wire::FLIP_Y != 0)
-    }
-
-    /// Sets which way round `member` is drawn — see [`Enlisting::flipped`].
-    ///
-    /// The walker turning round: written in the update that turned it, beside the velocity that
-    /// sends it back the way it came.
-    pub fn set_flip(&mut self, member: Member, flip_x: bool, flip_y: bool) {
-        let record = &mut self.records[self.seat(member)];
-        record.meta = mirrored(record.meta, flip_x, flip_y);
-    }
-
-    /// How many cells `member` is drawn from, across and down — see [`Enlisting::spanning`].
-    pub fn span(&self, member: Member) -> (u8, u8) {
-        let span = self.records[self.seat(member)].span;
-
-        ((span & 0x0f) + 1, (span >> 4) + 1)
-    }
-
-    /// Sets how many cells `member` is drawn from, across and down — see [`Enlisting::spanning`].
-    ///
-    /// The pose that needs more room than the rest: a sword swung out a cell in front, a stretch a
-    /// cell taller. It is the look alone — the rectangle the member is met by is
-    /// [`resize`](Self::resize)'s, if it changes at all — and a block no sheet holds panics here as
-    /// it does in [`spanning`](Enlisting::spanning).
-    pub fn set_span(&mut self, member: Member, width: u8, height: u8) {
-        let record = &mut self.records[self.seat(member)];
-        record.span = span_byte(width, height);
-    }
-
-    /// Whether `member` is left off the screen — see [`Enlisting::hidden`].
-    pub fn hidden(&self, member: Member) -> bool {
-        self.records[self.seat(member)].meta & wire::HIDDEN != 0
-    }
-
-    /// Hides `member`, or shows it again — see [`Enlisting::hidden`].
-    ///
-    /// The blink: a hero flickering through the frames after a hit is hidden on every other one
-    /// of them, and stepped, met and told on all of them alike.
-    pub fn set_hidden(&mut self, member: Member, hidden: bool) {
-        let record = &mut self.records[self.seat(member)];
-        if hidden {
-            record.meta |= wire::HIDDEN;
-        } else {
-            record.meta &= !wire::HIDDEN;
-        }
-    }
-
-    /// The member's own answer to what means *wall* to it, where it gave one — see
-    /// [`Enlisting::stopped_by`].
-    ///
-    /// `None` is a member that goes by the scene's word, whatever
-    /// [`with_solid`](Self::with_solid) declared it to be.
-    pub fn solid(&self, member: Member) -> Option<BitFlags<SpriteFlag>> {
-        let slot = self.seat(member);
-
-        (self.own_solid & (1 << slot) != 0).then(|| {
-            BitFlags::from_bits(self.records[slot].solid)
-                .expect("a seat's solid was written from real flags")
-        })
-    }
-
-    /// Sets what means *wall* to `member`, or hands it back to the scene's word — see
-    /// [`Enlisting::stopped_by`].
-    ///
-    /// `None` is the scene's word as it stands now ([`with_solid`](Self::with_solid)), and the
-    /// member follows it from here on.
-    pub fn set_solid(&mut self, member: Member, solid: Option<BitFlags<SpriteFlag>>) {
-        let slot = self.seat(member);
-        let word = match solid {
-            Some(solid) => {
-                self.own_solid |= 1 << slot;
-                solid
-            }
-            None => {
-                self.own_solid &= !(1 << slot);
-                self.solid
-            }
-        };
-        self.records[slot].solid = word.bits();
-    }
-
-    /// Which flags `member` cares to be told about — see [`Enlisting::heeding`].
-    pub fn heeds(&self, member: Member) -> BitFlags<SpriteFlag> {
-        BitFlags::from_bits(self.records[self.seat(member)].heeds)
-            .expect("a seat's heeds was written from real flags")
-    }
-
-    /// Sets which flags `member` cares to be told about — see [`Enlisting::heeding`].
-    pub fn set_heeds(&mut self, member: Member, heeds: impl Into<BitFlags<SpriteFlag>>) {
-        let record = &mut self.records[self.seat(member)];
-        record.heeds = heeds.into().bits();
-    }
-
-    /// What `member` weighs — see [`Enlisting::weighing`].
-    pub fn mass(&self, member: Member) -> f32 {
-        self.masses[self.seat(member)]
-    }
-
-    /// Sets what `member` weighs: a crate that fills with water, a ship that burns its fuel off.
-    pub fn set_mass(&mut self, member: Member, mass: f32) {
-        let slot = self.seat(member);
+        // Solid is settled here, between the description's own rule and the scene's word at the
+        // moment of claiming, exactly as it is for a member told a new rule after it is seated.
+        let word = solid.unwrap_or(self.solid);
+        record.solid = word.bits();
+        self.records[slot] = record;
         self.masses[slot] = mass;
+        self.offsets[slot] = offset;
+        if solid.is_some() {
+            self.own_solid |= 1 << slot;
+        } else {
+            self.own_solid &= !(1 << slot);
+        }
+
+        Some(Member {
+            slot: slot as u8,
+            generation: self.generations[slot],
+        })
     }
 
     /// Moves the whole cast one update: the forces the world owns, then the world, then the bodies.
     ///
     /// For each member in turn, in seat order: the world's own [forces](Self::with_forces) bend its
-    /// velocity, in the order they were composed; whatever ran its [rectangle](Self::bounds) into
+    /// velocity, in the order they were composed; whatever ran its [rectangle](Member::bounds) into
     /// something solid to it — the scene's word ([`with_solid`](Self::with_solid)), unless the
-    /// member has [rules of its own](Enlisting::stopped_by) — is taken out of it, on each axis
-    /// separately; the velocity that survives is stored back and the body moved by it; whatever
-    /// that carried outside its [confines](Enlisting::confined_to) is put back; and the sides that
-    /// stopped it together with the flags of everything it met are written into its
-    /// [`contacts`](Self::contacts), where the cart reads them at its leisure.
+    /// member has [rules of its own](super::MemberBuilder::stopped_by) — is taken out of it, on
+    /// each axis separately; the velocity that survives is stored back and the body moved by
+    /// it; whatever that carried outside its [confines](super::MemberBuilder::confined_to) is
+    /// put back; and the sides that stopped it together with the flags of everything it met are
+    /// written into its [`contacts`](Member::contacts), where the cart reads them at its
+    /// leisure.
     ///
     /// *Something* is the map and the rest of the cast alike. The tiles under the member are asked
     /// what they carry, and so is every other member, at the rectangle it covers right now and
-    /// under the flags the cell it [wears](Enlisting::wearing) carries in the sprite editor. Flags
-    /// shared with what is solid to the member stop it — a tile and a neighbour in the same
-    /// one-axis pass, so landing on a lift reads [`below`](Contacts::below) exactly as landing on a
-    /// floor tile does — and everything met, wall or not, comes back in [`Contacts::touched`]. A
-    /// member is never asked about itself, so its own kind is a wall like anybody else's: two
-    /// crates wearing `CRATE`, each with `CRATE` in solid, stop each other and neither is ever its
-    /// own wall.
+    /// under the flags the cell it [wears](super::MemberBuilder::wearing) carries in the sprite
+    /// editor. Flags shared with what is solid to the member stop it — a tile and a neighbour
+    /// in the same one-axis pass, so landing on a lift reads [`below`](Contacts::below) exactly
+    /// as landing on a floor tile does — and everything met, wall or not, comes back in
+    /// [`Contacts::touched`]. A member is never asked about itself, so its own kind is a wall
+    /// like anybody else's: two crates wearing `CRATE`, each with `CRATE` in solid, stop each
+    /// other and neither is ever its own wall.
     ///
     /// A meeting between two members reaches both of them, whichever one's movement made it: the
     /// mover's own sweep answers the mover, and whoever it arrived on is told what arrived —
-    /// filtered by that member's own [heeds](Enlisting::heeding) and solid, flags only, in the same
-    /// update. So a ram is felt on both sides of it however the two were seated, and either party
-    /// may be [retired](Self::retire) the moment the step returns without costing the other its
-    /// news.
+    /// filtered by that member's own [heeds](super::MemberBuilder::heeding) and solid, flags only,
+    /// in the same update. So a ram is felt on both sides of it however the two were seated,
+    /// and either party may be [retired](Member::retire) the moment the step returns without
+    /// costing the other its news.
     ///
     /// The two halves of the answer are taken over different ground, and on purpose. A member is
     /// *stopped* where an axis was trying to go — the endpoint, which is where a wall has to be to
@@ -754,9 +411,9 @@ impl<const N: usize, F: Force> World<N, F> {
     /// this; a member can.
     ///
     /// The edge of the world is the last thing to have its say, after the movement that took the
-    /// member out there: one that named [confines](Enlisting::confined_to) is put back against
-    /// them, the speed that carried it out is spent, and the sides it was held at join the walls'
-    /// in the answer.
+    /// member out there: one that named [confines](super::MemberBuilder::confined_to) is put back
+    /// against them, the speed that carried it out is spent, and the sides it was held at join
+    /// the walls' in the answer.
     ///
     /// An axis that was blocked is zeroed in the stored velocity too, not just in this update's
     /// movement: a fall that lands has been spent, and something that walked into a wall is not
@@ -798,10 +455,11 @@ impl<const N: usize, F: Force> World<N, F> {
 
     /// Draws the whole cast, in seat order, where the last step left it.
     ///
-    /// Each member is drawn from the cell it [wears](Enlisting::wearing), at the pixel it draws at
-    /// ([`draw_pos`](Self::draw_pos)), as many cells as it [spans](Enlisting::spanning), and
-    /// mirrored the way it is [flipped](Enlisting::flipped). A member that wears nothing is not
-    /// drawn, nor is one that is [hidden](Enlisting::hidden), and an empty seat is nothing here as
+    /// Each member is drawn from the cell it [wears](super::MemberBuilder::wearing), at the pixel
+    /// it draws at ([`draw_pos`](Member::draw_pos)), as many cells as it
+    /// [spans](super::MemberBuilder::spanning), and mirrored the way it is
+    /// [flipped](super::MemberBuilder::flipped). A member that wears nothing is not drawn, nor
+    /// is one that is [hidden](super::MemberBuilder::hidden), and an empty seat is nothing here as
     /// it is nothing everywhere else. Seat order is drawing order as it is stepping order: a later
     /// seat is drawn over an earlier one.
     ///
@@ -827,8 +485,8 @@ impl<const N: usize, F: Force> World<N, F> {
     /// # }
     /// ```
     ///
-    /// The look is the update's to decide — [`set_sprite`](Self::set_sprite),
-    /// [`set_flip`](Self::set_flip) and the rest are written beside the velocity — and
+    /// The look is the update's to decide — [`set_sprite`](Member::set_sprite),
+    /// [`set_flip`](Member::set_flip) and the rest are written beside the velocity — and
     /// [`Game::draw`](crate::Game::draw) holds the game by `&self`, so nothing about the world can
     /// change here. What is set on the screen is honoured as it is for any sprite: the camera, the
     /// clip, the transparency and the palette. Anything that is not a member — the HUD, a particle
@@ -1013,7 +671,7 @@ impl<const N: usize, F: Force> World<N, F> {
     /// inline there — a compare and a taken seat — and the panic lives in [`stale`], cold and out
     /// of line, where it costs nothing until it fires.
     #[inline(always)]
-    fn seat(&self, member: Member) -> usize {
+    pub(super) fn seat(&self, member: Member) -> usize {
         if !self.holds(member) {
             stale(member.slot, N);
         }
@@ -1024,7 +682,7 @@ impl<const N: usize, F: Force> World<N, F> {
     /// Whether `member` names somebody actually in the cast: a seat of this world's, taken, and
     /// taken by the very member the handle was made for.
     #[inline(always)]
-    fn holds(&self, member: Member) -> bool {
+    pub(super) fn holds(&self, member: Member) -> bool {
         let slot = member.slot as usize;
 
         slot < N && self.seated & (1 << slot) != 0 && self.generations[slot] == member.generation
@@ -1199,286 +857,10 @@ impl<const N: usize, F: Force> World<N, F> {
     }
 }
 
-/// A member mid-enlistment: the seat is taken already, and this is what says who is in it.
-///
-/// [`World::enlist`] claims the lowest empty seat and puts a whole member in it — standing where it
-/// was told to, covering the rectangle it was given, and everything else the default: still,
-/// wearing nothing, stopped by whatever the scene calls solid, told about everything it meets, free
-/// to walk off the map and of the weight nobody has to think about. Every builder here says one
-/// more thing about whoever is in that seat, writing it where the member now lives, and
-/// [`member`](Self::member) closes the description and hands the [`Member`] handle over.
-///
-/// ```no_run
-/// # use pixel8::{physics::{Bounds, World}, SpriteId};
-/// # const BADIE_SPRITE: SpriteId = SpriteId(6);
-/// # const LEVEL: Bounds = Bounds::new(0, 0, 256, 128);
-/// # fn f(world: &mut World<4>) {
-/// // The badie: one sprite's worth of it, wearing the cell its flag is written on, patrolling
-/// // inside the level and never let out of it.
-/// let badie = world
-///     .enlist(200.0, 104.0, 8, 8)
-///     .expect("a seat for the badie")
-///     .wearing(BADIE_SPRITE)
-///     .confined_to(LEVEL)
-///     .member();
-/// # }
-/// ```
-///
-/// The chain is the whole of it: nothing is kept here, because there was never anywhere else for it
-/// to be kept. What a member is *now* is asked of the world with the handle enlisting gave back,
-/// and changed there — [`set_sprite`](World::set_sprite), [`set_confines`](World::set_confines) and
-/// the rest.
-///
-/// Only [`member`](Self::member) makes the enlistment stand. A chain abandoned before it — dropped,
-/// or unwound out of — gives its seat straight back, as if nobody had ever been asked: a seat may
-/// be held by a handle or by this, and never by nothing.
-#[must_use = "an enlisting left unfinished gives its seat straight back — `member` is what makes \
-              it stand"]
-pub struct Enlisting<'a, const N: usize, F: Force> {
-    /// The world the seat is in, held for as long as the member is being described.
-    world: &'a mut World<N, F>,
-    /// And which seat, which is the one thing about it that cannot change from here.
-    slot: usize,
-}
-
-impl<const N: usize, F: Force> Enlisting<'_, N, F> {
-    /// The same member, already travelling.
-    ///
-    /// Standing still is the default, and what most members want: a velocity is written afresh
-    /// every update with [`set_velocity`](World::set_velocity), out of the buttons or a patrol or
-    /// whatever else the cart is thinking.
-    pub fn moving(self, dx: f32, dy: f32) -> Self {
-        let record = &mut self.world.records[self.slot];
-        (record.dx, record.dy) = (dx, dy);
-
-        self
-    }
-
-    /// The same member, wearing `sprite`: the cell whose flags everybody else meets in it, and the
-    /// cell the world draws it from.
-    ///
-    /// The other side of [`stopped_by`](Self::stopped_by). That says which flags stop *me*; this
-    /// says which flags I carry, and they are the flags the cart wrote on that cell in the sprite
-    /// editor — the same one vocabulary the map's tiles already speak. So a badie is a badie
-    /// because its cell is flagged `BADIE`, and everything that meets it is told `BADIE` in
-    /// [`Contacts::touched`](super::Contacts::touched).
-    ///
-    /// It is the member's look as well: [`World::draw`] draws it from this very cell, mirrored or
-    /// spanning more cells as the builders below say, so what is drawn and what is met are one
-    /// sprite.
-    ///
-    /// Wearing nothing — the default — is a member nobody is stopped by, nobody is told about, and
-    /// nobody sees. It is still stopped by everything, and still told everything: a sensor needs no
-    /// flag of its own. A member whose look changes with its state changes what it wears with
-    /// [`set_sprite`](World::set_sprite); two walk-cycle cells carrying the same flag change
-    /// nothing anybody meets, which is the usual case.
-    pub fn wearing(self, sprite: SpriteId) -> Self {
-        self.world.records[self.slot].sprite = sprite.0 as u16;
-
-        self
-    }
-
-    /// The same member, drawn mirrored: across for `flip_x`, and up and down for `flip_y`.
-    ///
-    /// Which way a member faces is part of how it looks, and the world [draws](World::draw) it
-    /// that way. Nothing about the step reads it: the rectangle stays where it is, and the flags
-    /// everybody else meets are the worn cell's either way round. A member that turns as it walks
-    /// turns with [`set_flip`](World::set_flip), in the update that turned it.
-    pub fn flipped(self, flip_x: bool, flip_y: bool) -> Self {
-        let record = &mut self.world.records[self.slot];
-        record.meta = mirrored(record.meta, flip_x, flip_y);
-
-        self
-    }
-
-    /// The same member, drawn from a block of `width` x `height` cells of the sheet, with the cell
-    /// it wears at its top left.
-    ///
-    /// The way [`Graphics::sprite_ext`] draws a block: a 16x16 hero is `spanning(2, 2)`, wearing
-    /// the cell at the top left of its picture. One cell is the default, and what most of a cast
-    /// is drawn from.
-    ///
-    /// It is the look and only the look. The rectangle the member is stepped by is still the one
-    /// [`enlist`](World::enlist) gave it, and what everybody meets in it is still the flags of the
-    /// one cell it wears.
-    ///
-    /// One to sixteen cells each way, the sheet being sixteen cells across; anything else is a bug
-    /// in the cart, and panics saying so.
-    pub fn spanning(self, width: u8, height: u8) -> Self {
-        self.world.records[self.slot].span = span_byte(width, height);
-
-        self
-    }
-
-    /// The same member, with rules of its own about what means *wall* to it.
-    ///
-    /// The scene's word — [`World::with_solid`] — is what a member is stopped by unless it says
-    /// otherwise here, and most of a cast never says otherwise, because what is a wall is usually a
-    /// fact about the scene rather than about anybody in it. What is said here *replaces* the
-    /// scene's word for this member alone, and the emptiest rule of all — `BitFlags::empty()` — is
-    /// a member nothing anywhere stops, whatever the scene declares: a bullet, a bird, anything a
-    /// cart wants told about the world rather than stopped by it.
-    ///
-    /// A member's *own* kind belongs here as readily as anything else, and is the usual reason to
-    /// have rules of one's own at all: the world knows who is who and never asks a member about
-    /// itself, so two crates wearing `CRATE`, each with `CRATE` solid to it, block each other and
-    /// neither is ever its own wall.
-    ///
-    /// ```no_run
-    /// # use pixel8::{physics::World, SpriteFlag, SpriteId};
-    /// # const SOLID: SpriteFlag = SpriteFlag::Flag0;
-    /// # const CRATE: SpriteFlag = SpriteFlag::Flag1;
-    /// # const CRATE_SPRITE: SpriteId = SpriteId(9);
-    /// # fn f(world: &mut World<4>) {
-    /// // The walls stop a crate like they stop everybody — and so does another crate.
-    /// let crated = world
-    ///     .enlist(0.0, 0.0, 8, 8)
-    ///     .expect("a seat for the crate")
-    ///     .wearing(CRATE_SPRITE)
-    ///     .stopped_by(SOLID | CRATE)
-    ///     .member();
-    /// # }
-    /// ```
-    pub fn stopped_by(self, solid: impl Into<BitFlags<SpriteFlag>>) -> Self {
-        self.world.own_solid |= 1 << self.slot;
-        self.world.records[self.slot].solid = solid.into().bits();
-
-        self
-    }
-
-    /// The same member, told about `heeds` and nothing else.
-    ///
-    /// [`stopped_by`](Self::stopped_by) says what stops the member; this says what it wants to hear
-    /// about, and everything else the world meets on its behalf it throws away without ever working
-    /// out whether it was met. Everything is the default, and it is the honest one — a member that
-    /// has not said otherwise is told about every flag it meets.
-    ///
-    /// Narrowing it is a promise the cart makes and the world takes at its word: a neighbour
-    /// carrying nothing this member heeds is skipped before a single edge of it is worked out, and
-    /// a tile's flags are dropped before they are collected. In a scene where everything is in one
-    /// cast that is most of the work of an update, and it is spent on answers nobody was going to
-    /// read.
-    ///
-    /// It cannot cost a member a wall: solid is heeded whatever this says, so a wall it never asked
-    /// to hear about still stops it, and being stopped by it still reports it.
-    pub fn heeding(self, heeds: impl Into<BitFlags<SpriteFlag>>) -> Self {
-        self.world.records[self.slot].heeds = heeds.into().bits();
-
-        self
-    }
-
-    /// The same member, never let out of `confines`.
-    ///
-    /// The edge of the world, which is not a wall and is nowhere on the map: nothing else stops a
-    /// member walking off the last tile and falling for ever.
-    /// [`Bounds::screen`](super::Bounds::screen) is what most carts that want one mean; a level
-    /// bigger than the screen hands over the level. The sides it is held at arrive in the same
-    /// [`Contacts`](super::Contacts) as the walls, so a hold at the bottom of the level reads
-    /// [`below`](super::Contacts::below) as a floor tile does.
-    ///
-    /// Saying nothing — the default — is a member free to leave, which is what a bullet or a spent
-    /// enemy wants: it walks off the map, and the cart retires it when
-    /// [`Bounds::on_screen`](super::Bounds::on_screen) says it has gone. A room the player walks
-    /// into changes the limits with [`set_confines`](World::set_confines).
-    pub fn confined_to(self, confines: Bounds) -> Self {
-        let record = &mut self.world.records[self.slot];
-        record.meta |= wire::CONFINED;
-        (record.cx, record.cy) = (confines.x(), confines.y());
-        (record.cw, record.ch) = (confines.width(), confines.height());
-
-        self
-    }
-
-    /// The same member, with its rectangle sitting `dx`, `dy` pixels from the pixel it draws at.
-    ///
-    /// For a hurtbox narrower than the sprite: the member is drawn from one corner and judged from
-    /// another. The rectangle keeps that seat on the body wherever the step carries it, so what
-    /// stops the member stops the rectangle, exactly where a cart drew it.
-    ///
-    /// `(0, 0)` — the default — is the rectangle over the sprite, which is what most of a cast
-    /// wants.
-    pub fn offset(self, dx: i16, dy: i16) -> Self {
-        self.world.offsets[self.slot] = (dx, dy);
-        let record = &mut self.world.records[self.slot];
-        (record.bx, record.by) = corner((record.rx, record.ry), (dx, dy));
-
-        self
-    }
-
-    /// The same member as a prop: in the cast to be met, never to be moved.
-    ///
-    /// A prop stands in everybody's way exactly as any member does — the rectangle it covers and
-    /// the flags on the cell it wears — and is otherwise left alone: no force reaches it, nothing
-    /// resolves it, and its contacts are never written. The cart drives it wherever it likes, on
-    /// whatever rails it likes, with [`set_pos`](World::set_pos) before the world steps. A hazard
-    /// patrolling a fixed beat, a lift on a track, a door: things the world must know about without
-    /// being asked to drive them. It is [drawn](World::draw) like anybody else, wherever the cart
-    /// last put it.
-    pub fn prop(self) -> Self {
-        self.world.records[self.slot].meta |= wire::PROP;
-
-        self
-    }
-
-    /// The same member, hidden: in the cast to be met, never to be drawn.
-    ///
-    /// The other half of what a [prop](Self::prop) is: a prop is met and never moved, and a hidden
-    /// member is met and never drawn. It is in the cast like anybody else — stepped, stopping
-    /// whoever its cell is a wall to, and told what it meets — and [`World::draw`] leaves it off
-    /// the screen. An invisible wall, a trigger wearing a flagged cell, a hero blinking through the
-    /// frames after a hit, with [`set_hidden`](World::set_hidden) on every other one of them.
-    pub fn hidden(self) -> Self {
-        self.world.records[self.slot].meta |= wire::HIDDEN;
-
-        self
-    }
-
-    /// The same member, weighing `mass`.
-    ///
-    /// How hard it is to push, relative to everything else in the scene: `1.0` is the default
-    /// nobody has to think about, `4.0` takes four times the shove for the same movement and `0.25`
-    /// a quarter of it. What to make of it is each [`Force`]'s business — [`Wind`](super::Wind) and
-    /// [`Atmosphere`](super::Atmosphere) divide their grip by it, and [`Gravity`](super::Gravity)
-    /// never reads it at all. See the [module docs](super#mass).
-    pub fn weighing(self, mass: f32) -> Self {
-        self.world.masses[self.slot] = mass;
-
-        self
-    }
-
-    /// The member as the cart will know it from here: the seat, and the right to ask about whoever
-    /// is in it.
-    ///
-    /// The end of the description and the only way out of it — the seat has been taken since
-    /// [`enlist`](World::enlist) claimed it, and a handle nobody keeps is a seat nobody can ever
-    /// [retire](World::retire).
-    #[must_use = "the handle is the only way the seat is ever asked about or given back"]
-    pub fn member(self) -> Member {
-        let member = Member {
-            slot: self.slot as u8,
-            generation: self.world.generations[self.slot],
-        };
-        // The enlistment stands: the claim must not be rolled back as the chain ends.
-        core::mem::forget(self);
-
-        member
-    }
-}
-
-/// A chain abandoned before [`member`](Enlisting::member) never happened: the claim is rolled
-/// back, so no seat is ever held by nothing. `member` forgets the guard, which is how a finished
-/// chain keeps its seat.
-impl<const N: usize, F: Force> Drop for Enlisting<'_, N, F> {
-    fn drop(&mut self) {
-        self.world.vacate(self.slot);
-    }
-}
-
 impl<const N: usize, F: Force> World<N, F> {
-    /// Empties `slot`, bookkeeping and all — what [`retire`](Self::retire) does short of ageing
-    /// the seat, and what an [`Enlisting`] abandoned mid-chain undoes its claim with: no handle
-    /// was ever handed out for it, so there is nothing to age.
-    fn vacate(&mut self, slot: usize) {
+    /// Empties `slot`, bookkeeping and all — what [`retire`](Member::retire) does short of ageing
+    /// the seat: no handle was ever handed out for it, so there is nothing to age.
+    pub(super) fn vacate(&mut self, slot: usize) {
         self.seated &= !(1 << slot);
         self.own_solid &= !(1 << slot);
         self.records[slot] = wire::VACANT;
@@ -1796,7 +1178,7 @@ fn hold(entity: &mut dyn Kinetic, limits: Bounds, velocity: &mut Velocity) -> Bi
 /// — a corner past them was never a pixel anything could stand on — and worked out in the wider
 /// type, because a body drawn at one end of the space wearing a rectangle at the other is a
 /// strange member but a safe one, and must not wrap into a different geometry here.
-fn corner((rx, ry): (i16, i16), (dx, dy): (i16, i16)) -> (i16, i16) {
+pub(super) fn corner((rx, ry): (i16, i16), (dx, dy): (i16, i16)) -> (i16, i16) {
     fn along(pixel: i16, offset: i16) -> i16 {
         (pixel as i32 + offset as i32).clamp(i16::MIN as i32, i16::MAX as i32) as i16
     }
@@ -1806,7 +1188,7 @@ fn corner((rx, ry): (i16, i16), (dx, dy): (i16, i16)) -> (i16, i16) {
 
 /// `meta` with its two mirror bits set for `flip_x` and `flip_y`, and every other bit — what the
 /// step reads, and whether the member is shown — as it was.
-fn mirrored(meta: u8, flip_x: bool, flip_y: bool) -> u8 {
+pub(super) fn mirrored(meta: u8, flip_x: bool, flip_y: bool) -> u8 {
     let mut mirrored = meta & !(wire::FLIP_X | wire::FLIP_Y);
     if flip_x {
         mirrored |= wire::FLIP_X;
@@ -1825,7 +1207,7 @@ fn mirrored(meta: u8, flip_x: bool, flip_y: bool) -> u8 {
 /// seat starts as, and the whole sheet is `0xff`. Nothing outside one to sixteen fits a nibble
 /// that way, and a cart asking for it has made a mistake better heard about where it was made
 /// than drawn from some other block of the sheet.
-fn span_byte(width: u8, height: u8) -> u8 {
+pub(super) fn span_byte(width: u8, height: u8) -> u8 {
     assert!(
         (1..=16).contains(&width) && (1..=16).contains(&height),
         "a member is drawn from one to sixteen cells each way, not {width}x{height}"
@@ -2050,17 +1432,17 @@ mod tests {
         // One update's pull, both in the velocity each kept and in how far each fell.
         for (member, x) in [(one, 0.0), (two, 40.0)] {
             assert_eq!(
-                world.velocity(member),
+                member.velocity(&world),
                 Velocity::new(0.0, Gravity::DEFAULT_STRENGTH)
             );
-            assert_eq!(world.pos(member), (x, Gravity::DEFAULT_STRENGTH));
+            assert_eq!(member.pos(&world), (x, Gravity::DEFAULT_STRENGTH));
         }
 
         for _ in 0..1_000 {
             world.step(&CTX);
         }
         assert_eq!(
-            world.velocity(one).dy,
+            one.velocity(&world).dy,
             Gravity::DEFAULT_TERMINAL_VELOCITY,
             "the pull never settled at its terminal velocity"
         );
@@ -2071,14 +1453,13 @@ mod tests {
         // The weather belongs to the scene, not to the members, so a cast stepped by a world that
         // took none carries on at whatever it was already doing.
         let mut world: World<1> = World::new();
-        let drifter = world
-            .enlist(0.0, 0.0, 8, 8)
-            .unwrap()
+        let drifter = Member::builder(0.0, 0.0, 8, 8)
             .moving(0.0, 1.0)
-            .member();
+            .enlist(&mut world)
+            .unwrap();
         world.step(&CTX);
-        assert_eq!(world.velocity(drifter), Velocity::new(0.0, 1.0));
-        assert_eq!(world.pos(drifter), (0.0, 1.0));
+        assert_eq!(drifter.velocity(&world), Velocity::new(0.0, 1.0));
+        assert_eq!(drifter.pos(&world), (0.0, 1.0));
     }
 
     #[test]
@@ -2091,12 +1472,12 @@ mod tests {
 
         // The drag that runs before the pull has not felt it yet, so the first update — and every
         // one after it — differs by exactly that much.
-        assert_eq!(aired.velocity(aired_first).dy, Gravity::DEFAULT_STRENGTH);
+        assert_eq!(aired_first.velocity(&aired).dy, Gravity::DEFAULT_STRENGTH);
         assert!(
-            pulled.velocity(pulled_first).dy < aired.velocity(aired_first).dy,
+            pulled_first.velocity(&pulled).dy < aired_first.velocity(&aired).dy,
             "the order made no difference: {} against {}",
-            pulled.velocity(pulled_first).dy,
-            aired.velocity(aired_first).dy
+            pulled_first.velocity(&pulled).dy,
+            aired_first.velocity(&aired).dy
         );
     }
 
@@ -2105,23 +1486,25 @@ mod tests {
         // The same wind on two members that differ in nothing but what they weigh, and it is the
         // world that carries the one to the other.
         let mut world: World<2, Wind> = World::new().with_forces(Wind::new(2.0));
-        let light = world.enlist(0.0, 0.0, 8, 8).unwrap().weighing(0.5).member();
-        let heavy = world
-            .enlist(0.0, 40.0, 8, 8)
-            .unwrap()
+        let light = Member::builder(0.0, 0.0, 8, 8)
+            .weighing(0.5)
+            .enlist(&mut world)
+            .unwrap();
+        let heavy = Member::builder(0.0, 40.0, 8, 8)
             .weighing(4.0)
-            .member();
+            .enlist(&mut world)
+            .unwrap();
         world.step(&CTX);
         assert!(
-            world.velocity(light).dx > world.velocity(heavy).dx,
+            light.velocity(&world).dx > heavy.velocity(&world).dx,
             "the mass was not read: {} against {}",
-            world.velocity(light).dx,
-            world.velocity(heavy).dx
+            light.velocity(&world).dx,
+            heavy.velocity(&world).dx
         );
 
         // And it is the seat's own, changed where it lives.
-        world.set_mass(heavy, 0.5);
-        assert_eq!(world.mass(heavy), 0.5);
+        heavy.set_mass(&mut world, 0.5);
+        assert_eq!(heavy.mass(&world), 0.5);
     }
 
     #[test]
@@ -2135,8 +1518,8 @@ mod tests {
         }
 
         let (world, member) = one_update_under((GRAVITY, Wind::new(1.0), Updraft));
-        assert_eq!(world.velocity(member).dx, 0.05);
-        assert_eq!(world.velocity(member).dy, Gravity::DEFAULT_STRENGTH - 0.5);
+        assert_eq!(member.velocity(&world).dx, 0.05);
+        assert_eq!(member.velocity(&world).dy, Gravity::DEFAULT_STRENGTH - 0.5);
     }
 
     #[test]
@@ -2145,13 +1528,16 @@ mod tests {
         // move and the world's only to know about.
         let mut world: World<2, Gravity> = World::new().with_forces(GRAVITY);
         let faller = pebble(&mut world, 0.0, 0.0);
-        let lift = world.enlist(0.0, 40.0, 8, 8).unwrap().prop().member();
+        let lift = Member::builder(0.0, 40.0, 8, 8)
+            .prop()
+            .enlist(&mut world)
+            .unwrap();
         for _ in 0..8 {
             world.step(&CTX);
         }
-        assert!(world.pos(faller).1 > 0.0, "the pull missed the faller");
-        assert_eq!(world.pos(lift), (0.0, 40.0), "the prop was moved");
-        assert_eq!(world.velocity(lift), Velocity::default());
+        assert!(faller.pos(&world).1 > 0.0, "the pull missed the faller");
+        assert_eq!(lift.pos(&world), (0.0, 40.0), "the prop was moved");
+        assert_eq!(lift.velocity(&world), Velocity::default());
     }
 
     /// One update of `forces` over a single member, and the world it was stepped in.
@@ -2166,7 +1552,7 @@ mod tests {
     /// A sprite-sized member seated at (`x`, `y`), saying nothing about itself — what most of a
     /// cast is.
     fn pebble<const N: usize, F: Force>(world: &mut World<N, F>, x: f32, y: f32) -> Member {
-        world.enlist(x, y, 8, 8).unwrap().member()
+        Member::builder(x, y, 8, 8).enlist(world).unwrap()
     }
 
     #[test]
@@ -2176,57 +1562,82 @@ mod tests {
             .map(|i| pebble(&mut world, i as f32 * 16.0, 0.0))
             .collect();
         assert_eq!(
-            seats.iter().map(Member::seat).collect::<Vec<_>>(),
+            seats.iter().map(|m| m.seat()).collect::<Vec<_>>(),
             [0, 1, 2],
             "the seats were not filled in order"
         );
         assert!(
-            world.enlist(0.0, 0.0, 8, 8).is_none(),
+            Member::builder(0.0, 0.0, 8, 8).enlist(&mut world).is_none(),
             "a fourth member was seated in a world of three"
         );
 
         // And a seat freed in the middle is the next one filled, so a cast seated in the order the
         // scene works stays in it.
-        world.retire(seats[1]);
+        seats[1].retire(&mut world);
         let understudy = pebble(&mut world, 64.0, 0.0);
         assert_eq!(understudy.seat(), 1);
-        assert_eq!(world.pos(understudy), (64.0, 0.0));
+        assert_eq!(understudy.pos(&world), (64.0, 0.0));
     }
 
     #[test]
-    fn an_enlisting_abandoned_mid_chain_gives_its_seat_straight_back() {
-        // `#[must_use]` is a lint, and a lint can be shrugged off — `let _`, or an unwind out of
-        // the middle of a chain. The claim itself must not survive the shrug: a seat is held by a
-        // handle or by the chain still describing it, and never by nothing.
+    fn a_member_described_and_never_enlisted_takes_no_seat() {
+        // Nothing is claimed until `enlist`: a description dropped on the way there — never
+        // enlisted, or unwound out of by a builder that panicked — has touched no world at all,
+        // so the next member enlisted still gets seat 0.
         let mut world: World<1> = World::new();
-        let _ = world.enlist(10.0, 10.0, 8, 8);
-        let unfinished = world
-            .enlist(5.0, 5.0, 8, 8)
-            .unwrap()
+        let _ = Member::builder(10.0, 10.0, 8, 8)
             .wearing(CRATE_SPRITE)
             .flipped(true, true)
             .spanning(2, 2)
             .hidden();
-        drop(unfinished);
 
-        // The world of one has its one seat back — and nothing the abandoned chains wrote is
-        // waiting in it for whoever is seated next, the look included.
-        let member = world
-            .enlist(0.0, 0.0, 8, 8)
-            .expect("the seat was leaked")
-            .member();
-        assert!(world.seated(member));
-        assert_eq!(world.pos(member), (0.0, 0.0));
-        assert_eq!(world.sprite(member), None);
-        assert_eq!(world.flip(member), (false, false));
-        assert_eq!(world.span(member), (1, 1));
-        assert!(!world.hidden(member));
+        // The world of one has its one seat still free — and nothing the dropped description
+        // wrote is waiting in it for whoever is seated next, the look included.
+        let member = Member::builder(0.0, 0.0, 8, 8)
+            .enlist(&mut world)
+            .expect("the seat was leaked");
+        assert_eq!(member.seat(), 0);
+        assert!(member.seated(&world));
+        assert_eq!(member.pos(&world), (0.0, 0.0));
+        assert_eq!(member.sprite(&world), None);
+        assert_eq!(member.flip(&world), (false, false));
+        assert_eq!(member.span(&world), (1, 1));
+        assert!(!member.hidden(&world));
     }
 
     #[test]
-    fn a_bare_enlisting_is_a_whole_member_already() {
+    fn one_description_seats_as_many_members_as_it_is_enlisted() {
+        // `MemberBuilder` is `Copy`, so one description seats as many members as a cart enlists
+        // from it — a shot fired again and again — and each seat reads back exactly what was
+        // described.
+        let mut world: World<2> = World::new();
+        let description = Member::builder(4.0, 8.0, 8, 8)
+            .moving(1.0, -2.0)
+            .wearing(CRATE_SPRITE)
+            .flipped(true, false);
+
+        let first = description
+            .enlist(&mut world)
+            .expect("a seat for the first");
+        let second = description
+            .enlist(&mut world)
+            .expect("a seat for the second");
+        assert_eq!((first.seat(), second.seat()), (0, 1));
+
+        for member in [first, second] {
+            assert_eq!(member.pos(&world), (4.0, 8.0));
+            assert_eq!(member.velocity(&world), Velocity::new(1.0, -2.0));
+            assert_eq!(member.sprite(&world), Some(CRATE_SPRITE));
+            assert_eq!(member.flip(&world), (true, false));
+        }
+    }
+
+    #[test]
+    fn a_bare_description_is_a_whole_member_already() {
         let mut world: World<1> = World::new();
-        let bare = world.enlist(4.5, -2.25, 8, 8).unwrap().member();
+        let bare = Member::builder(4.5, -2.25, 8, 8)
+            .enlist(&mut world)
+            .unwrap();
         let record = &world.records[bare.seat()];
         // Where it stands, exactly and as it draws: the position floored, as a fresh body's is.
         assert_eq!((record.x, record.y), (4.5, -2.25));
@@ -2240,7 +1651,7 @@ mod tests {
         assert_eq!(record.heeds, BitFlags::<SpriteFlag>::all().bits());
         assert_eq!(record.meta, 0);
         // And of the weight nobody has to think about, with the rectangle over the sprite.
-        assert_eq!(world.mass(bare), 1.0);
+        assert_eq!(bare.mass(&world), 1.0);
         assert_eq!(world.offsets[bare.seat()], (0, 0));
     }
 
@@ -2249,40 +1660,36 @@ mod tests {
         let mut world: World<3> = World::new().with_solid(WALL);
 
         // Nothing said: the scene's word, whatever it is.
-        let scene = pebble(&mut world, 0.0, 0.0);
+        let plain = pebble(&mut world, 0.0, 0.0);
         assert_eq!(
-            world.records[scene.seat()].solid,
+            world.records[plain.seat()].solid,
             BitFlags::from(WALL).bits()
         );
-        assert_eq!(world.solid(scene), None);
+        assert_eq!(plain.solid(&world), None);
 
         // A rule of its own replaces it rather than adding to it — the empty one included.
-        let own = world
-            .enlist(0.0, 40.0, 8, 8)
-            .unwrap()
+        let own = Member::builder(0.0, 40.0, 8, 8)
             .stopped_by(CRATE)
-            .member();
+            .enlist(&mut world)
+            .unwrap();
         assert_eq!(
             world.records[own.seat()].solid,
             BitFlags::from(CRATE).bits()
         );
-        let ghost = world
-            .enlist(0.0, 80.0, 8, 8)
-            .unwrap()
+        let ghost = Member::builder(0.0, 80.0, 8, 8)
             .stopped_by(BitFlags::empty())
-            .member();
+            .enlist(&mut world)
+            .unwrap();
         assert_eq!(world.records[ghost.seat()].solid, 0);
-        assert_eq!(world.solid(ghost), Some(BitFlags::empty()));
+        assert_eq!(ghost.solid(&world), Some(BitFlags::empty()));
     }
 
     #[test]
-    fn everything_an_enlisting_says_reaches_the_seat_it_fills() {
+    fn everything_a_description_says_reaches_the_seat_it_fills() {
         const ROOM: Bounds = Bounds::new(-8, 4, 100, 64);
 
         let mut world: World<1> = World::new();
-        let member = world
-            .enlist(10.0, 20.0, 6, 4)
-            .unwrap()
+        let member = Member::builder(10.0, 20.0, 6, 4)
             .moving(1.5, -0.5)
             .wearing(SpriteId(9))
             .heeding(CRATE)
@@ -2290,7 +1697,8 @@ mod tests {
             .offset(1, 2)
             .prop()
             .weighing(3.0)
-            .member();
+            .enlist(&mut world)
+            .unwrap();
 
         let record = &world.records[member.seat()];
         assert_eq!((record.dx, record.dy), (1.5, -0.5));
@@ -2303,7 +1711,7 @@ mod tests {
         assert_eq!(record.meta, wire::PROP | wire::CONFINED);
         // The rectangle sits where the offset put it, and is the size it was given.
         assert_eq!((record.bx, record.by, record.bw, record.bh), (11, 22, 6, 4));
-        assert_eq!(world.mass(member), 3.0);
+        assert_eq!(member.mass(&world), 3.0);
     }
 
     #[test]
@@ -2317,12 +1725,12 @@ mod tests {
     fn a_retired_member_s_handle_is_nobody() {
         let mut world: World<2> = World::new();
         let member = pebble(&mut world, 0.0, 0.0);
-        assert!(world.seated(member));
-        world.retire(member);
+        assert!(member.seated(&world));
+        member.retire(&mut world);
         // The asking-first way round, for a cart that would rather not find out the hard way.
-        assert!(!world.seated(member));
+        assert!(!member.seated(&world));
 
-        world.pos(member);
+        member.pos(&world);
     }
 
     #[test]
@@ -2331,15 +1739,15 @@ mod tests {
         let mut world: World<2> = World::new();
         let _ = pebble(&mut world, 0.0, 0.0);
         let gone = pebble(&mut world, 16.0, 0.0);
-        world.retire(gone);
+        gone.retire(&mut world);
         let successor = pebble(&mut world, 32.0, 0.0);
         // The same seat, and not the same member: the handle to whoever left it must not answer
         // for whoever took it.
         assert_eq!(successor.seat(), gone.seat());
         assert_ne!(successor, gone);
-        assert_eq!(world.pos(successor), (32.0, 0.0));
+        assert_eq!(successor.pos(&world), (32.0, 0.0));
 
-        world.set_velocity(gone, Velocity::new(1.0, 0.0));
+        gone.set_velocity(&mut world, Velocity::new(1.0, 0.0));
     }
 
     #[test]
@@ -2379,98 +1787,96 @@ mod tests {
         // The step answers the body and leaves the rectangle's corner alone — the wire's in/out
         // split — so it is the world that has to put it back, every step, offset and all.
         let mut world: World<1> = World::new();
-        let inset = world
-            .enlist(0.0, 0.0, 4, 8)
-            .unwrap()
+        let inset = Member::builder(0.0, 0.0, 4, 8)
             .offset(2, 0)
             .moving(3.0, 1.0)
-            .member();
-        assert_eq!(world.bounds(inset), Bounds::new(2, 0, 4, 8));
+            .enlist(&mut world)
+            .unwrap();
+        assert_eq!(inset.bounds(&world), Bounds::new(2, 0, 4, 8));
         world.step(&CTX);
-        assert_eq!(world.pos(inset), (3.0, 1.0));
-        assert_eq!(world.bounds(inset), Bounds::new(5, 1, 4, 8));
+        assert_eq!(inset.pos(&world), (3.0, 1.0));
+        assert_eq!(inset.bounds(&world), Bounds::new(5, 1, 4, 8));
 
         // And a rectangle re-cut mid-animation is met at its new size from the next step on.
-        world.resize(inset, 8, 4);
-        world.set_offset(inset, 0, 4);
-        assert_eq!(world.bounds(inset), Bounds::new(3, 5, 8, 4));
+        inset.resize(&mut world, 8, 4);
+        inset.set_offset(&mut world, 0, 4);
+        assert_eq!(inset.bounds(&world), Bounds::new(3, 5, 8, 4));
     }
 
     #[test]
     fn a_teleport_re_snaps_the_drawn_pixel_and_takes_the_rectangle_with_it() {
         let mut world: World<1> = World::new();
-        let prop = world
-            .enlist(0.0, 0.0, 8, 8)
-            .unwrap()
+        let prop = Member::builder(0.0, 0.0, 8, 8)
             .offset(1, -1)
             .prop()
-            .member();
-        world.set_pos(prop, 40.9, 12.2);
-        assert_eq!(world.pos(prop), (40.9, 12.2));
-        assert_eq!(world.draw_pos(prop), (40, 12));
-        assert_eq!(world.bounds(prop), Bounds::new(41, 11, 8, 8));
+            .enlist(&mut world)
+            .unwrap();
+        prop.set_pos(&mut world, 40.9, 12.2);
+        assert_eq!(prop.pos(&world), (40.9, 12.2));
+        assert_eq!(prop.draw_pos(&world), (40, 12));
+        assert_eq!(prop.bounds(&world), Bounds::new(41, 11, 8, 8));
     }
 
     #[test]
     fn what_a_member_is_told_after_it_is_seated_lands_in_its_seat() {
-        // The seat is where a member lives now, so everything an enlisting said once can be said
+        // The seat is where a member lives, so everything its description said once can be said
         // again — and what is said reaches the very bytes the next step is read out of.
         let mut world: World<1> = World::new().with_solid(WALL);
         let walker = pebble(&mut world, 0.0, 0.0);
         let seat = walker.seat();
 
-        world.set_sprite(walker, Some(CRATE_SPRITE));
+        walker.set_sprite(&mut world, Some(CRATE_SPRITE));
         assert_eq!(world.records[seat].sprite, CRATE_SPRITE.0 as u16);
-        world.set_sprite(walker, None);
+        walker.set_sprite(&mut world, None);
         assert_eq!(world.records[seat].sprite, wire::UNWORN);
 
-        world.set_heeds(walker, CRATE);
+        walker.set_heeds(&mut world, CRATE);
         assert_eq!(world.records[seat].heeds, BitFlags::from(CRATE).bits());
 
         // A rule of its own replaces the scene's; handing it back takes the scene's word as it
         // stands now.
-        world.set_solid(walker, Some(CRATE.into()));
+        walker.set_solid(&mut world, Some(CRATE.into()));
         assert_eq!(world.records[seat].solid, BitFlags::from(CRATE).bits());
-        world.set_solid(walker, None);
+        walker.set_solid(&mut world, None);
         assert_eq!(world.records[seat].solid, BitFlags::from(WALL).bits());
 
-        world.set_confines(walker, Some(Bounds::new(-8, 4, 100, 64)));
+        walker.set_confines(&mut world, Some(Bounds::new(-8, 4, 100, 64)));
         let record = &world.records[seat];
         assert_eq!(record.meta & wire::CONFINED, wire::CONFINED);
         assert_eq!(
             (record.cx, record.cy, record.cw, record.ch),
             (-8, 4, 100, 64)
         );
-        world.set_confines(walker, None);
+        walker.set_confines(&mut world, None);
         assert_eq!(world.records[seat].meta & wire::CONFINED, 0);
     }
 
     #[test]
     fn what_a_member_is_described_as_reads_back_through_its_handle() {
-        // The world owns the description now, so the cart asks rather than remembers: whoever
-        // draws the member and whoever wonders what everybody else meets in it read the same
-        // answer, through the same handle — after the enlisting, and after every setter.
+        // The world owns the description, so the cart asks rather than remembers: whoever draws
+        // the member and whoever wonders what everybody else meets in it read the same answer,
+        // through the same handle — once it is enlisted, and after every setter.
         let mut world: World<1> = World::new().with_solid(WALL);
         let walker = pebble(&mut world, 0.0, 0.0);
 
-        assert_eq!(world.sprite(walker), None);
-        assert_eq!(world.solid(walker), None, "no rule of its own yet");
-        assert_eq!(world.heeds(walker), BitFlags::all());
-        assert_eq!(world.confines(walker), None);
+        assert_eq!(walker.sprite(&world), None);
+        assert_eq!(walker.solid(&world), None, "no rule of its own yet");
+        assert_eq!(walker.heeds(&world), BitFlags::all());
+        assert_eq!(walker.confines(&world), None);
 
-        world.set_sprite(walker, Some(CRATE_SPRITE));
-        world.set_solid(walker, Some(WALL | CRATE));
-        world.set_heeds(walker, CRATE);
-        world.set_confines(walker, Some(Bounds::new(-8, 4, 100, 64)));
-        assert_eq!(world.sprite(walker), Some(CRATE_SPRITE));
-        assert_eq!(world.solid(walker), Some(WALL | CRATE));
-        assert_eq!(world.heeds(walker), CRATE.into());
-        assert_eq!(world.confines(walker), Some(Bounds::new(-8, 4, 100, 64)));
+        walker.set_sprite(&mut world, Some(CRATE_SPRITE));
+        walker.set_solid(&mut world, Some(WALL | CRATE));
+        walker.set_heeds(&mut world, CRATE);
+        walker.set_confines(&mut world, Some(Bounds::new(-8, 4, 100, 64)));
+        assert_eq!(walker.sprite(&world), Some(CRATE_SPRITE));
+        assert_eq!(walker.solid(&world), Some(WALL | CRATE));
+        assert_eq!(walker.heeds(&world), CRATE.into());
+        assert_eq!(walker.confines(&world), Some(Bounds::new(-8, 4, 100, 64)));
 
         // Handed back to the scene's word, the member has no rule of its own to report — the
         // scene's word is not its answer, however much it is stopped by it.
-        world.set_solid(walker, None);
-        assert_eq!(world.solid(walker), None);
+        walker.set_solid(&mut world, None);
+        assert_eq!(walker.solid(&world), None);
     }
 
     #[test]
@@ -2479,11 +1885,10 @@ mod tests {
         // no rule of its own takes the new word, and the one that named the empty rule keeps it.
         let mut world: World<2> = World::new();
         let walker = pebble(&mut world, 0.0, 0.0);
-        let ghost = world
-            .enlist(0.0, 40.0, 8, 8)
-            .unwrap()
+        let ghost = Member::builder(0.0, 40.0, 8, 8)
             .stopped_by(BitFlags::empty())
-            .member();
+            .enlist(&mut world)
+            .unwrap();
         let mut world = world.with_solid(WALL);
         assert_eq!(
             world.records[walker.seat()].solid,
@@ -2507,11 +1912,11 @@ mod tests {
         // What a cart's placed state holds for an actor it has not enlisted yet: a seat no world
         // has. Asking is the same bug as asking about somebody who left, and says which it was.
         let mut world: World<2> = World::new();
-        assert!(!world.seated(Member::NOBODY));
+        assert!(!Member::NOBODY.seated(&world));
         let _ = pebble(&mut world, 0.0, 0.0);
-        assert!(!world.seated(Member::NOBODY));
+        assert!(!Member::NOBODY.seated(&world));
 
-        world.pos(Member::NOBODY);
+        Member::NOBODY.pos(&world);
     }
 
     #[test]
@@ -2536,31 +1941,30 @@ mod tests {
     #[test]
     fn a_member_is_held_inside_the_limits_it_is_confined_to() {
         let mut world: World<1> = World::new();
-        let walker = world
-            .enlist(-4.0, 8.0, 8, 8)
-            .unwrap()
+        let walker = Member::builder(-4.0, 8.0, 8, 8)
             .moving(-2.0, 0.5)
             .confined_to(Bounds::screen())
-            .member();
+            .enlist(&mut world)
+            .unwrap();
         world.step(&CTX);
-        assert!(world.contacts(walker).left());
-        assert_eq!(world.pos(walker), (0.0, 8.5));
+        assert!(walker.contacts(&world).left());
+        assert_eq!(walker.pos(&world), (0.0, 8.5));
 
         // And limits taken away are a member let go.
-        world.set_confines(walker, None);
-        world.set_velocity(walker, Velocity::new(-2.0, 0.0));
+        walker.set_confines(&mut world, None);
+        walker.set_velocity(&mut world, Velocity::new(-2.0, 0.0));
         world.step(&CTX);
-        assert_eq!(world.pos(walker), (-2.0, 8.5));
-        assert_eq!(world.contacts(walker), Contacts::empty());
+        assert_eq!(walker.pos(&world), (-2.0, 8.5));
+        assert_eq!(walker.contacts(&world), Contacts::empty());
     }
 
     #[test]
     fn a_bare_member_is_drawn_from_one_cell_unflipped_and_shown() {
         let mut world: World<1> = World::new();
         let bare = pebble(&mut world, 4.5, -2.25);
-        assert_eq!(world.flip(bare), (false, false));
-        assert_eq!(world.span(bare), (1, 1));
-        assert!(!world.hidden(bare));
+        assert_eq!(bare.flip(&world), (false, false));
+        assert_eq!(bare.span(&world), (1, 1));
+        assert!(!bare.hidden(&world));
         let record = &world.records[bare.seat()];
         assert_eq!(
             record.meta & (wire::FLIP_X | wire::FLIP_Y | wire::HIDDEN),
@@ -2574,24 +1978,23 @@ mod tests {
     }
 
     #[test]
-    fn everything_an_enlisting_says_about_the_look_reaches_the_seat() {
+    fn everything_a_description_says_about_the_look_reaches_the_seat() {
         let mut world: World<1> = World::new();
-        let member = world
-            .enlist(0.0, 0.0, 8, 8)
-            .unwrap()
+        let member = Member::builder(0.0, 0.0, 8, 8)
             .wearing(CRATE_SPRITE)
             .flipped(true, false)
             .spanning(2, 3)
             .hidden()
-            .member();
+            .enlist(&mut world)
+            .unwrap();
 
         let record = &world.records[member.seat()];
         assert_eq!(record.meta, wire::FLIP_X | wire::HIDDEN);
         // Two across less one in the low nibble, three down less one in the high.
         assert_eq!(record.span, 0x21);
-        assert_eq!(world.flip(member), (true, false));
-        assert_eq!(world.span(member), (2, 3));
-        assert!(world.hidden(member));
+        assert_eq!(member.flip(&world), (true, false));
+        assert_eq!(member.span(&world), (2, 3));
+        assert!(member.hidden(&world));
     }
 
     #[test]
@@ -2599,38 +2002,37 @@ mod tests {
         // A prop held to the screen, so the bits the step reads are set all along and every
         // change to the look has to leave them standing.
         let mut world: World<1> = World::new();
-        let door = world
-            .enlist(0.0, 0.0, 8, 8)
-            .unwrap()
+        let door = Member::builder(0.0, 0.0, 8, 8)
             .wearing(CRATE_SPRITE)
             .confined_to(Bounds::screen())
             .prop()
-            .member();
+            .enlist(&mut world)
+            .unwrap();
         let seat = door.seat();
         let steps_by = wire::PROP | wire::CONFINED;
 
-        world.set_flip(door, true, false);
+        door.set_flip(&mut world, true, false);
         assert_eq!(world.records[seat].meta, steps_by | wire::FLIP_X);
-        assert_eq!(world.flip(door), (true, false));
+        assert_eq!(door.flip(&world), (true, false));
         // Turned the other way round: across cleared, up and down set.
-        world.set_flip(door, false, true);
+        door.set_flip(&mut world, false, true);
         assert_eq!(world.records[seat].meta, steps_by | wire::FLIP_Y);
-        assert_eq!(world.flip(door), (false, true));
+        assert_eq!(door.flip(&world), (false, true));
 
-        world.set_span(door, 16, 16);
+        door.set_span(&mut world, 16, 16);
         assert_eq!(world.records[seat].span, 0xff);
-        assert_eq!(world.span(door), (16, 16));
+        assert_eq!(door.span(&world), (16, 16));
 
-        world.set_hidden(door, true);
+        door.set_hidden(&mut world, true);
         assert_eq!(
             world.records[seat].meta,
             steps_by | wire::FLIP_Y | wire::HIDDEN
         );
-        assert!(world.hidden(door));
+        assert!(door.hidden(&world));
         assert_eq!(world.records[seat].look(), None);
-        world.set_hidden(door, false);
+        door.set_hidden(&mut world, false);
         assert_eq!(world.records[seat].meta, steps_by | wire::FLIP_Y);
-        assert!(!world.hidden(door));
+        assert!(!door.hidden(&world));
         assert!(
             world.records[seat].look().is_some(),
             "it was never shown again"
@@ -2642,35 +2044,31 @@ mod tests {
         // Three members wearing three cells — one plain, one hidden, one turned round and drawn
         // from a block — and a seat retired from under the middle of them.
         let mut world: World<4> = World::new();
-        let plain = world
-            .enlist(3.5, 7.25, 8, 8)
-            .unwrap()
+        let plain = Member::builder(3.5, 7.25, 8, 8)
             .wearing(SpriteId(5))
-            .member();
-        let gone = world
-            .enlist(20.0, 0.0, 8, 8)
-            .unwrap()
+            .enlist(&mut world)
+            .unwrap();
+        let gone = Member::builder(20.0, 0.0, 8, 8)
             .wearing(SpriteId(6))
-            .member();
-        let _ghost = world
-            .enlist(40.0, 0.0, 8, 8)
-            .unwrap()
+            .enlist(&mut world)
+            .unwrap();
+        let _ghost = Member::builder(40.0, 0.0, 8, 8)
             .wearing(WALL_SPRITE)
             .hidden()
-            .member();
-        let turned = world
-            .enlist(60.5, 30.0, 8, 8)
-            .unwrap()
+            .enlist(&mut world)
+            .unwrap();
+        let turned = Member::builder(60.5, 30.0, 8, 8)
             .wearing(CRATE_SPRITE)
             .flipped(true, false)
             .spanning(2, 3)
-            .member();
-        world.retire(gone);
+            .enlist(&mut world)
+            .unwrap();
+        gone.retire(&mut world);
 
         // Only the two that show, in the order they are seated, each at the pixel it draws at.
         let taken = &world.records[..world.high_water()];
-        let (plain_x, plain_y) = world.draw_pos(plain);
-        let (turned_x, turned_y) = world.draw_pos(turned);
+        let (plain_x, plain_y) = plain.draw_pos(&world);
+        let (turned_x, turned_y) = turned.draw_pos(&world);
         let shown: Vec<wire::Look> = wire::looks(taken, BitFlags::empty(), unflagged).collect();
         assert_eq!(
             shown,
@@ -2707,55 +2105,52 @@ mod tests {
     #[test]
     fn a_step_moves_the_look_with_the_body_and_leaves_the_rest_of_it_alone() {
         let mut world: World<1> = World::new();
-        let runner = world
-            .enlist(0.0, 0.0, 8, 8)
-            .unwrap()
+        let runner = Member::builder(0.0, 0.0, 8, 8)
             .moving(3.0, 2.0)
             .wearing(CRATE_SPRITE)
             .flipped(true, true)
             .spanning(2, 1)
             .hidden()
-            .member();
+            .enlist(&mut world)
+            .unwrap();
         world.step(&CTX);
-        assert_eq!(world.draw_pos(runner), (3, 2), "the step never moved it");
+        assert_eq!(runner.draw_pos(&world), (3, 2), "the step never moved it");
 
         // Nothing of the look went into the step, and nothing of it came back changed.
-        assert_eq!(world.flip(runner), (true, true));
-        assert_eq!(world.span(runner), (2, 1));
-        assert!(world.hidden(runner));
+        assert_eq!(runner.flip(&world), (true, true));
+        assert_eq!(runner.span(&world), (2, 1));
+        assert!(runner.hidden(&world));
 
         // And shown again, it is drawn where the step left the body.
-        world.set_hidden(runner, false);
+        runner.set_hidden(&mut world, false);
         let look = world.records[runner.seat()]
             .look()
             .expect("a member wearing a cell and shown has a look");
-        assert_eq!((look.x, look.y), world.draw_pos(runner));
+        assert_eq!((look.x, look.y), runner.draw_pos(&world));
     }
 
     #[test]
     fn a_retired_seat_shows_nothing_and_the_next_member_in_it_starts_plain() {
         let mut world: World<1> = World::new();
-        let showy = world
-            .enlist(0.0, 0.0, 8, 8)
-            .unwrap()
+        let showy = Member::builder(0.0, 0.0, 8, 8)
             .wearing(CRATE_SPRITE)
             .flipped(true, true)
             .spanning(3, 2)
-            .member();
+            .enlist(&mut world)
+            .unwrap();
         let seat = showy.seat();
         assert!(world.records[seat].look().is_some());
-        world.retire(showy);
+        showy.retire(&mut world);
         assert_eq!(world.records[seat].look(), None, "a retired seat was drawn");
 
         // Whoever is seated there next wears a cell of its own and nothing else of the last one's.
-        let successor = world
-            .enlist(8.0, 16.0, 8, 8)
-            .unwrap()
+        let successor = Member::builder(8.0, 16.0, 8, 8)
             .wearing(CRATE_SPRITE)
-            .member();
-        assert_eq!(world.flip(successor), (false, false));
-        assert_eq!(world.span(successor), (1, 1));
-        assert!(!world.hidden(successor));
+            .enlist(&mut world)
+            .unwrap();
+        assert_eq!(successor.flip(&world), (false, false));
+        assert_eq!(successor.span(&world), (1, 1));
+        assert!(!successor.hidden(&world));
         assert_eq!(
             world.records[seat].look(),
             Some(wire::Look {
@@ -2774,11 +2169,10 @@ mod tests {
     #[should_panic(expected = "one to sixteen cells")]
     fn a_member_drawn_from_no_cells_at_all_is_refused_loudly() {
         let mut world: World<1> = World::new();
-        let _ = world
-            .enlist(0.0, 0.0, 8, 8)
-            .unwrap()
+        let _ = Member::builder(0.0, 0.0, 8, 8)
             .spanning(0, 1)
-            .member();
+            .enlist(&mut world)
+            .unwrap();
     }
 
     #[test]
@@ -2786,7 +2180,7 @@ mod tests {
     fn a_member_drawn_from_past_the_edge_of_the_sheet_is_refused_loudly() {
         let mut world: World<1> = World::new();
         let member = pebble(&mut world, 0.0, 0.0);
-        world.set_span(member, 1, 17);
+        member.set_span(&mut world, 1, 17);
     }
 
     #[test]
@@ -2795,20 +2189,18 @@ mod tests {
         // the ABI's stubs: nothing to see, and nothing on the way that may panic — not a gap in
         // the cast, not the widest block there is, and not a layer.
         let mut world: World<3> = World::new();
-        let _shown = world
-            .enlist(0.0, 0.0, 8, 8)
-            .unwrap()
+        let _shown = Member::builder(0.0, 0.0, 8, 8)
             .wearing(CRATE_SPRITE)
-            .member();
+            .enlist(&mut world)
+            .unwrap();
         let gone = pebble(&mut world, 16.0, 0.0);
-        let _sheet = world
-            .enlist(32.0, 0.0, 8, 8)
-            .unwrap()
+        let _sheet = Member::builder(32.0, 0.0, 8, 8)
             .wearing(WALL_SPRITE)
             .flipped(true, true)
             .spanning(16, 16)
-            .member();
-        world.retire(gone);
+            .enlist(&mut world)
+            .unwrap();
+        gone.retire(&mut world);
 
         let mut gfx = Graphics { _private: () };
         world.draw(&mut gfx, BitFlags::empty());

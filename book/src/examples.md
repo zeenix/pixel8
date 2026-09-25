@@ -39,15 +39,15 @@ here, in a few hundred lines split into small modules:
   the scene is one **[`World`]** of two seats, which owns where the hero and the
   badie are, how fast, and what they last ran into. The walls are declared on it
   once (the same flag the map marks its solid tiles with), it owns the level's
-  **[`Gravity`]**, and each actor is **[enlisted][`enlist`]** in one
-  **[chain][`Enlisting`]** — the **[`Bounds`]** it covers, the rectangle the hero
-  may never leave (**[`confined_to`]**), the **[`wearing`]** cell that says the
-  badie is a badie — keeping the **[`Member`]** handle the chain ends in beside
-  its own game data. A single **[`step`]** an update pulls the hero down, stops
-  it at the solid tiles, holds it inside the level, patrols the badie and tells
-  each of them what it met; one **[`draw`]** a frame puts both on screen where
-  the step moved them (so running jumps climb clean staircases), each in the
-  look its update gave it — the cell it wears, which way it faces;
+  **[`Gravity`]**, and each actor is described by a **[`MemberBuilder`]** — the
+  **[`Bounds`]** it covers, the rectangle the hero may never leave
+  (**[`confined_to`]**), the **[`wearing`]** cell that says the badie is a badie
+  — and **[enlisted][`enlist`]** in it, keeping the **[`Member`]** handle that
+  comes back beside its own game data. A single **[`step`]** an update pulls the
+  hero down, stops it at the solid tiles, holds it inside the level, patrols the
+  badie and tells each of them what it met; one **[`draw`]** a frame puts both
+  on screen where the step moved them (so running jumps climb clean staircases),
+  each in the look its update gave it — the cell it wears, which way it faces;
 - nothing walks a pair of casts: the badie's sprites are flagged, so the hero's
   **[`contacts`]** report having met one in **[`touches`]** and the cart only
   decides whether that was a ram or a stomp — same frame, so a stomped badie is
@@ -120,14 +120,14 @@ candle, point it another way for an exhaust trail.
 [`Bounds`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Bounds.html
 [`step`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.step
 [`World`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html
-[`Enlisting`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Enlisting.html
+[`MemberBuilder`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.MemberBuilder.html
 [`Member`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Member.html
-[`enlist`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.enlist
-[`retire`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.retire
+[`enlist`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.MemberBuilder.html#method.enlist
+[`retire`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Member.html#method.retire
 [`draw`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.draw
-[`confined_to`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Enlisting.html#method.confined_to
-[`wearing`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Enlisting.html#method.wearing
-[`contacts`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.contacts
+[`confined_to`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.MemberBuilder.html#method.confined_to
+[`wearing`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.MemberBuilder.html#method.wearing
+[`contacts`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Member.html#method.contacts
 [`touches`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Contacts.html#method.touches
 
 ## stress

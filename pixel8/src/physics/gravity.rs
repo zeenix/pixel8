@@ -12,9 +12,10 @@ use crate::Direction;
 /// against or the wall a puzzle turns the room onto. See the [module docs](super#gravity).
 ///
 /// **Mass does not enter into it.** Everything falls alike, whatever it weighs, so an anvil and a
-/// feather drop side by side and a cart that gives a member a [mass](super::Enlisting::weighing)
-/// does not change how it falls by doing so. What tells the two apart is the air between them: see
-/// [`Atmosphere`](super::Atmosphere), which reads mass exactly where gravity refuses to.
+/// feather drop side by side and a cart that gives a member a
+/// [mass](super::MemberBuilder::weighing) does not change how it falls by doing so. What tells the
+/// two apart is the air between them: see [`Atmosphere`](super::Atmosphere), which reads mass
+/// exactly where gravity refuses to.
 ///
 /// ```no_run
 /// # use pixel8::{physics::{Gravity, World}, Context};

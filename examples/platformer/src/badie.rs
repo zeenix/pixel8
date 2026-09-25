@@ -22,13 +22,12 @@ impl Badie {
     /// the badie itself listens for nothing.
     pub fn new(scene: &mut Scene) -> Self {
         Self {
-            member: scene
-                .enlist(BADIE_START_X, BADIE_Y, BADIE_WIDTH, BADIE_HEIGHT)
-                .expect("a seat for the badie")
+            member: Member::builder(BADIE_START_X, BADIE_Y, BADIE_WIDTH, BADIE_HEIGHT)
                 .moving(-BADIE_SPEED, 0.0)
                 .wearing(BADIE_SPRITE)
                 .heeding(BitFlags::<SpriteFlag>::empty())
-                .member(),
+                .enlist(scene)
+                .expect("a seat for the badie"),
         }
     }
 
@@ -39,7 +38,7 @@ impl Badie {
 
     /// Gives the seat back — stomped, or the run over.
     pub fn retire(self, scene: &mut Scene) {
-        scene.retire(self.member);
+        self.member.retire(scene);
     }
 
     /// Our badie patrols horizontally back and forth between two points, turning at each end.
@@ -47,21 +46,21 @@ impl Badie {
     pub fn patrol(&self, scene: &mut Scene) {
         // The badie faces the way it walks; the world's flip is the one copy of that fact,
         // so the patrol reads it back instead of keeping one of its own.
-        let (mut heading_right, _) = scene.flip(self.member);
-        let x = scene.pos(self.member).0;
+        let (mut heading_right, _) = self.member.flip(scene);
+        let x = self.member.pos(scene).0;
         if x < BADIE_END_X {
             heading_right = true;
         } else if x > BADIE_START_X {
             heading_right = false;
         }
-        scene.set_flip(self.member, heading_right, false);
-        let mut velocity = scene.velocity(self.member);
+        self.member.set_flip(scene, heading_right, false);
+        let mut velocity = self.member.velocity(scene);
         velocity.dx = if heading_right {
             BADIE_SPEED
         } else {
             -BADIE_SPEED
         };
-        scene.set_velocity(self.member, velocity);
+        self.member.set_velocity(scene, velocity);
     }
 
     /// What the badie looks like this frame, written into its seat for the world to draw.
@@ -73,6 +72,6 @@ impl Badie {
             GameMode::InGame { .. } if (frame / 4).is_multiple_of(2) => BADIE_ALT_SPRITE,
             GameMode::Ended { .. } | GameMode::InGame { .. } => BADIE_SPRITE,
         };
-        scene.set_sprite(self.member, Some(sprite));
+        self.member.set_sprite(scene, Some(sprite));
     }
 }

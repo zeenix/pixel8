@@ -129,9 +129,9 @@ impl Wind {
     /// This is also the drag that keeps a wind from accelerating things forever, so `0.0` is a
     /// wind that does nothing rather than a gentle one.
     ///
-    /// A member's [mass](super::Enlisting::weighing) divides it: exposure is how much of the wind
-    /// a thing catches, mass is how much there is of it to shift, and the wind's grip is the one
-    /// over the other.
+    /// A member's [mass](super::MemberBuilder::weighing) divides it: exposure is how much of the
+    /// wind a thing catches, mass is how much there is of it to shift, and the wind's grip is
+    /// the one over the other.
     pub fn with_exposure(mut self, exposure: f32) -> Self {
         self.set_exposure(exposure);
         self

@@ -61,11 +61,12 @@ pub const UNWORN: u16 = u16::MAX;
 /// [`World`](super::World): what the engine needs of a member going in, and what the step decided
 /// coming back, in the same forty-four bytes.
 ///
-/// Going in, everything is what the cart said as it [enlisted](super::World::enlist) the member —
-/// with `solid` already settled between the member's own rule and the world's, so the engine never
-/// has to ask whose word it was. Coming back, `x`/`y`/`rx`/`ry` are the body's whole state after
-/// the step, `dx`/`dy` the velocity that survived it, and `sides`/`touched` the [`Contacts`]; the
-/// rest comes back untouched, which is why the world can keep its state here between steps.
+/// Going in, everything is what the cart said as it [enlisted](super::MemberBuilder::enlist) the
+/// member — with `solid` already settled between the member's own rule and the world's, so the
+/// engine never has to ask whose word it was. Coming back, `x`/`y`/`rx`/`ry` are the body's whole
+/// state after the step, `dx`/`dy` the velocity that survived it, and `sides`/`touched` the
+/// [`Contacts`]; the rest comes back untouched, which is why the world can keep its state here
+/// between steps.
 ///
 /// The same bytes are also what a draw reads: the cell a member wears, how many cells its block
 /// spans and which way round, and whether it is shown at all — [`look`](Record::look) is that

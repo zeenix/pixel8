@@ -23,7 +23,7 @@
 //! tiles with — it owns the level's pull, a [`Gravity`](pixel8::physics::Gravity)
 //! handed over at the start, and it owns the position, the velocity, the rectangle
 //! and the contacts of both actors. Each of them is
-//! [enlisted](pixel8::physics::World::enlist) once — one sprite's worth of rectangle,
+//! [enlisted](pixel8::physics::MemberBuilder::enlist) once — one sprite's worth of rectangle,
 //! the level itself as the edge the hero may never leave, and, for the badie, the
 //! sprite it wears — and keeps the [`Member`](pixel8::physics::Member) handle it gets
 //! back beside its own game data.
@@ -31,7 +31,7 @@
 //!
 //! One [`step`](pixel8::physics::World::step) an update does the moving, the stopping
 //! and the reporting for both; the `below()` of what it leaves in the hero's
-//! [`contacts`](pixel8::physics::World::contacts) is what this cart calls *grounded*.
+//! [`contacts`](pixel8::physics::Member::contacts) is what this cart calls *grounded*.
 //! One [`draw`](pixel8::physics::World::draw) a frame puts both of them on screen where
 //! the step left them, and because the world holds the trajectory it draws from, a running
 //! jump (hold Right + jump) — a sub-pixel diagonal — climbs a clean staircase instead of
@@ -43,7 +43,7 @@
 //! flag in the sprite editor, so [`touches`](pixel8::physics::Contacts::touches)
 //! answers for it and nothing here walks a pair of casts. Whether the touch was a
 //! ram or a stomp — and what it costs — is settled in this file, where the badie
-//! lives; a stomped badie is [retired](pixel8::physics::World::retire) on the spot,
+//! lives; a stomped badie is [retired](pixel8::physics::Member::retire) on the spot,
 //! its seat free for the next run.
 //!
 //! The code is split into small modules: `hero` and `badie` (the two moving
@@ -161,7 +161,8 @@ impl Platformer {
         let (mut rammed, mut stomped) = (false, false);
         if let (true, Some(badie)) = (self.hero.met_badie(&self.scene), &self.badie) {
             // Level with the badie is a ram; anything else is the hero coming down on it.
-            if self.scene.bounds(self.hero.member()).y() == self.scene.bounds(badie.member()).y() {
+            if self.hero.member().bounds(&self.scene).y() == badie.member().bounds(&self.scene).y()
+            {
                 rammed = true;
             } else {
                 stomped = true;

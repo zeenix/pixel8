@@ -143,50 +143,43 @@ impl Game for Probe {
         // otherwise identical, so a mirrored right crate is what carries the flip bit over the
         // wire.
         let crated = |world: &mut World<5>, x: f32, flip: bool| {
-            world
-                .enlist(x, CRATE_ROW, SIDE, SIDE)
-                .unwrap()
+            Member::builder(x, CRATE_ROW, SIDE, SIDE)
                 .wearing(CRATE_SPRITE)
                 .flipped(flip, false)
-                .member()
+                .enlist(world)
+                .unwrap()
         };
         self.left = crated(&mut self.world, LEFT_CRATE_AT, false);
         self.right = crated(&mut self.world, RIGHT_CRATE_AT, true);
         // The sensor: wearing nothing, told everything, and stopped by nothing — a rule of its
         // own, held against a world that declares otherwise.
-        self.sensor = self
-            .world
-            .enlist(SENSOR_AT, SENSOR_ROW, SIDE, SIDE)
-            .unwrap()
+        self.sensor = Member::builder(SENSOR_AT, SENSOR_ROW, SIDE, SIDE)
             .stopped_by(BitFlags::<SpriteFlag>::empty())
-            .member();
+            .enlist(&mut self.world)
+            .unwrap();
         // And the hazard: standing still, wearing a flagged cell, stopped by nothing.
-        self.hazard = self
-            .world
-            .enlist(HAZARD_AT, SENSOR_ROW, SIDE, SIDE)
-            .unwrap()
+        self.hazard = Member::builder(HAZARD_AT, SENSOR_ROW, SIDE, SIDE)
             .wearing(HAZARD_SPRITE)
             .stopped_by(BitFlags::<SpriteFlag>::empty())
-            .member();
+            .enlist(&mut self.world)
+            .unwrap();
         // And the ghost: propped far from the rest of the cast, wearing the very cell the crates
         // do — inside the layer `draw` asks for — and hidden, so a hidden bit lost in the
         // crossing would show up drawn on exactly the crates' own pixels.
-        self.ghost = self
-            .world
-            .enlist(GHOST_AT.0, GHOST_AT.1, SIDE, SIDE)
-            .unwrap()
+        self.ghost = Member::builder(GHOST_AT.0, GHOST_AT.1, SIDE, SIDE)
             .wearing(CRATE_SPRITE)
             .stopped_by(BitFlags::<SpriteFlag>::empty())
             .prop()
             .hidden()
-            .member();
+            .enlist(&mut self.world)
+            .unwrap();
     }
 
     fn update(&mut self, ctx: &mut Context) {
         // The cast in the order it was seated, every push renewed.
         let cast = [self.left, self.right, self.sensor, self.hazard, self.ghost];
         for (member, push) in cast.into_iter().zip(self.pushes) {
-            self.world.set_velocity(member, push);
+            member.set_velocity(&mut self.world, push);
         }
 
         // The whole cast, in one call: the crates against each other, the sensor against the
@@ -199,25 +192,25 @@ impl Game for Probe {
         self.world.draw(gfx, CRATE);
 
         // The report: rows and columns of its own, over the cast the world just drew.
-        let (left_x, left_y) = self.world.draw_pos(self.left);
+        let (left_x, left_y) = self.left.draw_pos(&self.world);
         gfx.pset(left_x, LEFT_CRATE_ROW, Color::WHITE);
         gfx.pset(
-            self.world.draw_pos(self.right).0,
+            self.right.draw_pos(&self.world).0,
             RIGHT_CRATE_ROW,
             Color::WHITE,
         );
         gfx.pset(left_y, CRATE_Y_ROW, Color::WHITE);
         gfx.pset(
-            self.world.draw_pos(self.sensor).0,
+            self.sensor.draw_pos(&self.world).0,
             SENSOR_X_ROW,
             Color::WHITE,
         );
-        answer(gfx, LEFT_STOPPED, self.world.contacts(self.left).right());
-        answer(gfx, RIGHT_STOPPED, self.world.contacts(self.right).left());
+        answer(gfx, LEFT_STOPPED, self.left.contacts(&self.world).right());
+        answer(gfx, RIGHT_STOPPED, self.right.contacts(&self.world).left());
         answer(
             gfx,
             MET_HAZARD,
-            self.world.contacts(self.sensor).touches(HAZARD),
+            self.sensor.contacts(&self.world).touches(HAZARD),
         );
     }
 }
