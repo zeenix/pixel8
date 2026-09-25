@@ -2,7 +2,8 @@
 
 use super::{
     collider::{far, Cast, Collider, Neighbour},
-    wire, Bounds, Contact, Contacts, Force, Kinetic, Member, Subject, Velocity,
+    wire, Bounds, Contact, Contacts, Force, Kinetic, Member, MemberId, MemberMut, Subject,
+    Velocity,
 };
 use crate::{BitFlags, Context, Graphics, SpriteFlag, SpriteId};
 
@@ -19,7 +20,7 @@ use crate::{BitFlags, Context, Graphics, SpriteFlag, SpriteId};
 ///
 /// ```no_run
 /// use pixel8::{
-///     physics::{Bounds, Gravity, Member, World},
+///     physics::{Bounds, Gravity, Member, MemberId, World},
 ///     *,
 /// };
 ///
@@ -28,10 +29,10 @@ use crate::{BitFlags, Context, Graphics, SpriteFlag, SpriteId};
 /// # const HERO_SPRITE: SpriteId = SpriteId(1);
 /// struct Level {
 ///     /// The scene: three seats under the level's pull, and every one of them a member the
-///     /// handles below are the cart's grip on.
+///     /// ids below are the cart's grip on.
 ///     world: World<3, Gravity>,
-///     hero: Member,
-///     badies: [Member; 2],
+///     hero: MemberId,
+///     badies: [MemberId; 2],
 ///     /// And what is the cart's own, which the world has never heard of.
 ///     score: u16,
 /// }
@@ -60,15 +61,17 @@ use crate::{BitFlags, Context, Graphics, SpriteFlag, SpriteId};
 ///     fn update(&mut self, ctx: &mut Context) {
 ///         // Whatever each of them means to do this update — read the buttons, turn a patrol
 ///         // round — is written into its velocity first. Then the world moves the lot.
-///         let mut velocity = self.hero.velocity(&self.world);
+///         let mut hero = self.world.member_mut(self.hero);
+///         let mut velocity = hero.velocity();
 ///         velocity.dx = if ctx.is_button_down(Button::Right) { 0.7 } else { 0.0 };
-///         self.hero.set_velocity(&mut self.world, velocity);
+///         hero.set_velocity(velocity);
 ///
 ///         self.world.step(ctx);
 ///
 ///         // And the answers are waiting in the seats.
-///         let grounded = self.hero.contacts(&self.world).below();
-///         let hurt = self.hero.contacts(&self.world).touches(SPIKES);
+///         let hero = self.world.member(self.hero);
+///         let grounded = hero.contacts().below();
+///         let hurt = hero.contacts().touches(SPIKES);
 ///     }
 ///
 ///     fn draw(&self, gfx: &mut Graphics) {
@@ -86,8 +89,8 @@ use crate::{BitFlags, Context, Graphics, SpriteFlag, SpriteId};
 /// position and the coherent pixel it draws at, the velocity, the rectangle it covers, the cell it
 /// wears and the rest of its look — which way round, how many cells, whether it is shown at all —
 /// what stops it, what it cares to hear about, how far it may go, what it weighs, and what its
-/// last step ran into. A cart keeps a [`Member`] — two bytes — and its own game data beside it,
-/// and asks the member, handed the world, for the rest.
+/// last step ran into. A cart keeps a [`MemberId`] — two bytes — and its own game data beside it,
+/// and [borrows](Self::member) the member it names from the world for the rest.
 ///
 /// It is not a saving in bytes and does not pretend to be one. A seat is the forty-four bytes of
 /// its record plus nine the world keeps alongside, `N` of them for as long as the world lives,
@@ -327,7 +330,7 @@ impl<const N: usize, F: Force> World<N, F> {
 
     /// Claims the lowest empty seat for a whole description — the `record` a
     /// [`MemberBuilder`](super::MemberBuilder) built up, its own rule for solid if it gave one, its
-    /// mass and its rectangle's offset — and hands back the [`Member`] handle, or `None` for a
+    /// mass and its rectangle's offset — and hands back the [`MemberId`], or `None` for a
     /// full house: the world's half of [`enlist`](super::MemberBuilder::enlist), since the seats
     /// are the world's to hand out.
     pub(super) fn claim(
@@ -336,7 +339,7 @@ impl<const N: usize, F: Force> World<N, F> {
         solid: Option<BitFlags<SpriteFlag>>,
         mass: f32,
         offset: (i16, i16),
-    ) -> Option<Member> {
+    ) -> Option<MemberId> {
         // The lowest empty seat. Past `N` the mask reads as empty, so a full house answers here
         // rather than needing a count of its own.
         let slot = (!self.seated).trailing_zeros() as usize;
@@ -358,7 +361,7 @@ impl<const N: usize, F: Force> World<N, F> {
             self.own_solid &= !(1 << slot);
         }
 
-        Some(Member {
+        Some(MemberId {
             slot: slot as u8,
             generation: self.generations[slot],
         })
@@ -390,7 +393,7 @@ impl<const N: usize, F: Force> World<N, F> {
     /// mover's own sweep answers the mover, and whoever it arrived on is told what arrived —
     /// filtered by that member's own [heeds](super::MemberBuilder::heeding) and solid, flags only,
     /// in the same update. So a ram is felt on both sides of it however the two were seated,
-    /// and either party may be [retired](Member::retire) the moment the step returns without
+    /// and either party may be [retired](MemberMut::retire) the moment the step returns without
     /// costing the other its news.
     ///
     /// The two halves of the answer are taken over different ground, and on purpose. A member is
@@ -485,8 +488,8 @@ impl<const N: usize, F: Force> World<N, F> {
     /// # }
     /// ```
     ///
-    /// The look is the update's to decide — [`set_sprite`](Member::set_sprite),
-    /// [`set_flip`](Member::set_flip) and the rest are written beside the velocity — and
+    /// The look is the update's to decide — [`set_sprite`](MemberMut::set_sprite),
+    /// [`set_flip`](MemberMut::set_flip) and the rest are written beside the velocity — and
     /// [`Game::draw`](crate::Game::draw) holds the game by `&self`, so nothing about the world can
     /// change here. What is set on the screen is honoured as it is for any sprite: the camera, the
     /// clip, the transparency and the palette. Anything that is not a member — the HUD, a particle
@@ -545,6 +548,90 @@ impl<const N: usize, F: Force> World<N, F> {
                 .expect("a look is at least one cell each way");
             }
         }
+    }
+
+    /// Borrows the member `id` names, to be read.
+    ///
+    /// A [`Member`] borrows the world shared, so a cart may hold as many of them at once as it
+    /// has questions — a stomp told from a ram by comparing two members'
+    /// [`bounds`](Member::bounds).
+    ///
+    /// `id` naming nobody in this cast — a retired member, or [`MemberId::NOBODY`] — is a cart
+    /// holding on to nobody, and this panics saying so rather than answering for whoever holds
+    /// the seat now; [`get_member`](Self::get_member) is the question to ask instead of finding
+    /// out the hard way.
+    ///
+    /// ```no_run
+    /// # use pixel8::physics::{MemberId, World};
+    /// # fn f(world: &World<8>, hero: MemberId) -> bool {
+    /// world.member(hero).contacts().below()
+    /// # }
+    /// ```
+    // Inlined, as are the other three ways of borrowing a member. Carts are built for size, and
+    // out of line a borrow is a call that writes the whole view to memory for the cart to read
+    // back; inlined, it is the stale check and whichever fields the cart then reads.
+    #[inline]
+    pub fn member(&self, id: MemberId) -> Member<'_> {
+        let slot = self.seat(id);
+
+        Member {
+            id,
+            record: &self.records[slot],
+            mass: self.masses[slot],
+            own_solid: self.own_solid & (1 << slot) != 0,
+        }
+    }
+
+    /// Borrows the member `id` names, to be changed.
+    ///
+    /// A [`MemberMut`] borrows the world exclusively, so a cart holds one only for the few lines
+    /// that change a single member, and lets it go before the world [steps](Self::step) or
+    /// another member is borrowed.
+    ///
+    /// `id` naming nobody in this cast — a retired member, or [`MemberId::NOBODY`] — is a cart
+    /// holding on to nobody, and this panics saying so rather than answering for whoever holds
+    /// the seat now; [`get_member_mut`](Self::get_member_mut) is the question to ask instead of
+    /// finding out the hard way.
+    ///
+    /// ```no_run
+    /// # use pixel8::physics::{MemberId, Velocity, World};
+    /// # fn f(world: &mut World<8>, hero: MemberId, velocity: Velocity) {
+    /// world.member_mut(hero).set_velocity(velocity);
+    /// # }
+    /// ```
+    #[inline]
+    pub fn member_mut(&mut self, id: MemberId) -> MemberMut<'_> {
+        let slot = self.seat(id);
+        let scene_solid = self.solid;
+
+        MemberMut {
+            id,
+            record: &mut self.records[slot],
+            mass: &mut self.masses[slot],
+            offset: &mut self.offsets[slot],
+            seated: &mut self.seated,
+            own_solid: &mut self.own_solid,
+            generation: &mut self.generations[slot],
+            scene_solid,
+        }
+    }
+
+    /// Borrows the member `id` names, to be read — or `None` for a retired member, or
+    /// [`MemberId::NOBODY`]: the question to ask instead of finding out the hard way, since
+    /// [`member`](Self::member) panics on a stale `id` rather than answering for whoever holds
+    /// the seat now.
+    #[inline]
+    pub fn get_member(&self, id: MemberId) -> Option<Member<'_>> {
+        self.holds(id).then(|| self.member(id))
+    }
+
+    /// Borrows the member `id` names, to be changed — or `None` for a retired member, or
+    /// [`MemberId::NOBODY`]: the question to ask instead of finding out the hard way, since
+    /// [`member_mut`](Self::member_mut) panics on a stale `id` rather than answering for whoever
+    /// holds the seat now.
+    #[inline]
+    pub fn get_member_mut(&mut self, id: MemberId) -> Option<MemberMut<'_>> {
+        self.holds(id).then(|| self.member_mut(id))
     }
 
     /// One update's worth of the world's own forces, over every member the world moves.
@@ -660,32 +747,33 @@ impl<const N: usize, F: Force> World<N, F> {
         (u64::BITS - self.seated.leading_zeros()) as usize
     }
 
-    /// `member`'s seat, or a panic naming it.
+    /// `id`'s seat, or a panic naming it.
     ///
-    /// A handle to somebody who has left the cast — or to somebody who was never enlisted, which is
-    /// what [`Member::NOBODY`] is — is a cart holding on to nobody, and there is no honest answer
-    /// to give it: the seat is empty, or it has been let to somebody else who is nobody's hero.
-    /// Loud, and exactly where it happened.
+    /// An id to somebody who has left the cast — or to somebody who was never enlisted, which is
+    /// what [`MemberId::NOBODY`] is — is a cart holding on to nobody, and there is no honest
+    /// answer to give it: the seat is empty, or it has been let to somebody else who is nobody's
+    /// hero. Loud, and exactly where it happened.
     ///
-    /// The check is on every accessor a cart calls in an update, so its hot half is spelled to
-    /// inline there — a compare and a taken seat — and the panic lives in [`stale`], cold and out
-    /// of line, where it costs nothing until it fires.
+    /// The check is on every [`member`](Self::member)/[`member_mut`](Self::member_mut) a cart
+    /// calls in an update, so its hot half is spelled to inline there — a compare and a taken
+    /// seat — and the panic lives in [`stale`], cold and out of line, where it costs nothing
+    /// until it fires.
     #[inline(always)]
-    pub(super) fn seat(&self, member: Member) -> usize {
-        if !self.holds(member) {
-            stale(member.slot, N);
+    pub(super) fn seat(&self, id: MemberId) -> usize {
+        if !self.holds(id) {
+            stale(id.slot, N);
         }
 
-        member.slot as usize
+        id.slot as usize
     }
 
-    /// Whether `member` names somebody actually in the cast: a seat of this world's, taken, and
-    /// taken by the very member the handle was made for.
+    /// Whether `id` names somebody actually in the cast: a seat of this world's, taken, and
+    /// taken by the very member the id was made for.
     #[inline(always)]
-    pub(super) fn holds(&self, member: Member) -> bool {
-        let slot = member.slot as usize;
+    pub(super) fn holds(&self, id: MemberId) -> bool {
+        let slot = id.slot as usize;
 
-        slot < N && self.seated & (1 << slot) != 0 && self.generations[slot] == member.generation
+        slot < N && self.seated & (1 << slot) != 0 && self.generations[slot] == id.generation
     }
 
     /// The step itself, over a map and a sprite sheet handed in rather than reached for.
@@ -854,18 +942,6 @@ impl<const N: usize, F: Force> World<N, F> {
             let contacts = entity.contacts_mut();
             contacts.touched = contacts.touched | (news & listening);
         }
-    }
-}
-
-impl<const N: usize, F: Force> World<N, F> {
-    /// Empties `slot`, bookkeeping and all — what [`retire`](Member::retire) does short of ageing
-    /// the seat: no handle was ever handed out for it, so there is nothing to age.
-    pub(super) fn vacate(&mut self, slot: usize) {
-        self.seated &= !(1 << slot);
-        self.own_solid &= !(1 << slot);
-        self.records[slot] = wire::VACANT;
-        self.masses[slot] = 1.0;
-        self.offsets[slot] = (0, 0);
     }
 }
 
@@ -1432,17 +1508,17 @@ mod tests {
         // One update's pull, both in the velocity each kept and in how far each fell.
         for (member, x) in [(one, 0.0), (two, 40.0)] {
             assert_eq!(
-                member.velocity(&world),
+                world.member(member).velocity(),
                 Velocity::new(0.0, Gravity::DEFAULT_STRENGTH)
             );
-            assert_eq!(member.pos(&world), (x, Gravity::DEFAULT_STRENGTH));
+            assert_eq!(world.member(member).pos(), (x, Gravity::DEFAULT_STRENGTH));
         }
 
         for _ in 0..1_000 {
             world.step(&CTX);
         }
         assert_eq!(
-            one.velocity(&world).dy,
+            world.member(one).velocity().dy,
             Gravity::DEFAULT_TERMINAL_VELOCITY,
             "the pull never settled at its terminal velocity"
         );
@@ -1458,8 +1534,8 @@ mod tests {
             .enlist(&mut world)
             .unwrap();
         world.step(&CTX);
-        assert_eq!(drifter.velocity(&world), Velocity::new(0.0, 1.0));
-        assert_eq!(drifter.pos(&world), (0.0, 1.0));
+        assert_eq!(world.member(drifter).velocity(), Velocity::new(0.0, 1.0));
+        assert_eq!(world.member(drifter).pos(), (0.0, 1.0));
     }
 
     #[test]
@@ -1472,12 +1548,12 @@ mod tests {
 
         // The drag that runs before the pull has not felt it yet, so the first update — and every
         // one after it — differs by exactly that much.
-        assert_eq!(aired_first.velocity(&aired).dy, Gravity::DEFAULT_STRENGTH);
+        let pulled_dy = pulled.member(pulled_first).velocity().dy;
+        let aired_dy = aired.member(aired_first).velocity().dy;
+        assert_eq!(aired_dy, Gravity::DEFAULT_STRENGTH);
         assert!(
-            pulled_first.velocity(&pulled).dy < aired_first.velocity(&aired).dy,
-            "the order made no difference: {} against {}",
-            pulled_first.velocity(&pulled).dy,
-            aired_first.velocity(&aired).dy
+            pulled_dy < aired_dy,
+            "the order made no difference: {pulled_dy} against {aired_dy}"
         );
     }
 
@@ -1495,16 +1571,18 @@ mod tests {
             .enlist(&mut world)
             .unwrap();
         world.step(&CTX);
+        let (light_dx, heavy_dx) = (
+            world.member(light).velocity().dx,
+            world.member(heavy).velocity().dx,
+        );
         assert!(
-            light.velocity(&world).dx > heavy.velocity(&world).dx,
-            "the mass was not read: {} against {}",
-            light.velocity(&world).dx,
-            heavy.velocity(&world).dx
+            light_dx > heavy_dx,
+            "the mass was not read: {light_dx} against {heavy_dx}"
         );
 
         // And it is the seat's own, changed where it lives.
-        heavy.set_mass(&mut world, 0.5);
-        assert_eq!(heavy.mass(&world), 0.5);
+        world.member_mut(heavy).set_mass(0.5);
+        assert_eq!(world.member(heavy).mass(), 0.5);
     }
 
     #[test]
@@ -1518,8 +1596,11 @@ mod tests {
         }
 
         let (world, member) = one_update_under((GRAVITY, Wind::new(1.0), Updraft));
-        assert_eq!(member.velocity(&world).dx, 0.05);
-        assert_eq!(member.velocity(&world).dy, Gravity::DEFAULT_STRENGTH - 0.5);
+        assert_eq!(world.member(member).velocity().dx, 0.05);
+        assert_eq!(
+            world.member(member).velocity().dy,
+            Gravity::DEFAULT_STRENGTH - 0.5
+        );
     }
 
     #[test]
@@ -1535,13 +1616,16 @@ mod tests {
         for _ in 0..8 {
             world.step(&CTX);
         }
-        assert!(faller.pos(&world).1 > 0.0, "the pull missed the faller");
-        assert_eq!(lift.pos(&world), (0.0, 40.0), "the prop was moved");
-        assert_eq!(lift.velocity(&world), Velocity::default());
+        assert!(
+            world.member(faller).pos().1 > 0.0,
+            "the pull missed the faller"
+        );
+        assert_eq!(world.member(lift).pos(), (0.0, 40.0), "the prop was moved");
+        assert_eq!(world.member(lift).velocity(), Velocity::default());
     }
 
     /// One update of `forces` over a single member, and the world it was stepped in.
-    fn one_update_under<F: Force>(forces: F) -> (World<1, F>, Member) {
+    fn one_update_under<F: Force>(forces: F) -> (World<1, F>, MemberId) {
         let mut world: World<1, F> = World::new().with_forces(forces);
         let member = pebble(&mut world, 0.0, 0.0);
         world.step(&CTX);
@@ -1551,14 +1635,14 @@ mod tests {
 
     /// A sprite-sized member seated at (`x`, `y`), saying nothing about itself — what most of a
     /// cast is.
-    fn pebble<const N: usize, F: Force>(world: &mut World<N, F>, x: f32, y: f32) -> Member {
+    fn pebble<const N: usize, F: Force>(world: &mut World<N, F>, x: f32, y: f32) -> MemberId {
         Member::builder(x, y, 8, 8).enlist(world).unwrap()
     }
 
     #[test]
     fn a_member_takes_the_lowest_empty_seat_and_a_full_house_turns_one_away() {
         let mut world: World<3> = World::new();
-        let seats: Vec<Member> = (0..3)
+        let seats: Vec<MemberId> = (0..3)
             .map(|i| pebble(&mut world, i as f32 * 16.0, 0.0))
             .collect();
         assert_eq!(
@@ -1573,10 +1657,10 @@ mod tests {
 
         // And a seat freed in the middle is the next one filled, so a cast seated in the order the
         // scene works stays in it.
-        seats[1].retire(&mut world);
+        world.member_mut(seats[1]).retire();
         let understudy = pebble(&mut world, 64.0, 0.0);
         assert_eq!(understudy.seat(), 1);
-        assert_eq!(understudy.pos(&world), (64.0, 0.0));
+        assert_eq!(world.member(understudy).pos(), (64.0, 0.0));
     }
 
     #[test]
@@ -1597,12 +1681,12 @@ mod tests {
             .enlist(&mut world)
             .expect("the seat was leaked");
         assert_eq!(member.seat(), 0);
-        assert!(member.seated(&world));
-        assert_eq!(member.pos(&world), (0.0, 0.0));
-        assert_eq!(member.sprite(&world), None);
-        assert_eq!(member.flip(&world), (false, false));
-        assert_eq!(member.span(&world), (1, 1));
-        assert!(!member.hidden(&world));
+        assert!(world.get_member(member).is_some());
+        assert_eq!(world.member(member).pos(), (0.0, 0.0));
+        assert_eq!(world.member(member).sprite(), None);
+        assert_eq!(world.member(member).flip(), (false, false));
+        assert_eq!(world.member(member).span(), (1, 1));
+        assert!(!world.member(member).hidden());
     }
 
     #[test]
@@ -1625,10 +1709,10 @@ mod tests {
         assert_eq!((first.seat(), second.seat()), (0, 1));
 
         for member in [first, second] {
-            assert_eq!(member.pos(&world), (4.0, 8.0));
-            assert_eq!(member.velocity(&world), Velocity::new(1.0, -2.0));
-            assert_eq!(member.sprite(&world), Some(CRATE_SPRITE));
-            assert_eq!(member.flip(&world), (true, false));
+            assert_eq!(world.member(member).pos(), (4.0, 8.0));
+            assert_eq!(world.member(member).velocity(), Velocity::new(1.0, -2.0));
+            assert_eq!(world.member(member).sprite(), Some(CRATE_SPRITE));
+            assert_eq!(world.member(member).flip(), (true, false));
         }
     }
 
@@ -1651,7 +1735,7 @@ mod tests {
         assert_eq!(record.heeds, BitFlags::<SpriteFlag>::all().bits());
         assert_eq!(record.meta, 0);
         // And of the weight nobody has to think about, with the rectangle over the sprite.
-        assert_eq!(bare.mass(&world), 1.0);
+        assert_eq!(world.member(bare).mass(), 1.0);
         assert_eq!(world.offsets[bare.seat()], (0, 0));
     }
 
@@ -1665,7 +1749,7 @@ mod tests {
             world.records[plain.seat()].solid,
             BitFlags::from(WALL).bits()
         );
-        assert_eq!(plain.solid(&world), None);
+        assert_eq!(world.member(plain).solid(), None);
 
         // A rule of its own replaces it rather than adding to it — the empty one included.
         let own = Member::builder(0.0, 40.0, 8, 8)
@@ -1681,7 +1765,7 @@ mod tests {
             .enlist(&mut world)
             .unwrap();
         assert_eq!(world.records[ghost.seat()].solid, 0);
-        assert_eq!(ghost.solid(&world), Some(BitFlags::empty()));
+        assert_eq!(world.member(ghost).solid(), Some(BitFlags::empty()));
     }
 
     #[test]
@@ -1711,7 +1795,7 @@ mod tests {
         assert_eq!(record.meta, wire::PROP | wire::CONFINED);
         // The rectangle sits where the offset put it, and is the size it was given.
         assert_eq!((record.bx, record.by, record.bw, record.bh), (11, 22, 6, 4));
-        assert_eq!(member.mass(&world), 3.0);
+        assert_eq!(world.member(member).mass(), 3.0);
     }
 
     #[test]
@@ -1725,12 +1809,12 @@ mod tests {
     fn a_retired_member_s_handle_is_nobody() {
         let mut world: World<2> = World::new();
         let member = pebble(&mut world, 0.0, 0.0);
-        assert!(member.seated(&world));
-        member.retire(&mut world);
+        assert!(world.get_member(member).is_some());
+        world.member_mut(member).retire();
         // The asking-first way round, for a cart that would rather not find out the hard way.
-        assert!(!member.seated(&world));
+        assert!(world.get_member(member).is_none());
 
-        member.pos(&world);
+        world.member(member);
     }
 
     #[test]
@@ -1739,15 +1823,15 @@ mod tests {
         let mut world: World<2> = World::new();
         let _ = pebble(&mut world, 0.0, 0.0);
         let gone = pebble(&mut world, 16.0, 0.0);
-        gone.retire(&mut world);
+        world.member_mut(gone).retire();
         let successor = pebble(&mut world, 32.0, 0.0);
-        // The same seat, and not the same member: the handle to whoever left it must not answer
+        // The same seat, and not the same member: the id to whoever left it must not answer
         // for whoever took it.
         assert_eq!(successor.seat(), gone.seat());
         assert_ne!(successor, gone);
-        assert_eq!(successor.pos(&world), (32.0, 0.0));
+        assert_eq!(world.member(successor).pos(), (32.0, 0.0));
 
-        gone.set_velocity(&mut world, Velocity::new(1.0, 0.0));
+        world.member_mut(gone).set_velocity(Velocity::new(1.0, 0.0));
     }
 
     #[test]
@@ -1792,15 +1876,15 @@ mod tests {
             .moving(3.0, 1.0)
             .enlist(&mut world)
             .unwrap();
-        assert_eq!(inset.bounds(&world), Bounds::new(2, 0, 4, 8));
+        assert_eq!(world.member(inset).bounds(), Bounds::new(2, 0, 4, 8));
         world.step(&CTX);
-        assert_eq!(inset.pos(&world), (3.0, 1.0));
-        assert_eq!(inset.bounds(&world), Bounds::new(5, 1, 4, 8));
+        assert_eq!(world.member(inset).pos(), (3.0, 1.0));
+        assert_eq!(world.member(inset).bounds(), Bounds::new(5, 1, 4, 8));
 
         // And a rectangle re-cut mid-animation is met at its new size from the next step on.
-        inset.resize(&mut world, 8, 4);
-        inset.set_offset(&mut world, 0, 4);
-        assert_eq!(inset.bounds(&world), Bounds::new(3, 5, 8, 4));
+        world.member_mut(inset).resize(8, 4);
+        world.member_mut(inset).set_offset(0, 4);
+        assert_eq!(world.member(inset).bounds(), Bounds::new(3, 5, 8, 4));
     }
 
     #[test]
@@ -1811,10 +1895,10 @@ mod tests {
             .prop()
             .enlist(&mut world)
             .unwrap();
-        prop.set_pos(&mut world, 40.9, 12.2);
-        assert_eq!(prop.pos(&world), (40.9, 12.2));
-        assert_eq!(prop.draw_pos(&world), (40, 12));
-        assert_eq!(prop.bounds(&world), Bounds::new(41, 11, 8, 8));
+        world.member_mut(prop).set_pos(40.9, 12.2);
+        assert_eq!(world.member(prop).pos(), (40.9, 12.2));
+        assert_eq!(world.member(prop).draw_pos(), (40, 12));
+        assert_eq!(world.member(prop).bounds(), Bounds::new(41, 11, 8, 8));
     }
 
     #[test]
@@ -1825,29 +1909,31 @@ mod tests {
         let walker = pebble(&mut world, 0.0, 0.0);
         let seat = walker.seat();
 
-        walker.set_sprite(&mut world, Some(CRATE_SPRITE));
+        world.member_mut(walker).set_sprite(Some(CRATE_SPRITE));
         assert_eq!(world.records[seat].sprite, CRATE_SPRITE.0 as u16);
-        walker.set_sprite(&mut world, None);
+        world.member_mut(walker).set_sprite(None);
         assert_eq!(world.records[seat].sprite, wire::UNWORN);
 
-        walker.set_heeds(&mut world, CRATE);
+        world.member_mut(walker).set_heeds(CRATE);
         assert_eq!(world.records[seat].heeds, BitFlags::from(CRATE).bits());
 
         // A rule of its own replaces the scene's; handing it back takes the scene's word as it
         // stands now.
-        walker.set_solid(&mut world, Some(CRATE.into()));
+        world.member_mut(walker).set_solid(Some(CRATE.into()));
         assert_eq!(world.records[seat].solid, BitFlags::from(CRATE).bits());
-        walker.set_solid(&mut world, None);
+        world.member_mut(walker).set_solid(None);
         assert_eq!(world.records[seat].solid, BitFlags::from(WALL).bits());
 
-        walker.set_confines(&mut world, Some(Bounds::new(-8, 4, 100, 64)));
+        world
+            .member_mut(walker)
+            .set_confines(Some(Bounds::new(-8, 4, 100, 64)));
         let record = &world.records[seat];
         assert_eq!(record.meta & wire::CONFINED, wire::CONFINED);
         assert_eq!(
             (record.cx, record.cy, record.cw, record.ch),
             (-8, 4, 100, 64)
         );
-        walker.set_confines(&mut world, None);
+        world.member_mut(walker).set_confines(None);
         assert_eq!(world.records[seat].meta & wire::CONFINED, 0);
     }
 
@@ -1859,24 +1945,89 @@ mod tests {
         let mut world: World<1> = World::new().with_solid(WALL);
         let walker = pebble(&mut world, 0.0, 0.0);
 
-        assert_eq!(walker.sprite(&world), None);
-        assert_eq!(walker.solid(&world), None, "no rule of its own yet");
-        assert_eq!(walker.heeds(&world), BitFlags::all());
-        assert_eq!(walker.confines(&world), None);
+        assert_eq!(world.member(walker).sprite(), None);
+        assert_eq!(world.member(walker).solid(), None, "no rule of its own yet");
+        assert_eq!(world.member(walker).heeds(), BitFlags::all());
+        assert_eq!(world.member(walker).confines(), None);
 
-        walker.set_sprite(&mut world, Some(CRATE_SPRITE));
-        walker.set_solid(&mut world, Some(WALL | CRATE));
-        walker.set_heeds(&mut world, CRATE);
-        walker.set_confines(&mut world, Some(Bounds::new(-8, 4, 100, 64)));
-        assert_eq!(walker.sprite(&world), Some(CRATE_SPRITE));
-        assert_eq!(walker.solid(&world), Some(WALL | CRATE));
-        assert_eq!(walker.heeds(&world), CRATE.into());
-        assert_eq!(walker.confines(&world), Some(Bounds::new(-8, 4, 100, 64)));
+        world.member_mut(walker).set_sprite(Some(CRATE_SPRITE));
+        world.member_mut(walker).set_solid(Some(WALL | CRATE));
+        world.member_mut(walker).set_heeds(CRATE);
+        world
+            .member_mut(walker)
+            .set_confines(Some(Bounds::new(-8, 4, 100, 64)));
+        assert_eq!(world.member(walker).sprite(), Some(CRATE_SPRITE));
+        assert_eq!(world.member(walker).solid(), Some(WALL | CRATE));
+        assert_eq!(world.member(walker).heeds(), CRATE.into());
+        assert_eq!(
+            world.member(walker).confines(),
+            Some(Bounds::new(-8, 4, 100, 64))
+        );
 
         // Handed back to the scene's word, the member has no rule of its own to report — the
         // scene's word is not its answer, however much it is stopped by it.
-        walker.set_solid(&mut world, None);
-        assert_eq!(walker.solid(&world), None);
+        world.member_mut(walker).set_solid(None);
+        assert_eq!(world.member(walker).solid(), None);
+    }
+
+    #[test]
+    fn a_member_borrowed_to_change_answers_what_it_was_just_told() {
+        let mut world: World<1> = World::new();
+        let walker = pebble(&mut world, 0.0, 0.0);
+
+        let mut member = world.member_mut(walker);
+        member.set_velocity(Velocity::new(1.5, -0.5));
+        member.set_flip(true, false);
+        member.set_span(2, 3);
+        member.set_hidden(true);
+        assert_eq!(member.velocity(), Velocity::new(1.5, -0.5));
+        assert_eq!(member.flip(), (true, false));
+        assert_eq!(member.span(), (2, 3));
+        assert!(member.hidden());
+
+        // And a fresh, read-only borrow agrees with the one that just told it so.
+        let fresh = world.member(walker);
+        assert_eq!(fresh.velocity(), Velocity::new(1.5, -0.5));
+        assert_eq!(fresh.flip(), (true, false));
+        assert_eq!(fresh.span(), (2, 3));
+        assert!(fresh.hidden());
+    }
+
+    #[test]
+    fn two_members_can_be_read_side_by_side() {
+        let mut world: World<2> = World::new();
+        let a = Member::builder(0.0, 20.0, 8, 8).enlist(&mut world).unwrap();
+        let b = Member::builder(0.0, 20.0, 8, 8).enlist(&mut world).unwrap();
+
+        // Both borrowed shared at once: a `Member` never keeps the world from being asked again.
+        let (first, second) = (world.member(a), world.member(b));
+        assert_eq!(first.bounds(), second.bounds());
+    }
+
+    #[test]
+    fn either_view_prints_the_member_it_borrows() {
+        let mut world: World<1> = World::new();
+        let member = Member::builder(4.0, 8.0, 8, 8)
+            .moving(1.0, -2.0)
+            .enlist(&mut world)
+            .unwrap();
+
+        // What the getters answer, in their order: who it is and where first, the look last.
+        let read = format!("{:?}", world.member(member));
+        assert!(
+            read.starts_with(
+                "Member { id: MemberId { slot: 0, generation: 0 }, pos: (4.0, 8.0), \
+                 draw_pos: (4, 8), velocity: Velocity { dx: 1.0, dy: -2.0 },"
+            ),
+            "{read}"
+        );
+        assert!(read.ends_with("hidden: false, prop: false }"), "{read}");
+
+        // The view to change a member prints that very member, wrapped.
+        assert_eq!(
+            format!("{:?}", world.member_mut(member)),
+            format!("MemberMut({read})")
+        );
     }
 
     #[test]
@@ -1912,11 +2063,26 @@ mod tests {
         // What a cart's placed state holds for an actor it has not enlisted yet: a seat no world
         // has. Asking is the same bug as asking about somebody who left, and says which it was.
         let mut world: World<2> = World::new();
-        assert!(!Member::NOBODY.seated(&world));
+        assert!(world.get_member(MemberId::NOBODY).is_none());
         let _ = pebble(&mut world, 0.0, 0.0);
-        assert!(!Member::NOBODY.seated(&world));
+        assert!(world.get_member(MemberId::NOBODY).is_none());
 
-        Member::NOBODY.pos(&world);
+        world.member(MemberId::NOBODY);
+    }
+
+    #[test]
+    fn a_stale_id_is_no_member_to_get() {
+        let mut world: World<1> = World::new();
+        let member = pebble(&mut world, 0.0, 0.0);
+        assert!(world.get_member(member).is_some());
+        assert!(world.get_member_mut(member).is_some());
+
+        world.member_mut(member).retire();
+        assert!(world.get_member(member).is_none());
+        assert!(world.get_member_mut(member).is_none());
+
+        assert!(world.get_member(MemberId::NOBODY).is_none());
+        assert!(world.get_member_mut(MemberId::NOBODY).is_none());
     }
 
     #[test]
@@ -1947,24 +2113,26 @@ mod tests {
             .enlist(&mut world)
             .unwrap();
         world.step(&CTX);
-        assert!(walker.contacts(&world).left());
-        assert_eq!(walker.pos(&world), (0.0, 8.5));
+        assert!(world.member(walker).contacts().left());
+        assert_eq!(world.member(walker).pos(), (0.0, 8.5));
 
         // And limits taken away are a member let go.
-        walker.set_confines(&mut world, None);
-        walker.set_velocity(&mut world, Velocity::new(-2.0, 0.0));
+        world.member_mut(walker).set_confines(None);
+        world
+            .member_mut(walker)
+            .set_velocity(Velocity::new(-2.0, 0.0));
         world.step(&CTX);
-        assert_eq!(walker.pos(&world), (-2.0, 8.5));
-        assert_eq!(walker.contacts(&world), Contacts::empty());
+        assert_eq!(world.member(walker).pos(), (-2.0, 8.5));
+        assert_eq!(world.member(walker).contacts(), Contacts::empty());
     }
 
     #[test]
     fn a_bare_member_is_drawn_from_one_cell_unflipped_and_shown() {
         let mut world: World<1> = World::new();
         let bare = pebble(&mut world, 4.5, -2.25);
-        assert_eq!(bare.flip(&world), (false, false));
-        assert_eq!(bare.span(&world), (1, 1));
-        assert!(!bare.hidden(&world));
+        assert_eq!(world.member(bare).flip(), (false, false));
+        assert_eq!(world.member(bare).span(), (1, 1));
+        assert!(!world.member(bare).hidden());
         let record = &world.records[bare.seat()];
         assert_eq!(
             record.meta & (wire::FLIP_X | wire::FLIP_Y | wire::HIDDEN),
@@ -1992,9 +2160,9 @@ mod tests {
         assert_eq!(record.meta, wire::FLIP_X | wire::HIDDEN);
         // Two across less one in the low nibble, three down less one in the high.
         assert_eq!(record.span, 0x21);
-        assert_eq!(member.flip(&world), (true, false));
-        assert_eq!(member.span(&world), (2, 3));
-        assert!(member.hidden(&world));
+        assert_eq!(world.member(member).flip(), (true, false));
+        assert_eq!(world.member(member).span(), (2, 3));
+        assert!(world.member(member).hidden());
     }
 
     #[test]
@@ -2011,28 +2179,28 @@ mod tests {
         let seat = door.seat();
         let steps_by = wire::PROP | wire::CONFINED;
 
-        door.set_flip(&mut world, true, false);
+        world.member_mut(door).set_flip(true, false);
         assert_eq!(world.records[seat].meta, steps_by | wire::FLIP_X);
-        assert_eq!(door.flip(&world), (true, false));
+        assert_eq!(world.member(door).flip(), (true, false));
         // Turned the other way round: across cleared, up and down set.
-        door.set_flip(&mut world, false, true);
+        world.member_mut(door).set_flip(false, true);
         assert_eq!(world.records[seat].meta, steps_by | wire::FLIP_Y);
-        assert_eq!(door.flip(&world), (false, true));
+        assert_eq!(world.member(door).flip(), (false, true));
 
-        door.set_span(&mut world, 16, 16);
+        world.member_mut(door).set_span(16, 16);
         assert_eq!(world.records[seat].span, 0xff);
-        assert_eq!(door.span(&world), (16, 16));
+        assert_eq!(world.member(door).span(), (16, 16));
 
-        door.set_hidden(&mut world, true);
+        world.member_mut(door).set_hidden(true);
         assert_eq!(
             world.records[seat].meta,
             steps_by | wire::FLIP_Y | wire::HIDDEN
         );
-        assert!(door.hidden(&world));
+        assert!(world.member(door).hidden());
         assert_eq!(world.records[seat].look(), None);
-        door.set_hidden(&mut world, false);
+        world.member_mut(door).set_hidden(false);
         assert_eq!(world.records[seat].meta, steps_by | wire::FLIP_Y);
-        assert!(!door.hidden(&world));
+        assert!(!world.member(door).hidden());
         assert!(
             world.records[seat].look().is_some(),
             "it was never shown again"
@@ -2063,12 +2231,12 @@ mod tests {
             .spanning(2, 3)
             .enlist(&mut world)
             .unwrap();
-        gone.retire(&mut world);
+        world.member_mut(gone).retire();
 
         // Only the two that show, in the order they are seated, each at the pixel it draws at.
         let taken = &world.records[..world.high_water()];
-        let (plain_x, plain_y) = plain.draw_pos(&world);
-        let (turned_x, turned_y) = turned.draw_pos(&world);
+        let (plain_x, plain_y) = world.member(plain).draw_pos();
+        let (turned_x, turned_y) = world.member(turned).draw_pos();
         let shown: Vec<wire::Look> = wire::looks(taken, BitFlags::empty(), unflagged).collect();
         assert_eq!(
             shown,
@@ -2114,19 +2282,23 @@ mod tests {
             .enlist(&mut world)
             .unwrap();
         world.step(&CTX);
-        assert_eq!(runner.draw_pos(&world), (3, 2), "the step never moved it");
+        assert_eq!(
+            world.member(runner).draw_pos(),
+            (3, 2),
+            "the step never moved it"
+        );
 
         // Nothing of the look went into the step, and nothing of it came back changed.
-        assert_eq!(runner.flip(&world), (true, true));
-        assert_eq!(runner.span(&world), (2, 1));
-        assert!(runner.hidden(&world));
+        assert_eq!(world.member(runner).flip(), (true, true));
+        assert_eq!(world.member(runner).span(), (2, 1));
+        assert!(world.member(runner).hidden());
 
         // And shown again, it is drawn where the step left the body.
-        runner.set_hidden(&mut world, false);
+        world.member_mut(runner).set_hidden(false);
         let look = world.records[runner.seat()]
             .look()
             .expect("a member wearing a cell and shown has a look");
-        assert_eq!((look.x, look.y), runner.draw_pos(&world));
+        assert_eq!((look.x, look.y), world.member(runner).draw_pos());
     }
 
     #[test]
@@ -2140,7 +2312,7 @@ mod tests {
             .unwrap();
         let seat = showy.seat();
         assert!(world.records[seat].look().is_some());
-        showy.retire(&mut world);
+        world.member_mut(showy).retire();
         assert_eq!(world.records[seat].look(), None, "a retired seat was drawn");
 
         // Whoever is seated there next wears a cell of its own and nothing else of the last one's.
@@ -2148,9 +2320,9 @@ mod tests {
             .wearing(CRATE_SPRITE)
             .enlist(&mut world)
             .unwrap();
-        assert_eq!(successor.flip(&world), (false, false));
-        assert_eq!(successor.span(&world), (1, 1));
-        assert!(!successor.hidden(&world));
+        assert_eq!(world.member(successor).flip(), (false, false));
+        assert_eq!(world.member(successor).span(), (1, 1));
+        assert!(!world.member(successor).hidden());
         assert_eq!(
             world.records[seat].look(),
             Some(wire::Look {
@@ -2180,7 +2352,7 @@ mod tests {
     fn a_member_drawn_from_past_the_edge_of_the_sheet_is_refused_loudly() {
         let mut world: World<1> = World::new();
         let member = pebble(&mut world, 0.0, 0.0);
-        member.set_span(&mut world, 1, 17);
+        world.member_mut(member).set_span(1, 17);
     }
 
     #[test]
@@ -2200,7 +2372,7 @@ mod tests {
             .spanning(16, 16)
             .enlist(&mut world)
             .unwrap();
-        gone.retire(&mut world);
+        world.member_mut(gone).retire();
 
         let mut gfx = Graphics { _private: () };
         world.draw(&mut gfx, BitFlags::empty());

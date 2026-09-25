@@ -38,7 +38,7 @@
 #![no_std]
 
 use pixel8::{
-    physics::{Member, Velocity, World},
+    physics::{Member, MemberId, Velocity, World},
     *,
 };
 
@@ -95,15 +95,15 @@ struct Probe {
     world: World<5>,
     /// The two of one kind, walking into each other. Seat order is stepping order, and this is
     /// the order `boot` enlists them in.
-    left: Member,
-    right: Member,
+    left: MemberId,
+    right: MemberId,
     /// And the one that is stopped by nothing, walking into the one that stops nobody.
-    sensor: Member,
-    hazard: Member,
+    sensor: MemberId,
+    hazard: MemberId,
     /// Enlisted last, standing where nothing else in the cast ever reaches it and wearing the
     /// very cell the crates do: what pins the hidden bit, since a member shown despite it would
     /// land on exactly the crates' own pixels.
-    ghost: Member,
+    ghost: MemberId,
     /// What each of them means to do, written back into its velocity every update: a step that
     /// ran into something spends the speed that carried it there, so a member that did not renew
     /// it would stop reporting the wall it is leaning on.
@@ -116,11 +116,11 @@ impl Probe {
     const fn new() -> Self {
         Self {
             world: World::new(),
-            left: Member::NOBODY,
-            right: Member::NOBODY,
-            sensor: Member::NOBODY,
-            hazard: Member::NOBODY,
-            ghost: Member::NOBODY,
+            left: MemberId::NOBODY,
+            right: MemberId::NOBODY,
+            sensor: MemberId::NOBODY,
+            hazard: MemberId::NOBODY,
+            ghost: MemberId::NOBODY,
             pushes: [
                 Velocity::new(CRATE_SPEED, 0.0),
                 Velocity::new(-CRATE_SPEED, 0.0),
@@ -179,7 +179,7 @@ impl Game for Probe {
         // The cast in the order it was seated, every push renewed.
         let cast = [self.left, self.right, self.sensor, self.hazard, self.ghost];
         for (member, push) in cast.into_iter().zip(self.pushes) {
-            member.set_velocity(&mut self.world, push);
+            self.world.member_mut(member).set_velocity(push);
         }
 
         // The whole cast, in one call: the crates against each other, the sensor against the
@@ -192,26 +192,19 @@ impl Game for Probe {
         self.world.draw(gfx, CRATE);
 
         // The report: rows and columns of its own, over the cast the world just drew.
-        let (left_x, left_y) = self.left.draw_pos(&self.world);
+        let (left, right, sensor) = (
+            self.world.member(self.left),
+            self.world.member(self.right),
+            self.world.member(self.sensor),
+        );
+        let (left_x, left_y) = left.draw_pos();
         gfx.pset(left_x, LEFT_CRATE_ROW, Color::WHITE);
-        gfx.pset(
-            self.right.draw_pos(&self.world).0,
-            RIGHT_CRATE_ROW,
-            Color::WHITE,
-        );
+        gfx.pset(right.draw_pos().0, RIGHT_CRATE_ROW, Color::WHITE);
         gfx.pset(left_y, CRATE_Y_ROW, Color::WHITE);
-        gfx.pset(
-            self.sensor.draw_pos(&self.world).0,
-            SENSOR_X_ROW,
-            Color::WHITE,
-        );
-        answer(gfx, LEFT_STOPPED, self.left.contacts(&self.world).right());
-        answer(gfx, RIGHT_STOPPED, self.right.contacts(&self.world).left());
-        answer(
-            gfx,
-            MET_HAZARD,
-            self.sensor.contacts(&self.world).touches(HAZARD),
-        );
+        gfx.pset(sensor.draw_pos().0, SENSOR_X_ROW, Color::WHITE);
+        answer(gfx, LEFT_STOPPED, left.contacts().right());
+        answer(gfx, RIGHT_STOPPED, right.contacts().left());
+        answer(gfx, MET_HAZARD, sensor.contacts().touches(HAZARD));
     }
 }
 

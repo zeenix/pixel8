@@ -139,7 +139,7 @@ impl Bounds {
 
     /// Whether any pixel of the rectangle is on the screen.
     ///
-    /// This is what a cart [retires](super::Member::retire) a stray bullet or a spent enemy on:
+    /// This is what a cart [retires](super::MemberMut::retire) a stray bullet or a spent enemy on:
     /// nothing here keeps a member on the screen — it is free to travel right off it — and this is
     /// how the cart notices it has gone. One that should not be allowed to leave says so instead,
     /// in [`MemberBuilder::confined_to`](super::MemberBuilder::confined_to).

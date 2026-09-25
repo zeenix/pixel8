@@ -45,11 +45,11 @@ bitflag_enum! {
 /// entity and is still named.
 ///
 /// ```no_run
-/// # use pixel8::{physics::{Member, World}, SpriteFlag};
+/// # use pixel8::{physics::{MemberId, World}, SpriteFlag};
 /// # const SPIKES: SpriteFlag = SpriteFlag::Flag2;
-/// # fn f(world: &World<8>, hero: Member) -> (bool, bool) {
+/// # fn f(world: &World<8>, hero: MemberId) -> (bool, bool) {
 /// // The walls, the spikes and the edge of the world, in one answer the world left behind.
-/// let contacts = hero.contacts(world);
+/// let contacts = world.member(hero).contacts();
 ///
 /// (contacts.below(), contacts.touches(SPIKES))
 /// # }
@@ -119,12 +119,12 @@ impl Contacts {
     /// than ask it four questions.
     ///
     /// ```no_run
-    /// # use pixel8::physics::{Contact, Member, World};
-    /// # fn f(world: &World<8>, patrol: Member, walking_left: bool) -> bool {
+    /// # use pixel8::physics::{Contact, MemberId, World};
+    /// # fn f(world: &World<8>, patrol: MemberId, walking_left: bool) -> bool {
     /// let ahead = if walking_left { Contact::Left } else { Contact::Right };
     ///
     /// // A wall in front of the patrol, whichever way "in front" is this update.
-    /// patrol.contacts(world).sides().contains(ahead)
+    /// world.member(patrol).contacts().sides().contains(ahead)
     /// # }
     /// ```
     pub fn sides(self) -> BitFlags<Contact> {
@@ -157,10 +157,10 @@ impl Contacts {
     /// at all.
     ///
     /// ```no_run
-    /// # use pixel8::{physics::{Member, World}, SpriteFlag};
+    /// # use pixel8::{physics::{MemberId, World}, SpriteFlag};
     /// # const WATER: SpriteFlag = SpriteFlag::Flag3;
-    /// # fn f(world: &World<8>, hero: Member) {
-    /// let swimming = hero.contacts(world).touched().contains(WATER);
+    /// # fn f(world: &World<8>, hero: MemberId) {
+    /// let swimming = world.member(hero).contacts().touched().contains(WATER);
     /// # }
     /// ```
     pub fn touched(self) -> BitFlags<SpriteFlag> {
@@ -174,11 +174,11 @@ impl Contacts {
     /// asked about in one call, and a member that met none of them is told so once.
     ///
     /// ```no_run
-    /// # use pixel8::{physics::{Member, World}, SpriteFlag};
+    /// # use pixel8::{physics::{MemberId, World}, SpriteFlag};
     /// # const WATER: SpriteFlag = SpriteFlag::Flag3;
     /// # const LAVA: SpriteFlag = SpriteFlag::Flag4;
-    /// # fn f(world: &World<8>, hero: Member) {
-    /// let contacts = hero.contacts(world);
+    /// # fn f(world: &World<8>, hero: MemberId) {
+    /// let contacts = world.member(hero).contacts();
     /// let swimming = contacts.touches(WATER);
     /// let burning = contacts.touches(LAVA | WATER);
     /// # }
@@ -195,11 +195,11 @@ impl Contacts {
 /// water — where the fold is what turns a handful of answers back into one:
 ///
 /// ```no_run
-/// # use pixel8::physics::{Contacts, Member, World};
-/// # fn f(world: &World<16>, swarm: &[Member]) -> Contacts {
+/// # use pixel8::physics::{Contacts, MemberId, World};
+/// # fn f(world: &World<16>, swarm: &[MemberId]) -> Contacts {
 /// let mut met = Contacts::empty();
 /// for wasp in swarm {
-///     met |= wasp.contacts(world);
+///     met |= world.member(*wasp).contacts();
 /// }
 ///
 /// met
