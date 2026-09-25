@@ -1,4 +1,5 @@
-//! The cast on the wire: how a step crosses the ABI, written down once for both sides of it.
+//! The cast on the wire: how a step and a draw cross the ABI, written down once for both sides of
+//! it.
 //!
 //! A [`World`](super::World) keeps its whole cast in these records — one fixed-size [`Record`] a
 //! seat, in the world itself — and [`step`](super::World::step) hands that very array to the
@@ -7,6 +8,11 @@
 //! the same bytes: where each body ended up, what survived of its velocity, and what it met.
 //! Nothing is marshalled in either direction — the cart's state *is* the buffer — and the
 //! collisions themselves never spend a drop of cart fuel.
+//!
+//! The same bytes carry what a draw needs too — the cell a member wears, which way round, how
+//! many cells its block spans, and whether it is shown at all — and a `draw_cast` import hands
+//! the very same array across the wire again, unaltered, for the console to walk with [`looks`]
+//! and draw natively in one call: the drawing twin of the step above, just as free of cart fuel.
 //!
 //! Both halves of the crossing live in this one file so they cannot drift: the SDK fills and reads
 //! [`Record`]s in cart memory, and the console — which depends on this very crate — decodes them
@@ -28,11 +34,25 @@ use crate::{BitFlags, Body, SpriteFlag, SpriteId};
 /// [`World::new`](super::World::new)'s own `const` check.
 pub const CAP: usize = 64;
 
-/// The record's `meta` bit for a [prop](Kinetic::prop): met, never moved.
+/// The record's `meta` bit for a [prop](Kinetic::prop): met, never moved. Read by the step, never
+/// the draw.
 pub const PROP: u8 = 1;
 
-/// The record's `meta` bit for an entity that named [confines](Kinetic::confines).
+/// The record's `meta` bit for an entity that named [confines](Kinetic::confines). Read by the
+/// step, never the draw.
 pub const CONFINED: u8 = 1 << 1;
+
+/// The record's `meta` bit for a member drawn mirrored left to right. Read by the draw, never the
+/// step.
+pub const FLIP_X: u8 = 1 << 2;
+
+/// The record's `meta` bit for a member drawn mirrored top to bottom. Read by the draw, never the
+/// step.
+pub const FLIP_Y: u8 = 1 << 3;
+
+/// The record's `meta` bit for a member met like anybody else, but never drawn. Read by the draw,
+/// never the step.
+pub const HIDDEN: u8 = 1 << 4;
 
 /// The `sprite` field's value for an entity that wears nothing.
 pub const UNWORN: u16 = u16::MAX;
@@ -41,11 +61,16 @@ pub const UNWORN: u16 = u16::MAX;
 /// [`World`](super::World): what the engine needs of a member going in, and what the step decided
 /// coming back, in the same forty-four bytes.
 ///
-/// Going in, everything is what the cart said as it [enlisted](super::World::enlist) the member —
-/// with `solid` already settled between the member's own rule and the world's, so the engine never
-/// has to ask whose word it was. Coming back, `x`/`y`/`rx`/`ry` are the body's whole state after
-/// the step, `dx`/`dy` the velocity that survived it, and `sides`/`touched` the [`Contacts`]; the
-/// rest comes back untouched, which is why the world can keep its state here between steps.
+/// Going in, everything is what the cart said as it [enlisted](super::MemberBuilder::enlist) the
+/// member — with `solid` already settled between the member's own rule and the world's, so the
+/// engine never has to ask whose word it was. Coming back, `x`/`y`/`rx`/`ry` are the body's whole
+/// state after the step, `dx`/`dy` the velocity that survived it, and `sides`/`touched` the
+/// [`Contacts`]; the rest comes back untouched, which is why the world can keep its state here
+/// between steps.
+///
+/// The same bytes are also what a draw reads: the cell a member wears, how many cells its block
+/// spans and which way round, and whether it is shown at all — [`look`](Record::look) is that
+/// reading, worked out once and read the same way by both sides of the wire.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct Record {
@@ -74,14 +99,18 @@ pub struct Record {
     pub solid: u8,
     /// What it cares to be told about.
     pub heeds: u8,
-    /// [`PROP`] and [`CONFINED`].
+    /// [`PROP`] and [`CONFINED`], read by the step; [`FLIP_X`], [`FLIP_Y`] and [`HIDDEN`], read by
+    /// the draw. The step never writes `meta` at all, so whatever a cart set here — the look bits
+    /// included — survives every step untouched.
     pub meta: u8,
     /// Out: the sides of its [`Contacts`].
     pub sides: u8,
     /// Out: the flags of everything it met.
     pub touched: u8,
-    /// Padding, so the size is spelled out rather than implied.
-    pub pad: u8,
+    /// The block of the sheet the member is drawn from, beyond the one cell it wears: the low
+    /// four bits are the cells across less one, the high four bits the cells down less one; zero
+    /// — what every record starts as — is the single cell. Read by the draw alone.
+    pub span: u8,
 }
 
 /// The record size the layout above must come to — the wire stride, pinned by a test.
@@ -124,7 +153,7 @@ pub const EMPTY: Record = Record {
     meta: 0,
     sides: 0,
     touched: 0,
-    pad: 0,
+    span: 0,
 };
 
 impl Record {
@@ -163,7 +192,7 @@ impl Record {
             meta: bytes[40],
             sides: bytes[41],
             touched: bytes[42],
-            pad: 0,
+            span: bytes[43],
         }
     }
 
@@ -181,6 +210,62 @@ impl Record {
         bytes[41] = self.sides;
         bytes[42] = self.touched;
     }
+
+    /// What this record shows, or `None` for one that shows nothing: an empty seat, a member that
+    /// wears nothing, and one that is hidden.
+    pub fn look(&self) -> Option<Look> {
+        if self.sprite == UNWORN || self.meta & HIDDEN != 0 {
+            return None;
+        }
+        Some(Look {
+            sprite: SpriteId(self.sprite as u8),
+            x: self.rx,
+            y: self.ry,
+            width: (u16::from(self.span & 0x0f) + 1) * CELL,
+            height: (u16::from(self.span >> 4) + 1) * CELL,
+            flip_x: self.meta & FLIP_X != 0,
+            flip_y: self.meta & FLIP_Y != 0,
+        })
+    }
+}
+
+/// Everything a cast shows, in the order it is drawn — front to back, so a later record lands on
+/// top of an earlier one — narrowed, for a non-empty `layers`, to the records whose worn cell
+/// carries one of those flags: the very filter [`Graphics::map`](crate::Graphics::map) puts its
+/// tiles through, put to the cast. `carried` is what the sheet says a cell carries.
+///
+/// It is the one answer for both sides of the wire: the console walks it over the records a
+/// `draw_cast` handed across, and the SDK's native build over the world's own seats.
+pub fn looks<'a, F>(
+    records: &'a [Record],
+    layers: BitFlags<SpriteFlag>,
+    carried: F,
+) -> impl Iterator<Item = Look> + 'a
+where
+    F: Fn(SpriteId) -> BitFlags<SpriteFlag> + 'a,
+{
+    records
+        .iter()
+        .filter_map(Record::look)
+        .filter(move |look| layers.is_empty() || carried(look.sprite).intersects(layers))
+}
+
+/// What one record looks like on screen — the block of the sheet it is drawn from, where it goes
+/// and which way round — worked out once for both sides of the wire, and drawn by the very blit a
+/// cart's own [`Graphics::sprite_ext`](crate::Graphics::sprite_ext) reaches.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Look {
+    /// The cell at the block's top left: the one the member wears.
+    pub sprite: SpriteId,
+    /// Where the block's top left is drawn: the member's coherent pixel.
+    pub x: i16,
+    pub y: i16,
+    /// The block's size in pixels: whole cells, one unless the record spans more.
+    pub width: u16,
+    pub height: u16,
+    /// Mirrored left to right / top to bottom.
+    pub flip_x: bool,
+    pub flip_y: bool,
 }
 
 /// A record recast as a cast member, for the engine to step: on the console's side of the wire,
@@ -306,6 +391,9 @@ impl Kinetic for Recast {
     }
 }
 
+/// The side of one cell of the sheet, in pixels.
+const CELL: u16 = 8;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +425,7 @@ mod tests {
         assert_eq!(offset_of!(Record, meta), 40);
         assert_eq!(offset_of!(Record, sides), 41);
         assert_eq!(offset_of!(Record, touched), 42);
+        assert_eq!(offset_of!(Record, span), 43);
     }
 
     #[test]
@@ -359,10 +448,10 @@ mod tests {
             sprite: 9,
             solid: 0b0000_0101,
             heeds: 0b0000_0010,
-            meta: CONFINED,
+            meta: CONFINED | FLIP_Y,
             sides: 0,
             touched: 0,
-            pad: 0,
+            span: 0x21,
         };
 
         // Out through the struct's own bytes, in through the hand-addressed reader: the two
@@ -381,8 +470,9 @@ mod tests {
         assert_eq!(across.sprite, 9);
         assert_eq!(
             (across.solid, across.heeds, across.meta),
-            (0b101, 0b10, CONFINED)
+            (0b101, 0b10, CONFINED | FLIP_Y)
         );
+        assert_eq!(across.span, 0x21);
 
         // And the answers written back land exactly where the reader looks for them.
         let mut bytes = [0u8; RECORD];
@@ -393,6 +483,186 @@ mod tests {
         let back = Record::read(&bytes);
         assert_eq!((back.x, back.y), (record.x, record.y));
         assert_eq!((back.sides, back.touched), (0b1010, 0b1));
+    }
+
+    #[test]
+    fn a_step_s_answers_leave_the_look_alone() {
+        let record = Record {
+            meta: CONFINED | FLIP_X,
+            span: 0x12,
+            sprite: 3,
+            ..EMPTY
+        };
+        // SAFETY: `Record` is `#[repr(C)]` and exactly `RECORD` bytes with no padding — every byte
+        // is a field, which `the_layout_is_the_one_written_down` pins — so its bytes are a valid
+        // `[u8; RECORD]`. (`write` would not do: it writes the step's answers and nothing else.)
+        let bytes: [u8; RECORD] = unsafe { core::mem::transmute(record) };
+
+        // The step's own route: read what a raw client wrote, change what a step decides, and
+        // write the answer back into those same bytes — exactly what `step_the_cast` does.
+        let mut answered = Record::read(&bytes);
+        (answered.x, answered.y) = (5.0, 6.0);
+        (answered.rx, answered.ry) = (5, 6);
+        (answered.sides, answered.touched) = (0b1, 0b10);
+        let mut bytes = bytes;
+        answered.write(&mut bytes);
+
+        let back = Record::read(&bytes);
+        assert_eq!(back.meta, CONFINED | FLIP_X, "write must not touch meta");
+        assert_eq!(back.span, 0x12, "write must not touch span");
+        assert_eq!((back.x, back.y), (5.0, 6.0), "the answered position landed");
+        assert_eq!(
+            (back.rx, back.ry),
+            (5, 6),
+            "the answered drawn pixel landed"
+        );
+        assert_eq!(
+            (back.sides, back.touched),
+            (0b1, 0b10),
+            "the answered contacts landed"
+        );
+    }
+
+    #[test]
+    fn nothing_shown_has_no_look() {
+        assert_eq!(EMPTY.look(), None, "an empty record wears nothing");
+        assert_eq!(VACANT.look(), None, "a vacant seat wears nothing");
+        let hidden = Record {
+            sprite: 3,
+            meta: HIDDEN,
+            ..EMPTY
+        };
+        assert_eq!(hidden.look(), None, "a hidden record is never drawn");
+    }
+
+    #[test]
+    fn a_plain_record_looks_like_one_cell_at_the_drawn_pixel() {
+        // rx/ry differ from both the float position and the rectangle corner, so only the drawn
+        // pixel driving the look proves which of the three the look actually reads.
+        let record = Record {
+            x: 12.75,
+            y: 30.5,
+            rx: -5,
+            ry: 20,
+            bx: 13,
+            by: 25,
+            sprite: 9,
+            ..EMPTY
+        };
+        assert_eq!(
+            record.look(),
+            Some(Look {
+                sprite: SpriteId(9),
+                x: -5,
+                y: 20,
+                width: 8,
+                height: 8,
+                flip_x: false,
+                flip_y: false,
+            })
+        );
+    }
+
+    #[test]
+    fn span_and_flip_bits_size_and_mirror_the_look() {
+        let base = Record { sprite: 5, ..EMPTY };
+
+        let two_rows = Record { span: 0x10, ..base }.look().unwrap();
+        assert_eq!(
+            (two_rows.width, two_rows.height),
+            (8, 16),
+            "high nibble is cells down"
+        );
+
+        let two_cols = Record { span: 0x01, ..base }.look().unwrap();
+        assert_eq!(
+            (two_cols.width, two_cols.height),
+            (16, 8),
+            "low nibble is cells across"
+        );
+
+        let whole_sheet = Record { span: 0xff, ..base }.look().unwrap();
+        assert_eq!(
+            (whole_sheet.width, whole_sheet.height),
+            (128, 128),
+            "0xff spans the sheet"
+        );
+
+        let flipped = Record {
+            meta: FLIP_X | FLIP_Y,
+            ..base
+        }
+        .look()
+        .unwrap();
+        assert!(flipped.flip_x && flipped.flip_y);
+
+        let still_plain = Record {
+            meta: PROP | CONFINED,
+            ..base
+        }
+        .look()
+        .unwrap();
+        assert!(
+            !still_plain.flip_x && !still_plain.flip_y,
+            "PROP/CONFINED are not look bits"
+        );
+    }
+
+    #[test]
+    fn looks_keeps_order_and_skips_what_shows_nothing() {
+        let a = Record { sprite: 1, ..EMPTY };
+        let hidden_b = Record {
+            sprite: 2,
+            meta: HIDDEN,
+            ..EMPTY
+        };
+        let c = Record { sprite: 3, ..EMPTY };
+        let records = [a, VACANT, hidden_b, c];
+
+        let shown: Vec<SpriteId> = looks(&records, BitFlags::empty(), |_| BitFlags::empty())
+            .map(|look| look.sprite)
+            .collect();
+        assert_eq!(shown, [SpriteId(1), SpriteId(3)]);
+    }
+
+    #[test]
+    fn layers_filter_by_what_the_worn_cell_carries() {
+        let plain = Record { sprite: 1, ..EMPTY }; // carries nothing
+        let flagged = Record { sprite: 2, ..EMPTY }; // carries Flag0
+        let records = [plain, flagged];
+        let carried = |sprite: SpriteId| {
+            if sprite == SpriteId(2) {
+                BitFlags::from(SpriteFlag::Flag0)
+            } else {
+                BitFlags::empty()
+            }
+        };
+
+        let all: Vec<_> = looks(&records, BitFlags::empty(), carried)
+            .map(|look| look.sprite)
+            .collect();
+        assert_eq!(
+            all,
+            [SpriteId(1), SpriteId(2)],
+            "empty layers draws everything"
+        );
+
+        let picked: Vec<_> = looks(&records, BitFlags::from(SpriteFlag::Flag0), carried)
+            .map(|look| look.sprite)
+            .collect();
+        assert_eq!(
+            picked,
+            [SpriteId(2)],
+            "only the cell carrying the flag is picked"
+        );
+
+        let none: Vec<_> = looks(&records, BitFlags::from(SpriteFlag::Flag1), carried)
+            .map(|look| look.sprite)
+            .collect();
+        assert!(
+            none.is_empty(),
+            "a cell carrying no flags is never picked by a non-empty layer"
+        );
     }
 
     #[test]
@@ -430,5 +700,21 @@ mod tests {
         recast.report(&mut record);
         assert_eq!((record.x, record.y), (22.5, 30.25));
         assert_eq!((record.rx, record.ry), (22, 30));
+    }
+
+    #[test]
+    fn the_step_reads_nothing_of_the_look() {
+        let record = Record {
+            meta: FLIP_X | FLIP_Y | HIDDEN,
+            span: 0xff,
+            ..EMPTY
+        };
+        let recast = Recast::of(&record);
+        assert!(!recast.prop(), "FLIP_X/FLIP_Y/HIDDEN are not PROP");
+        assert_eq!(
+            recast.confines(),
+            None,
+            "FLIP_X/FLIP_Y/HIDDEN are not CONFINED"
+        );
     }
 }

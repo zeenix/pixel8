@@ -5,9 +5,10 @@ use crate::{Body, SCREEN_HEIGHT, SCREEN_WIDTH};
 /// The rectangle something covers, and what a cart's own collisions are judged against.
 ///
 /// One member against another, either of them against the edges of the screen, or a door or a
-/// trigger the level puts down once and never moves. [`World::enlist`](super::World::enlist) is
-/// where a member's own rectangle is given, [`World::bounds`](super::World::bounds) is where it is
-/// asked for, and every question about two of them is asked here.
+/// trigger the level puts down once and never moves.
+/// [`MemberBuilder::enlist`](super::MemberBuilder::enlist) is where a member's own rectangle is
+/// given, [`Member::bounds`](super::Member::bounds) is where it is asked for, and every question
+/// about two of them is asked here.
 ///
 /// Whole pixels, measured from where a [`Body`] *draws* rather than the sub-pixel position it
 /// tracks: two things that overlap on screen overlap here, which is the only answer a player will
@@ -67,7 +68,7 @@ impl Bounds {
     /// The screen, as a rectangle.
     ///
     /// The limit most carts hold their members inside — see
-    /// [`Enlisting::confined_to`](super::Enlisting::confined_to) — and what
+    /// [`MemberBuilder::confined_to`](super::MemberBuilder::confined_to) — and what
     /// [`on_screen`](Self::on_screen) is measured against. A cart with a level bigger than the
     /// screen writes down the level instead; this knows nothing of a
     /// [`camera`](crate::Graphics::camera).
@@ -138,10 +139,10 @@ impl Bounds {
 
     /// Whether any pixel of the rectangle is on the screen.
     ///
-    /// This is what a cart [retires](super::World::retire) a stray bullet or a spent enemy on:
+    /// This is what a cart [retires](super::Member::retire) a stray bullet or a spent enemy on:
     /// nothing here keeps a member on the screen — it is free to travel right off it — and this is
     /// how the cart notices it has gone. One that should not be allowed to leave says so instead,
-    /// in [`Enlisting::confined_to`](super::Enlisting::confined_to).
+    /// in [`MemberBuilder::confined_to`](super::MemberBuilder::confined_to).
     ///
     /// Measured against [`screen`](Self::screen), so it means the first screenful of the world.
     /// A cart that scrolls with a [`camera`](crate::Graphics::camera) is asking about somewhere

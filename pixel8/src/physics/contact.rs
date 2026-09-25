@@ -25,15 +25,15 @@ bitflag_enum! {
 /// of all it met on the way.
 ///
 /// What [`World::step`](super::World::step) leaves in every member's seat, for
-/// [`World::contacts`](super::World::contacts) to answer with — the whole of it, walls and the edge
-/// of the world together — so a cart standing a member on the bottom of the level, on a floor tile
-/// and on a moving platform reads the same answer the same way.
+/// [`Member::contacts`](super::Member::contacts) to answer with — the whole of it, walls and the
+/// edge of the world together — so a cart standing a member on the bottom of the level, on a floor
+/// tile and on a moving platform reads the same answer the same way.
 ///
 /// The two halves answer two kinds of question. The *sides* are the solid story: a side is
 /// reported when the member was moving that way and something stopped it — or held it, at the
-/// edge of its [confines](super::Enlisting::confined_to), or pushed it back out, for a neighbour
-/// that had come to stand on it — so one resting against a wall it is not pushing into reports
-/// nothing, and [`below`](Self::below) is what a platformer calls *grounded*. The *flags* —
+/// edge of its [confines](super::MemberBuilder::confined_to), or pushed it back out, for a
+/// neighbour that had come to stand on it — so one resting against a wall it is not pushing into
+/// reports nothing, and [`below`](Self::below) is what a platformer calls *grounded*. The *flags* —
 /// [`touched`](Self::touched) — are everything else: every sprite flag carried by a tile or by
 /// another cast member anywhere on the ground the step covered, solid to this entity or not.
 /// Water, a hazard, a pickup, a switch: one step, and the slot says which of them the entity met.
@@ -49,7 +49,7 @@ bitflag_enum! {
 /// # const SPIKES: SpriteFlag = SpriteFlag::Flag2;
 /// # fn f(world: &World<8>, hero: Member) -> (bool, bool) {
 /// // The walls, the spikes and the edge of the world, in one answer the world left behind.
-/// let contacts = world.contacts(hero);
+/// let contacts = hero.contacts(world);
 ///
 /// (contacts.below(), contacts.touches(SPIKES))
 /// # }
@@ -124,7 +124,7 @@ impl Contacts {
     /// let ahead = if walking_left { Contact::Left } else { Contact::Right };
     ///
     /// // A wall in front of the patrol, whichever way "in front" is this update.
-    /// world.contacts(patrol).sides().contains(ahead)
+    /// patrol.contacts(world).sides().contains(ahead)
     /// # }
     /// ```
     pub fn sides(self) -> BitFlags<Contact> {
@@ -152,7 +152,7 @@ impl Contacts {
     /// The flags say what *kind* of thing was met, never which one: a step through two patches
     /// of water reads exactly like a step through one. A cart that must know which — the coin to
     /// take off the map, the enemy to kill — looks at the state it already holds: the map, under
-    /// [`World::bounds`](super::World::bounds), or the one badie whose handle it keeps, its
+    /// [`Member::bounds`](super::Member::bounds), or the one badie whose handle it keeps, its
     /// rectangle asked [`Bounds::overlaps`](super::Bounds::overlaps) if the two have to be compared
     /// at all.
     ///
@@ -160,7 +160,7 @@ impl Contacts {
     /// # use pixel8::{physics::{Member, World}, SpriteFlag};
     /// # const WATER: SpriteFlag = SpriteFlag::Flag3;
     /// # fn f(world: &World<8>, hero: Member) {
-    /// let swimming = world.contacts(hero).touched().contains(WATER);
+    /// let swimming = hero.contacts(world).touched().contains(WATER);
     /// # }
     /// ```
     pub fn touched(self) -> BitFlags<SpriteFlag> {
@@ -178,7 +178,7 @@ impl Contacts {
     /// # const WATER: SpriteFlag = SpriteFlag::Flag3;
     /// # const LAVA: SpriteFlag = SpriteFlag::Flag4;
     /// # fn f(world: &World<8>, hero: Member) {
-    /// let contacts = world.contacts(hero);
+    /// let contacts = hero.contacts(world);
     /// let swimming = contacts.touches(WATER);
     /// let burning = contacts.touches(LAVA | WATER);
     /// # }
@@ -199,7 +199,7 @@ impl Contacts {
 /// # fn f(world: &World<16>, swarm: &[Member]) -> Contacts {
 /// let mut met = Contacts::empty();
 /// for wasp in swarm {
-///     met |= world.contacts(*wasp);
+///     met |= wasp.contacts(world);
 /// }
 ///
 /// met
@@ -226,7 +226,7 @@ impl BitOrAssign for Contacts {
 /// A step that met nothing, which is what a member that has not been stepped yet has met.
 ///
 /// Every seat starts here, so the answer a cart reads out of one it has only just
-/// [enlisted](super::World::enlist) is empty rather than anything it has to guard against.
+/// [enlisted](super::MemberBuilder::enlist) is empty rather than anything it has to guard against.
 impl Default for Contacts {
     fn default() -> Self {
         Self::empty()

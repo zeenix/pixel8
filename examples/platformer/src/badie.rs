@@ -1,4 +1,4 @@
-use pixel8::{physics::Member, BitFlags, Graphics, SpriteFlag};
+use pixel8::{physics::Member, BitFlags, SpriteFlag};
 
 use crate::{
     constants::{
@@ -12,7 +12,6 @@ use crate::{
 pub struct Badie {
     /// The badie's seat in the scene.
     member: Member,
-    flip: bool,
 }
 
 impl Badie {
@@ -23,14 +22,12 @@ impl Badie {
     /// the badie itself listens for nothing.
     pub fn new(scene: &mut Scene) -> Self {
         Self {
-            member: scene
-                .enlist(BADIE_START_X, BADIE_Y, BADIE_WIDTH, BADIE_HEIGHT)
-                .expect("a seat for the badie")
+            member: Member::builder(BADIE_START_X, BADIE_Y, BADIE_WIDTH, BADIE_HEIGHT)
                 .moving(-BADIE_SPEED, 0.0)
                 .wearing(BADIE_SPRITE)
                 .heeding(BitFlags::<SpriteFlag>::empty())
-                .member(),
-            flip: false,
+                .enlist(scene)
+                .expect("a seat for the badie"),
         }
     }
 
@@ -41,30 +38,40 @@ impl Badie {
 
     /// Gives the seat back — stomped, or the run over.
     pub fn retire(self, scene: &mut Scene) {
-        scene.retire(self.member);
+        self.member.retire(scene);
     }
 
     /// Our badie patrols horizontally back and forth between two points, turning at each end.
     /// What it means to do goes into its velocity, exactly like the hero's steering.
-    pub fn patrol(&mut self, scene: &mut Scene) {
-        let x = scene.pos(self.member).0;
+    pub fn patrol(&self, scene: &mut Scene) {
+        // The badie faces the way it walks; the world's flip is the one copy of that fact,
+        // so the patrol reads it back instead of keeping one of its own.
+        let (mut heading_right, _) = self.member.flip(scene);
+        let x = self.member.pos(scene).0;
         if x < BADIE_END_X {
-            self.flip = true;
+            heading_right = true;
         } else if x > BADIE_START_X {
-            self.flip = false;
+            heading_right = false;
         }
-        let mut velocity = scene.velocity(self.member);
-        velocity.dx = if self.flip { BADIE_SPEED } else { -BADIE_SPEED };
-        scene.set_velocity(self.member, velocity);
+        self.member.set_flip(scene, heading_right, false);
+        let mut velocity = self.member.velocity(scene);
+        velocity.dx = if heading_right {
+            BADIE_SPEED
+        } else {
+            -BADIE_SPEED
+        };
+        self.member.set_velocity(scene, velocity);
     }
 
-    pub fn draw(&self, gfx: &mut Graphics, scene: &Scene, frame: u32, mode: &GameMode) {
+    /// What the badie looks like this frame, written into its seat for the world to draw.
+    ///
+    /// Both cells carry the `BADIE` flag in the sprite editor, so switching between them never
+    /// changes what the hero meets.
+    pub fn animate(&self, scene: &mut Scene, frame: u32, mode: &GameMode) {
         let sprite = match mode {
             GameMode::InGame { .. } if (frame / 4).is_multiple_of(2) => BADIE_ALT_SPRITE,
             GameMode::Ended { .. } | GameMode::InGame { .. } => BADIE_SPRITE,
         };
-        let (x, y) = scene.draw_pos(self.member);
-        gfx.sprite_ext(sprite, x, y, 8, 8, self.flip, false)
-            .unwrap();
+        self.member.set_sprite(scene, Some(sprite));
     }
 }

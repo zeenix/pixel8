@@ -987,11 +987,9 @@ pub trait Game {
     /// impl Game for MyGame {
     ///     fn boot(&mut self, ctx: &mut Context) {
     ///         self.best = ctx.storage_get("best").and_then(|v| v.as_i64()).unwrap_or(0) as u16;
-    ///         self.hero = self
-    ///             .world
-    ///             .enlist(16.0, 80.0, 8, 8)
-    ///             .expect("a seat for the hero")
-    ///             .member();
+    ///         self.hero = Member::builder(16.0, 80.0, 8, 8)
+    ///             .enlist(&mut self.world)
+    ///             .expect("a seat for the hero");
     ///     }
     ///
     ///     fn update(&mut self, ctx: &mut Context) { /* ... */ }

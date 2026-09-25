@@ -23,7 +23,7 @@
 //! tiles with — it owns the level's pull, a [`Gravity`](pixel8::physics::Gravity)
 //! handed over at the start, and it owns the position, the velocity, the rectangle
 //! and the contacts of both actors. Each of them is
-//! [enlisted](pixel8::physics::World::enlist) once — one sprite's worth of rectangle,
+//! [enlisted](pixel8::physics::MemberBuilder::enlist) once — one sprite's worth of rectangle,
 //! the level itself as the edge the hero may never leave, and, for the badie, the
 //! sprite it wears — and keeps the [`Member`](pixel8::physics::Member) handle it gets
 //! back beside its own game data.
@@ -31,16 +31,19 @@
 //!
 //! One [`step`](pixel8::physics::World::step) an update does the moving, the stopping
 //! and the reporting for both; the `below()` of what it leaves in the hero's
-//! [`contacts`](pixel8::physics::World::contacts) is what this cart calls *grounded*.
-//! Because the world holds the trajectory, a running jump (hold Right + jump) — a
-//! sub-pixel diagonal — climbs a clean staircase instead of shimmering, and the cart
-//! draws at [`draw_pos`](pixel8::physics::World::draw_pos).
+//! [`contacts`](pixel8::physics::Member::contacts) is what this cart calls *grounded*.
+//! One [`draw`](pixel8::physics::World::draw) a frame puts both of them on screen where
+//! the step left them, and because the world holds the trajectory it draws from, a running
+//! jump (hold Right + jump) — a sub-pixel diagonal — climbs a clean staircase instead of
+//! shimmering. Each is drawn in the look that update gave it — the walk-cycle or jump
+//! cell it wears, which way it faces, the dead hero's blink — and seat order is drawing
+//! order as it is stepping order, so the hero, seated after the badie, is drawn over it.
 //!
 //! The badie is met through that same step: both of its sprites carry the `BADIE`
 //! flag in the sprite editor, so [`touches`](pixel8::physics::Contacts::touches)
 //! answers for it and nothing here walks a pair of casts. Whether the touch was a
 //! ram or a stomp — and what it costs — is settled in this file, where the badie
-//! lives; a stomped badie is [retired](pixel8::physics::World::retire) on the spot,
+//! lives; a stomped badie is [retired](pixel8::physics::Member::retire) on the spot,
 //! its seat free for the next run.
 //!
 //! The code is split into small modules: `hero` and `badie` (the two moving
@@ -158,7 +161,8 @@ impl Platformer {
         let (mut rammed, mut stomped) = (false, false);
         if let (true, Some(badie)) = (self.hero.met_badie(&self.scene), &self.badie) {
             // Level with the badie is a ram; anything else is the hero coming down on it.
-            if self.scene.bounds(self.hero.member()).y() == self.scene.bounds(badie.member()).y() {
+            if self.hero.member().bounds(&self.scene).y() == badie.member().bounds(&self.scene).y()
+            {
                 rammed = true;
             } else {
                 stomped = true;
@@ -265,6 +269,15 @@ impl Game for Platformer {
             } => *flash = self.frame.is_multiple_of(16),
             GameMode::Ended { .. } => (),
         }
+
+        // What each of the two looks like this update, written into its own seat for the
+        // world to draw — after everything above, and in every mode: a dead hero keeps
+        // blinking while the game-over clock runs, and a restart animates the seats it has
+        // just taken.
+        self.hero.animate(&mut self.scene, self.frame, &self.mode);
+        if let Some(badie) = &self.badie {
+            badie.animate(&mut self.scene, self.frame, &self.mode);
+        }
     }
 
     fn draw(&self, gfx: &mut Graphics) {
@@ -277,10 +290,9 @@ impl Game for Platformer {
         self.hero.center(gfx, &self.scene);
         gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
 
-        self.hero.draw(gfx, &self.scene, self.frame, &self.mode);
-        if let Some(badie) = &self.badie {
-            badie.draw(gfx, &self.scene, self.frame, &self.mode);
-        }
+        // The cast, in the look each one's update gave it; the hero, seated after the
+        // badie, is drawn over it.
+        self.scene.draw(gfx, BitFlags::empty());
 
         gfx.camera(0, 0);
 

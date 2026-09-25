@@ -5,15 +5,18 @@
 //! end with the entity a screen below the floor. This module gives those pieces names, and then
 //! takes them off the cart's hands altogether.
 //!
-//! A [`World`] *owns* the scene's moving matter. A cart [enlists](World::enlist) each member in
-//! turn — where this one stands, how big it is, what it wears, what stops it — and keeps the
-//! [`Member`] handle it gets back beside its own game data. Where each member is, how fast, what
-//! rectangle it covers and what it last ran into are the world's, stored once, and asked for with
-//! the handle: `world.draw_pos(hero)`, `world.contacts(hero)`, `world.set_velocity(hero, v)`.
-//! Forces act on velocity, never on position, and no member moves itself. One [`step`](World::step)
-//! an update runs the scene's weather over every velocity, stops whatever ran into the map's tiles
-//! or into the rest of the cast, holds each member inside the rectangle it may not leave, moves the
-//! bodies by what survived, and writes down what everybody met. One call a scene, an update.
+//! A [`World`] *owns* the scene's moving matter. A cart describes each member in turn with
+//! [`Member::builder`] — where this one stands, how big it is, what it wears, what stops it —
+//! [enlists](MemberBuilder::enlist) it into the world, and keeps the [`Member`] handle it gets back
+//! beside its own game data. Where each member is, how fast, what rectangle it covers and what it
+//! last ran into are the world's, stored once, and asked of the handle, handed the world:
+//! `hero.draw_pos(&world)`, `hero.contacts(&world)`, `hero.set_velocity(&mut world, v)`. Forces act
+//! on velocity, never on position, and no member moves itself. One [`step`](World::step) an update
+//! runs the scene's weather over every velocity, stops whatever ran into the map's tiles or into
+//! the rest of the cast, holds each member inside the rectangle it may not leave, moves the bodies
+//! by what survived, and writes down what everybody met. One call a scene, an update. And one
+//! [`draw`](World::draw) a frame puts the whole cast on screen, where the step left it and looking
+//! the way the update said, so a cart's `draw` is one call and whatever it paints of its own.
 //!
 //! The weather belongs to the scene rather than to the things in it: the same gust that bends the
 //! whole cast is one [`Wind`] the world [owns](World::with_forces), driven where it lives.
@@ -35,8 +38,8 @@
 //!     // pull, the air, and a wind that gusts and so cannot be a constant.
 //!     world: World<16, (Gravity, Atmosphere, Wind)>,
 //!     leaves: [Member; 16],
-//!     // The cart's own, which the world has never heard of: which way each leaf is facing.
-//!     turned: [bool; 16],
+//!     // The cart's own, which the world has never heard of: how many leaves the player caught.
+//!     caught: u16,
 //! }
 //!
 //! impl Autumn {
@@ -44,17 +47,17 @@
 //!         let mut world = World::new()
 //!             .with_forces((Gravity::new(), Atmosphere::new(), Wind::new(0.4)));
 //!         let leaves = core::array::from_fn(|i| {
-//!             world
-//!                 .enlist(i as f32 * 8.0, 0.0, 4, 4)
-//!                 .expect("a seat apiece for sixteen leaves")
+//!             Member::builder(i as f32 * 8.0, 0.0, 4, 4)
+//!                 .wearing(SpriteId(1))
 //!                 // A leaf weighs next to nothing, so the wind has three times the grip on it —
 //!                 // and the still air three times the drag. Gravity does not read this:
 //!                 // everything falls alike.
 //!                 .weighing(0.3)
-//!                 .member()
+//!                 .enlist(&mut world)
+//!                 .expect("a seat apiece for sixteen leaves")
 //!         });
 //!
-//!         Self { world, leaves, turned: [false; 16] }
+//!         Self { world, leaves, caught: 0 }
 //!     }
 //! }
 //!
@@ -67,10 +70,7 @@
 //!
 //!     fn draw(&self, gfx: &mut Graphics) {
 //!         gfx.clear(Color::BLACK);
-//!         for leaf in self.leaves {
-//!             let (x, y) = self.world.draw_pos(leaf);
-//!             gfx.sprite(SpriteId(1), x, y);
-//!         }
+//!         self.world.draw(gfx, BitFlags::empty());
 //!     }
 //! }
 //! ```
@@ -84,7 +84,7 @@
 //!
 //! # Mass
 //!
-//! [`Enlisting::weighing`] is how hard a member is to push, relative to everything else in the
+//! [`MemberBuilder::weighing`] is how hard a member is to push, relative to everything else in the
 //! scene: `1.0` is the default nobody has to think about, `4.0` takes four times the shove for the
 //! same movement and `0.25` a quarter of it. A member opts in by saying so once, and a cart that
 //! never mentions mass carries on exactly as it did.
@@ -120,9 +120,9 @@
 //! settles because the drag grows with the speed until it matches the pull, and sideways motion
 //! slows too — which the cap never did.
 //!
-//! Where gravity is blind to [mass](Enlisting::weighing), the air is not, and that is what finally
-//! tells the feather from the anvil: the same air takes a great share of the light thing and
-//! almost nothing of the heavy one, so the feather settles to a drift while the anvil goes on
+//! Where gravity is blind to [mass](MemberBuilder::weighing), the air is not, and that is what
+//! finally tells the feather from the anvil: the same air takes a great share of the light thing
+//! and almost nothing of the heavy one, so the feather settles to a drift while the anvil goes on
 //! gaining. [`Atmosphere::new`] is air at sea level, tuned so that a `1.0`-mass body settles
 //! exactly where the default [`Gravity`] would have capped it.
 //!
@@ -149,13 +149,13 @@
 //! # Collision
 //!
 //! Nothing here asks a cart to walk its own pairs, and nothing asks a member to detect anything. A
-//! member's [enlisting](World::enlist) only *describes*: the rectangle it covers, the flags that
+//! member's [enlisting](Member::builder) only *describes*: the rectangle it covers, the flags that
 //! stop it, the sprite it wears, how far it is let go. [`World::step`] does the rest for the whole
 //! cast — it stops each member at
 //! everything solid to it, tiles and cast alike, and writes the flags of everything it ran into
-//! into that member's [`contacts`](World::contacts). The cart enlists and reads; it never detects.
+//! into that member's [`contacts`](Member::contacts). The cart enlists and reads; it never detects.
 //!
-//! Every member covers one rectangle — [`World::bounds`] — because that is what the step is judged
+//! Every member covers one rectangle — [`Member::bounds`] — because that is what the step is judged
 //! over, and the same rectangle answers the two questions a cart asks off its own bat:
 //! [`Bounds::overlaps`] against a rectangle it knows about already, and [`Bounds::on_screen`] for
 //! something that has left the screen altogether.
@@ -165,7 +165,7 @@
 //! /// A bullet against the doors the level put down once — and nothing at all once it is off
 //! /// screen.
 //! fn hit(world: &World<8>, bullet: Member, doors: &[Bounds]) -> bool {
-//!     let bounds = world.bounds(bullet);
+//!     let bounds = bullet.bounds(world);
 //!
 //!     bounds.on_screen() && doors.iter().any(|door| bounds.overlaps(*door))
 //! }
@@ -177,13 +177,13 @@
 //! calls a wall is a sprite flag, named once on the world in [`World::with_solid`], and every
 //! member stops at every tile carrying it, over the rectangle it covers everywhere else. It is the
 //! flag a cart already marks its walls with for [`Graphics::map`](crate::Graphics::map). A member
-//! the scene's word does not fit is [`stopped_by`](Enlisting::stopped_by) rules of its own, which
-//! replace the world's for that member alone.
+//! the scene's word does not fit is [`stopped_by`](MemberBuilder::stopped_by) rules of its own,
+//! which replace the world's for that member alone.
 //!
 //! The tiles taught the console one vocabulary — a thing *is* whatever flags it carries, written
-//! once in the sprite editor — and the cast speaks it too. [`Enlisting::wearing`] is where a member
-//! says which cell it wears, and the flags on that cell are what everybody else meets when they
-//! meet it. So one [`World::step`] settles both: a flag shared with `solid` stops the member,
+//! once in the sprite editor — and the cast speaks it too. [`MemberBuilder::wearing`] is where a
+//! member says which cell it wears, and the flags on that cell are what everybody else meets when
+//! they meet it. So one [`World::step`] settles both: a flag shared with `solid` stops the member,
 //! whether it is on a tile or on a neighbour, in the same one-axis-at-a-time pass; a rising lift
 //! pushes the rider standing on it and the rider goes on reading [`below`](Contacts::below); and
 //! everything met, wall or not, tile or member, comes back in [`Contacts::touched`]. One step
@@ -192,26 +192,25 @@
 //!
 //! Three flags, three directions, and they are the whole of it:
 //!
-//! * [`stopped_by`](Enlisting::stopped_by) — which flags are a **wall to me**. The world's word
+//! * [`stopped_by`](MemberBuilder::stopped_by) — which flags are a **wall to me**. The world's word
 //!   ([`World::with_solid`]) by default, and rules of this member's own where it gives them; under
 //!   a world that declared nothing, nothing anywhere stops it.
-//! * [`wearing`](Enlisting::wearing) — which cell I **wear**, and so which flags others meet in me.
-//!   Nothing by default: nobody is stopped by it, and nobody is told about it. It is still stopped
-//!   by everything, and still told everything — a sensor needs no flag of its own.
-//! * [`heeding`](Enlisting::heeding) — which flags I **care to be told about**. Everything by
+//! * [`wearing`](MemberBuilder::wearing) — which cell I **wear**, and so which flags others meet in
+//!   me. Nothing by default: nobody is stopped by it, and nobody is told about it. It is still
+//!   stopped by everything, and still told everything — a sensor needs no flag of its own.
+//! * [`heeding`](MemberBuilder::heeding) — which flags I **care to be told about**. Everything by
 //!   default, which is why a cart never has to think about it until it wants to.
 //!
 //! ## What a member cares to meet
 //!
 //! A member describes what it wants to hear about, and the world spends nothing on the rest. That
-//! is [`heeding`](Enlisting::heeding), and it is the one place a cart can make a scene cheaper by
-//! saying
-//! something true about it: a bullet fired at the enemy cares about the enemy and about nothing
-//! else in the sky — not the other bullets beside it, not the tiles scrolling past behind it. Say
-//! so, and a neighbour carrying nothing it heeds is refused before a single edge of that neighbour
-//! is worked out, and a tile's flags are dropped before they are collected. In a scene where
-//! everything is in one cast, that is most of the work of an update, and it is spent on answers
-//! nobody was going to read.
+//! is [`heeding`](MemberBuilder::heeding), and it is the one place a cart can make a scene cheaper
+//! by saying something true about it: a bullet fired at the enemy cares about the enemy and about
+//! nothing else in the sky — not the other bullets beside it, not the tiles scrolling past behind
+//! it. Say so, and a neighbour carrying nothing it heeds is refused before a single edge of that
+//! neighbour is worked out, and a tile's flags are dropped before they are collected. In a scene
+//! where everything is in one cast, that is most of the work of an update, and it is spent on
+//! answers nobody was going to read.
 //!
 //! The promise stays one sentence, whatever a cart narrows: **you are told what you heed, and you
 //! are stopped by what you call solid.** `solid` is heeded whether it was named or not, so
@@ -233,10 +232,10 @@
 //!
 //! // And she is rammed and she is shot, and the rest of the sky is somebody else's business.
 //! # fn f(sky: &mut World<32>) -> Member {
-//! sky.enlist(60.0, 100.0, 8, 8)
-//!     .expect("a seat for the aircraft")
+//! Member::builder(60.0, 100.0, 8, 8)
 //!     .heeding(AIRCRAFT | ENEMY_SHOT)
-//!     .member()
+//!     .enlist(sky)
+//!     .expect("a seat for the aircraft")
 //! # }
 //! ```
 //!
@@ -255,16 +254,16 @@
 //! # const WATER: SpriteFlag = SpriteFlag::Flag3;
 //! # fn f(world: &mut World<4, Gravity>, ctx: &Context, hero: Member) {
 //! world.step(ctx);
-//! let contacts = world.contacts(hero);
+//! let contacts = hero.contacts(world);
 //! let (grounded, swimming) = (contacts.below(), contacts.touches(WATER));
 //! # }
 //! ```
 //!
 //! ## The cast, and the order it is in
 //!
-//! The cast is the world's own: `N` seats, filled by [`enlist`](World::enlist) and emptied by
-//! [`retire`](World::retire), and nothing to gather at the top of an update. Three things follow,
-//! and they are the whole of the contract:
+//! The cast is the world's own: `N` seats, filled by [`enlist`](MemberBuilder::enlist) and emptied
+//! by [`retire`](Member::retire), and nothing to gather at the top of an update. Three things
+//! follow, and they are the whole of the contract:
 //!
 //! * **Same frame.** Everybody is where they are. A member meets its neighbours at the rectangles
 //!   they cover *now*, not at a picture of them taken earlier, so a shot that lands is a hit its
@@ -274,17 +273,20 @@
 //!   the ones stepped before it where they have *just* moved to. So a lift enlisted before its
 //!   rider carries the rider with no lag at all, and one enlisted after it is a frame behind.
 //!   Enlist the cast the way the scene works. A seat freed by `retire` is the next one filled, so
-//!   the order a scene is seated in is the order it keeps.
+//!   the order a scene is seated in is the order it keeps. It is the order the cast is
+//!   [drawn](World::draw) in, too: a later seat over an earlier one. Where the two orders pull
+//!   apart — a shot takes whatever seat is free, yet belongs under the aircraft whichever it was —
+//!   [layers](#drawing) are the way out.
 //! * **Never itself.** The world knows who is who — a member is simply left out of its own
 //!   questions — so a member's own kind is a wall like anybody else's. Two crates whose
-//!   [`wearing`](Enlisting::wearing) cell carries `CRATE`, each with `CRATE`
-//!   [solid](Enlisting::stopped_by) to it, block each other and neither is ever shoved off its own
-//!   feet.
+//!   [`wearing`](MemberBuilder::wearing) cell carries `CRATE`, each with `CRATE`
+//!   [solid](MemberBuilder::stopped_by) to it, block each other and neither is ever shoved off its
+//!   own feet.
 //!
 //! And one refinement for the things a cart drives itself: a member that says it is a
-//! [prop](Enlisting::prop) is met and never moved. Its rectangle and its flags stand in everybody's
-//! way from wherever the cart last [put](World::set_pos) it — a hazard patrolling a fixed beat, a
-//! lift on a track — and the forces, the walls and the contacts all pass it by.
+//! [prop](MemberBuilder::prop) is met and never moved. Its rectangle and its flags stand in
+//! everybody's way from wherever the cart last [put](Member::set_pos) it — a hazard patrolling a
+//! fixed beat, a lift on a track — and the forces, the walls and the contacts all pass it by.
 //!
 //! ```no_run
 //! # use pixel8::{physics::{Bounds, Gravity, Member, World}, *};
@@ -311,13 +313,12 @@
 //!             // what is a wall to it — a rule of its own rather than the scene's, because its own
 //!             // kind is in it, which no world-wide word could say for walkers alone. Plus the
 //!             // edge of the world, which is not a wall and is on no tile.
-//!             world
-//!                 .enlist(i as f32 * 24.0, 64.0, 8, 8)
-//!                 .expect("a seat apiece for three walkers")
+//!             Member::builder(i as f32 * 24.0, 64.0, 8, 8)
 //!                 .wearing(WALKER_SPRITE)
 //!                 .stopped_by(SOLID | WALKER)
 //!                 .confined_to(Bounds::screen())
-//!                 .member()
+//!                 .enlist(&mut world)
+//!                 .expect("a seat apiece for three walkers")
 //!         });
 //!
 //!         Self { world, walkers }
@@ -326,8 +327,8 @@
 //!     /// What the buttons ask for, written into each velocity before the world runs.
 //!     fn steer(&mut self, ctx: &Context) {
 //!         for walker in self.walkers {
-//!             let mut velocity = self.world.velocity(walker);
-//!             if self.world.contacts(walker).below() && ctx.is_button_pressed(Button::O) {
+//!             let mut velocity = walker.velocity(&self.world);
+//!             if walker.contacts(&self.world).below() && ctx.is_button_pressed(Button::O) {
 //!                 velocity.dy = -3.25;
 //!             }
 //!             velocity.dx = if ctx.is_button_down(Button::Left) {
@@ -337,7 +338,7 @@
 //!             } else {
 //!                 0.0
 //!             };
-//!             self.world.set_velocity(walker, velocity);
+//!             walker.set_velocity(&mut self.world, velocity);
 //!         }
 //!     }
 //!
@@ -363,31 +364,100 @@
 //! Flags say what *kind* of thing was met and never which one — two patches of water read as one
 //! patch of water, and one badie reads like another. A cart that must know which, because
 //! something has to happen to it, already holds the handle: it looks at its own state, and compares
-//! [`World::bounds`] if it must ask a rectangle anything at all. The step says *the hero met a
+//! [`Member::bounds`] if it must ask a rectangle anything at all. The step says *the hero met a
 //! badie*; which badie, and what it costs the hero, is the cart's and was never anybody else's.
 //!
 //! ## The edge of the world
 //!
 //! The last thing a member runs into is not a wall and is nowhere on the map: nothing stops it
-//! walking off the last tile and falling for ever. [`Enlisting::confined_to`] is where it says it
-//! may not — [`Bounds::screen`], or the level itself where that is the bigger of the two — and
+//! walking off the last tile and falling for ever. [`MemberBuilder::confined_to`] is where it says
+//! it may not — [`Bounds::screen`], or the level itself where that is the bigger of the two — and
 //! [`World::step`] holds it there, putting the rectangle back against the edge and spending the
 //! speed that took it out, exactly as a wall would have. It is declared once, with everything else
 //! a member is enlisted under, rather than enforced by a call an update can forget; the sides it
 //! was held at arrive in the same [`Contacts`], so a hold at the bottom of the level reads
 //! [`below`](Contacts::below) as a floor tile does. A room the player walks into changes them with
-//! [`World::set_confines`].
+//! [`Member::set_confines`].
 //!
 //! Saying nothing — the default — is a member free to leave, which is what a bullet or a spent
-//! enemy wants: it walks off the map, and the cart [retires](World::retire) it when
+//! enemy wants: it walks off the map, and the cart [retires](Member::retire) it when
 //! [`Bounds::on_screen`] says it has gone.
+//!
+//! # Drawing
+//!
+//! The world draws its cast as it steps it. One [`World::draw`] a frame puts every member on
+//! screen where the last step left it, and what it draws is the member's *look*, which is the
+//! world's like everything else about it: the cell it [wears](MemberBuilder::wearing), which way
+//! round it faces ([`flipped`](MemberBuilder::flipped), [`set_flip`](Member::set_flip)), how many
+//! cells of the sheet it spans ([`spanning`](MemberBuilder::spanning),
+//! [`set_span`](Member::set_span)), and whether it is shown at all
+//! ([`hidden`](MemberBuilder::hidden), [`set_hidden`](Member::set_hidden)). A member that wears
+//! nothing is not drawn: nobody is stopped by it, nobody is told about it, and nobody sees it
+//! either.
+//!
+//! The look is decided in the update, beside the velocity, by the code that knows why it changed:
+//! a walker turns round in the update that turned it, and puts on the next cell of its walk in the
+//! update that carried it there. By the time [`Game::draw`](crate::Game::draw) runs — holding the
+//! game by `&self` — there is nothing left to decide, and only the showing to do:
+//!
+//! ```no_run
+//! # use pixel8::{physics::{Member, World}, *};
+//! /// Two cells of a walk, flagged alike on the sheet: which one is worn changes how the walker
+//! /// looks and nothing about what it is met as.
+//! const WALK: [SpriteId; 2] = [SpriteId(16), SpriteId(17)];
+//!
+//! struct Stroll {
+//!     world: World<1>,
+//!     walker: Member,
+//! }
+//!
+//! impl Game for Stroll {
+//!     fn update(&mut self, ctx: &mut Context) {
+//!         let mut velocity = self.walker.velocity(&self.world);
+//!         velocity.dx = if ctx.is_button_down(Button::Left) {
+//!             -1.0
+//!         } else if ctx.is_button_down(Button::Right) {
+//!             1.0
+//!         } else {
+//!             0.0
+//!         };
+//!         self.walker.set_velocity(&mut self.world, velocity);
+//!         // How it looks, said beside how it moves: facing the way it was last sent, and a step
+//!         // of the walk for every four pixels it has come.
+//!         if velocity.dx != 0.0 {
+//!             self.walker.set_flip(&mut self.world, velocity.dx < 0.0, false);
+//!         }
+//!         let (x, _) = self.walker.draw_pos(&self.world);
+//!         let stride = WALK[(x / 4).rem_euclid(2) as usize];
+//!         self.walker.set_sprite(&mut self.world, Some(stride));
+//!
+//!         self.world.step(ctx);
+//!     }
+//!
+//!     fn draw(&self, gfx: &mut Graphics) {
+//!         gfx.clear(Color::BLACK);
+//!         self.world.draw(gfx, BitFlags::empty());
+//!     }
+//! }
+//! ```
+//!
+//! Seat order is drawing order, as it is stepping order: a later seat is drawn over an earlier
+//! one. A scene that wants it otherwise draws in layers, and `draw`'s `layers` is the very filter
+//! [`Graphics::map`](crate::Graphics::map) takes — an empty set draws everybody, and anything else
+//! only the members whose worn cell carries one of those flags. It is one call a layer, and
+//! whatever draw state a layer needs — a transparency, a palette swap for a hurt flash — is set
+//! around its call, as it would be around a `map`.
+//!
+//! Everything that is not a member is the cart's, drawn before the cast or after it: the map
+//! behind it, the HUD over it, a particle effect, the line of a rotor at a member's
+//! [`draw_pos`](Member::draw_pos).
 //!
 //! # Forces of your own
 //!
 //! A [`Force`] is one method, so a cart's own force fields — a current, a magnet, the drag of deep
 //! water — work everywhere the ones here do: hand [`with_forces`](World::with_forces) a tuple with
 //! them in it and the world owns the lot, applying it to every member it moves — a
-//! [prop](Enlisting::prop) steers itself, so no force bends one — before any of them takes a
+//! [prop](MemberBuilder::prop) steers itself, so no force bends one — before any of them takes a
 //! step:
 //!
 //! ```no_run
@@ -434,7 +504,8 @@
 //! single ownership buys is that nothing is ever copied: the step hands the console the world's own
 //! array and the console answers into it, so a cart pays for one call an update and not for a
 //! marshalling loop over its cast. The collisions themselves are the console's native work and cost
-//! a cart no fuel at all.
+//! a cart no fuel at all. The same array goes across again to be drawn, and the console draws it
+//! natively too: one call a frame, however long the cast.
 
 mod atmosphere;
 mod bounds;
@@ -457,7 +528,7 @@ pub use force::{Force, Subject};
 pub use gravity::Gravity;
 #[doc(hidden)]
 pub use kinetic::Kinetic;
-pub use member::Member;
+pub use member::{Member, MemberBuilder};
 pub use velocity::Velocity;
 pub use wind::Wind;
-pub use world::{Enlisting, World};
+pub use world::World;

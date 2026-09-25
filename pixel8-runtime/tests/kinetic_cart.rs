@@ -9,15 +9,19 @@
 //!
 //! This is the crossing: the fixture in `tests/carts/kinetic` is built with cargo
 //! for `wasm32-unknown-unknown` against the SDK in this working tree, loaded into
-//! a real [`GameVm`], and run for five frames. It steps one `World` over four
+//! a real [`GameVm`], and run for five frames. It steps one `World` over five
 //! entities — two crates of one kind walking into each other, a sensor walking
-//! into a flagged hazard — and writes the world's answers back out as pixels;
-//! what is asserted here is those pixels.
+//! into a flagged hazard, and a ghost standing apart from all of it — and
+//! writes the world's answers back out as pixels; what is asserted here is
+//! those pixels.
 //!
-//! Nothing in the fixture is drawn but the report. Collision comes off what an
-//! entity says it wears and what the *host* flagged that cell with, so the flags
-//! below are set here rather than in the cart — and the cart still collides
-//! without painting a thing.
+//! The fixture also draws its cast: `draw` hands the crates' layer to the same
+//! `World`, and what is asserted here reaches past the report to the pixels
+//! that crossing puts on screen — proof that a flip bit or a hidden bit picked
+//! up wrong would show here and nowhere else. Collision still comes off what an
+//! entity says it wears and what the *host* flagged that cell with, never what
+//! is painted, so the flags below are set here rather than in the cart, and a
+//! few pixels are set beside them only so the drawing can be read back.
 
 use std::{path::PathBuf, process::Command};
 
@@ -43,6 +47,14 @@ const MET_HAZARD: i32 = 4;
 
 /// The color the cart reports in.
 const LIT: u8 = 7;
+
+/// The screen row the crates are drawn on, matching the fixture's own `CRATE_ROW`.
+const CRATE_Y: i32 = 20;
+
+/// Where the fixture stands the hazard and the ghost, its `HAZARD_AT` on `SENSOR_ROW` and its
+/// `GHOST_AT`: the top-left corners of the two cells that must never be drawn.
+const HAZARD_AT: (i32, i32) = (40, 40);
+const GHOST_AT: (i32, i32) = (100, 60);
 
 /// What the crates do, worked out from the geometry the cart sets up rather than
 /// from what it printed the first time it ran.
@@ -129,6 +141,14 @@ fn a_cart_collides_with_the_cast_it_handed_the_world() {
         );
         vm.call_draw()
             .unwrap_or_else(|e| panic!("frame {frame}: draw: {}", e.message));
+        // The draw of five members is one crossing plus a handful of report calls. The ceiling
+        // is as generous as the update's, for the same reason: it catches the draw growing
+        // wildly, but it cannot by itself tell a crossing from a short walk in wasm.
+        let draw_fuel = vm.cpu_draw() * 131_072.0;
+        assert!(
+            draw_fuel < 2_000.0,
+            "frame {frame}: the draw burned {draw_fuel} fuel, far past one crossing and a report"
+        );
         let fb = &vm.state().fb;
         let lit = |column: i32| fb.pget(column, ANSWER_ROW) == LIT;
 
@@ -164,6 +184,54 @@ fn a_cart_collides_with_the_cast_it_handed_the_world() {
             "frame {frame}: sensor x"
         );
         assert_eq!(lit(MET_HAZARD), met, "frame {frame}: met the hazard");
+
+        // The crates, drawn from the cell `probe_assets` painted, at the pixel the world moved
+        // them to. The left one unmirrored, so its own top-left corner reads first; the right
+        // one flipped, so the very same corner reads from the top-right instead.
+        assert_eq!(
+            fb.pget(left, CRATE_Y),
+            8,
+            "frame {frame}: left crate's top-left corner"
+        );
+        assert_eq!(
+            fb.pget(left + 7, CRATE_Y + 7),
+            12,
+            "frame {frame}: left crate's bottom-right corner"
+        );
+        assert_eq!(
+            fb.pget(left + 1, CRATE_Y),
+            0,
+            "frame {frame}: a transparent pixel of the left crate shows the cleared screen"
+        );
+        assert_eq!(
+            fb.pget(right + 7, CRATE_Y),
+            8,
+            "frame {frame}: right crate's top-left corner, mirrored to its top-right"
+        );
+        assert_eq!(
+            fb.pget(right, CRATE_Y + 7),
+            12,
+            "frame {frame}: right crate's bottom-right corner, mirrored to its bottom-left"
+        );
+
+        // The hazard is left out by the layer the cart draws, and the ghost by being hidden:
+        // neither shows up anywhere in the 8x8 block it would be drawn from.
+        for dy in 0..8 {
+            for dx in 0..8 {
+                let hazard = (HAZARD_AT.0 + dx, HAZARD_AT.1 + dy);
+                assert_eq!(
+                    fb.pget(hazard.0, hazard.1),
+                    0,
+                    "frame {frame}: the hazard was drawn at {hazard:?}"
+                );
+                let ghost = (GHOST_AT.0 + dx, GHOST_AT.1 + dy);
+                assert_eq!(
+                    fb.pget(ghost.0, ghost.1),
+                    0,
+                    "frame {frame}: the ghost was drawn at {ghost:?}"
+                );
+            }
+        }
     }
 }
 
@@ -177,18 +245,37 @@ fn reported(fb: &Framebuffer, row: i32) -> Option<i32> {
     lit.next().is_none().then_some(first)
 }
 
-/// The sheet the fixture's entities wear: one cell flagged as the crates' own
-/// kind, one flagged as the hazard, and nothing else.
+/// The sheet the fixture's entities wear: the crate cell flagged as the
+/// crates' own kind, the hazard cell flagged as the hazard, and a few pixels
+/// of each so a draw of them leaves something a test can read back.
 ///
-/// Flags only, and no pixels at all. Flagging is the console's half of the
-/// arrangement — it is the host that says what a sprite *means* — and what an
-/// entity is made of no longer has anything to do with what was painted.
+/// Collision comes off the flags alone — flagging is the console's half of
+/// the arrangement, it is the host that says what a sprite *means*, and what
+/// an entity is made of has nothing to do with what is painted. The pixels
+/// exist only so a draw can be told from no draw at all: two corners of the
+/// crate cell, and the hazard cell lit whole, so a draw of the hazard — which
+/// should never happen — could not be missed.
 fn probe_assets() -> Assets {
     let mut assets = Assets::default();
     // Sprite 1 is the crate, sprite 2 the hazard, matching the fixture's own
     // `CRATE_SPRITE` and `HAZARD_SPRITE`.
     assets.sprites.set_flag(1, 0, true);
     assets.sprites.set_flag(2, 1, true);
+
+    // Sprite 1's top-left corner is sheet pixel (8, 0). Two of its pixels are
+    // painted, opposite corners of the cell, so a mirrored draw of it reads
+    // back differently from an unmirrored one; every other pixel is left 0,
+    // transparent, and shows whatever was drawn under it.
+    assets.sprites.set(8, 0, 8);
+    assets.sprites.set(15, 7, 12);
+    // Sprite 2's top-left corner is sheet pixel (16, 0). The whole cell is
+    // painted, so a draw of the hazard — which should never happen — reads
+    // back unmistakably wherever it lands.
+    for y in 0..8 {
+        for x in 0..8 {
+            assets.sprites.set(16 + x, y, 11);
+        }
+    }
 
     assets
 }

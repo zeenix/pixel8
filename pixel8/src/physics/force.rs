@@ -101,10 +101,10 @@ impl Subject {
     /// How hard the member is to push, relative to everything else in the scene.
     ///
     /// `1.0` is the weight nobody has to think about; a member says otherwise once, with
-    /// [`Enlisting::weighing`](super::Enlisting::weighing). A force that divides by it does well
-    /// to clamp what it works out, the way the ones here do, so that a mass a cart arrived at from
-    /// something empty — a zero, a `NaN` — gives an ordinary member rather than one flung off the
-    /// screen.
+    /// [`MemberBuilder::weighing`](super::MemberBuilder::weighing). A force that divides by it does
+    /// well to clamp what it works out, the way the ones here do, so that a mass a cart arrived
+    /// at from something empty — a zero, a `NaN` — gives an ordinary member rather than one
+    /// flung off the screen.
     pub const fn mass(&self) -> f32 {
         self.mass
     }
