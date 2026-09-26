@@ -120,6 +120,9 @@ pub struct Member<'a> {
     pub(super) own_solid: bool,
 }
 
+// Every method a view has, bar `builder`, is `#[inline]`, like the borrows that hand the views out:
+// carts are built for size, where a getter left out of line is a call, and one taking `&self`
+// makes the cart write the whole view to memory first. Inlined, it is the loads it reads.
 impl Member<'_> {
     /// Describes a member `width` x `height` pixels at (`x`, `y`), covering that rectangle from
     /// the pixel it will draw at, and hands back the [`MemberBuilder`] the rest of it is
@@ -169,6 +172,7 @@ impl Member<'_> {
 
     /// The [`MemberId`] this member was borrowed with — what the cart keeps to ask the world for
     /// it again.
+    #[inline]
     pub fn id(&self) -> MemberId {
         self.id
     }
@@ -177,6 +181,7 @@ impl Member<'_> {
     ///
     /// The truth for a cart's own arithmetic — which tile it is over, how far it is from something.
     /// What to *draw* at is [`draw_pos`](Self::draw_pos).
+    #[inline]
     pub fn pos(&self) -> (f32, f32) {
         (self.record.x, self.record.y)
     }
@@ -188,6 +193,7 @@ impl Member<'_> {
     /// head. It is [`Body`](crate::Body)'s phase-coherent pixel — a sub-pixel diagonal climbs a
     /// clean staircase through it instead of shimmering — and the step keeps it coherent across the
     /// wire, so a running jump climbs that same staircase in the console.
+    #[inline]
     pub fn draw_pos(&self) -> (i16, i16) {
         (self.record.rx, self.record.ry)
     }
@@ -196,6 +202,7 @@ impl Member<'_> {
     ///
     /// After a step, what survived it: an axis that ran into something has been spent, so a fall
     /// that landed reads zero and something that walked into a wall is not still walking.
+    #[inline]
     pub fn velocity(&self) -> Velocity {
         Velocity::new(self.record.dx, self.record.dy)
     }
@@ -207,6 +214,7 @@ impl Member<'_> {
     /// the bottom of the level, on a floor tile and on a moving platform reads all three the same
     /// way. A [prop](MemberBuilder::prop) is never given contacts: the cart drives it, and there
     /// is nobody home to tell.
+    #[inline]
     pub fn contacts(&self) -> Contacts {
         Contacts::from_wire(self.record.sides, self.record.touched)
     }
@@ -228,6 +236,7 @@ impl Member<'_> {
     /// world.member(hero).bounds().y() == world.member(badie).bounds().y()
     /// # }
     /// ```
+    #[inline]
     pub fn bounds(&self) -> Bounds {
         Bounds::new(
             self.record.bx,
@@ -239,6 +248,7 @@ impl Member<'_> {
 
     /// The rectangle the member may not leave, if it named one — see
     /// [`MemberBuilder::confined_to`].
+    #[inline]
     pub fn confines(&self) -> Option<Bounds> {
         (self.record.meta & wire::CONFINED != 0).then(|| {
             Bounds::new(
@@ -255,6 +265,7 @@ impl Member<'_> {
     /// One cell for both halves of a member's part in the scene: [`draw`](World::draw) draws the
     /// member from it and [`step`](World::step) steps it by the flags on it, so what is drawn and
     /// what is met can never be two different sprites.
+    #[inline]
     pub fn sprite(&self) -> Option<SpriteId> {
         match self.record.sprite {
             wire::UNWORN => None,
@@ -267,6 +278,7 @@ impl Member<'_> {
     ///
     /// `None` is a member that goes by the scene's word, whatever
     /// [`with_solid`](World::with_solid) declared it to be.
+    #[inline]
     pub fn solid(&self) -> Option<BitFlags<SpriteFlag>> {
         self.own_solid.then(|| {
             BitFlags::from_bits(self.record.solid)
@@ -275,17 +287,20 @@ impl Member<'_> {
     }
 
     /// Which flags the member cares to be told about — see [`MemberBuilder::heeding`].
+    #[inline]
     pub fn heeds(&self) -> BitFlags<SpriteFlag> {
         BitFlags::from_bits(self.record.heeds).expect("a seat's heeds was written from real flags")
     }
 
     /// What the member weighs — see [`MemberBuilder::weighing`].
+    #[inline]
     pub fn mass(&self) -> f32 {
         self.mass
     }
 
     /// Which way round the member is drawn: mirrored across, and mirrored up and down — see
     /// [`MemberBuilder::flipped`].
+    #[inline]
     pub fn flip(&self) -> (bool, bool) {
         (
             self.record.meta & wire::FLIP_X != 0,
@@ -294,11 +309,13 @@ impl Member<'_> {
     }
 
     /// How many cells the member is drawn from, across and down — see [`MemberBuilder::spanning`].
+    #[inline]
     pub fn span(&self) -> (u8, u8) {
         ((self.record.span & 0x0f) + 1, (self.record.span >> 4) + 1)
     }
 
     /// Whether the member is left off the screen — see [`MemberBuilder::hidden`].
+    #[inline]
     pub fn hidden(&self) -> bool {
         self.record.meta & wire::HIDDEN != 0
     }
@@ -353,74 +370,89 @@ pub struct MemberMut<'a> {
     pub(super) scene_solid: BitFlags<SpriteFlag>,
 }
 
+// Inlined throughout, for the reason given at `impl Member`.
 impl MemberMut<'_> {
     /// The [`MemberId`] this member was borrowed with — see [`Member::id`].
+    #[inline]
     pub fn id(&self) -> MemberId {
         self.read().id()
     }
 
     /// Where the member is — see [`Member::pos`].
+    #[inline]
     pub fn pos(&self) -> (f32, f32) {
         self.read().pos()
     }
 
     /// The coherent pixel the member draws at — see [`Member::draw_pos`].
+    #[inline]
     pub fn draw_pos(&self) -> (i16, i16) {
         self.read().draw_pos()
     }
 
     /// What the member is travelling at — see [`Member::velocity`].
+    #[inline]
     pub fn velocity(&self) -> Velocity {
         self.read().velocity()
     }
 
     /// What the member's last step ran into — see [`Member::contacts`].
+    #[inline]
     pub fn contacts(&self) -> Contacts {
         self.read().contacts()
     }
 
     /// The rectangle the member covers — see [`Member::bounds`].
+    #[inline]
     pub fn bounds(&self) -> Bounds {
         self.read().bounds()
     }
 
     /// The rectangle the member may not leave, if it named one — see [`Member::confines`].
+    #[inline]
     pub fn confines(&self) -> Option<Bounds> {
         self.read().confines()
     }
 
     /// The cell the member wears, if any — see [`Member::sprite`].
+    #[inline]
     pub fn sprite(&self) -> Option<SpriteId> {
         self.read().sprite()
     }
 
     /// The member's own answer to what means *wall* to it, where it gave one — see
     /// [`Member::solid`].
+    #[inline]
     pub fn solid(&self) -> Option<BitFlags<SpriteFlag>> {
         self.read().solid()
     }
 
     /// Which flags the member cares to be told about — see [`Member::heeds`].
+    #[inline]
     pub fn heeds(&self) -> BitFlags<SpriteFlag> {
         self.read().heeds()
     }
 
     /// What the member weighs — see [`Member::mass`].
+    #[inline]
     pub fn mass(&self) -> f32 {
         self.read().mass()
     }
 
     /// Which way round the member is drawn — see [`Member::flip`].
+    #[inline]
     pub fn flip(&self) -> (bool, bool) {
         self.read().flip()
     }
 
     /// How many cells the member is drawn from, across and down — see [`Member::span`].
+    #[inline]
     pub fn span(&self) -> (u8, u8) {
         self.read().span()
     }
 
     /// Whether the member is left off the screen — see [`Member::hidden`].
+    #[inline]
     pub fn hidden(&self) -> bool {
         self.read().hidden()
     }
@@ -435,6 +467,7 @@ impl MemberMut<'_> {
     /// Ordinary movement is not this. A member is moved by having a velocity
     /// ([`set_velocity`](Self::set_velocity)) and being stepped: that is what is stopped by walls,
     /// held inside limits and reported in contacts, and none of it happens here.
+    #[inline]
     pub fn set_pos(&mut self, x: f32, y: f32) {
         (self.record.x, self.record.y) = (x, y);
         (self.record.rx, self.record.ry) = (floor_i16(x), floor_i16(y));
@@ -446,6 +479,7 @@ impl MemberMut<'_> {
     /// Where the buttons, the patrol and the jump all end up. It is written before
     /// [`step`](World::step), which is what turns it into movement — and written afresh every
     /// update by anything that leans on a wall, since the step spends the speed that ran into one.
+    #[inline]
     pub fn set_velocity(&mut self, velocity: Velocity) {
         (self.record.dx, self.record.dy) = (velocity.dx, velocity.dy);
     }
@@ -455,12 +489,14 @@ impl MemberMut<'_> {
     /// For a hitbox that follows the animation — a crouch, a blast that grows, a hurtbox switched
     /// off by giving it no size at all, which is a member nothing resolves and everything lets
     /// through. Where the rectangle sits on the body is [`set_offset`](Self::set_offset).
+    #[inline]
     pub fn resize(&mut self, width: u16, height: u16) {
         (self.record.bw, self.record.bh) = (width, height);
     }
 
     /// Sets where the member's rectangle sits relative to the pixel it draws at — see
     /// [`MemberBuilder::offset`].
+    #[inline]
     pub fn set_offset(&mut self, dx: i16, dy: i16) {
         *self.offset = (dx, dy);
         (self.record.bx, self.record.by) = corner((self.record.rx, self.record.ry), (dx, dy));
@@ -471,6 +507,7 @@ impl MemberMut<'_> {
     ///
     /// The room the player has just walked into, an arena closing in, a level that grows. `None`
     /// is a member let go: free to walk off the map, which is what a bullet or a spent enemy wants.
+    #[inline]
     pub fn set_confines(&mut self, confines: Option<Bounds>) {
         match confines {
             Some(limits) => {
@@ -488,6 +525,7 @@ impl MemberMut<'_> {
     /// the step. Cells carrying the same flags change how the member looks and nothing about what
     /// everybody meets, which is what a walk cycle wants; a badie that turns into a puff of smoke
     /// changes both.
+    #[inline]
     pub fn set_sprite(&mut self, sprite: Option<SpriteId>) {
         self.record.sprite = match sprite {
             Some(sprite) => sprite.0 as u16,
@@ -500,6 +538,7 @@ impl MemberMut<'_> {
     ///
     /// `None` is the scene's word as it stands now ([`with_solid`](World::with_solid)), and the
     /// member follows it from here on.
+    #[inline]
     pub fn set_solid(&mut self, solid: Option<BitFlags<SpriteFlag>>) {
         let slot = self.id.seat();
         let word = match solid {
@@ -516,11 +555,13 @@ impl MemberMut<'_> {
     }
 
     /// Sets which flags the member cares to be told about — see [`MemberBuilder::heeding`].
+    #[inline]
     pub fn set_heeds(&mut self, heeds: impl Into<BitFlags<SpriteFlag>>) {
         self.record.heeds = heeds.into().bits();
     }
 
     /// Sets what the member weighs: a crate that fills with water, a ship that burns its fuel off.
+    #[inline]
     pub fn set_mass(&mut self, mass: f32) {
         *self.mass = mass;
     }
@@ -529,6 +570,7 @@ impl MemberMut<'_> {
     ///
     /// The walker turning round: written in the update that turned it, beside the velocity that
     /// sends it back the way it came.
+    #[inline]
     pub fn set_flip(&mut self, flip_x: bool, flip_y: bool) {
         self.record.meta = mirrored(self.record.meta, flip_x, flip_y);
     }
@@ -540,6 +582,7 @@ impl MemberMut<'_> {
     /// cell taller. It is the look alone — the rectangle the member is met by is
     /// [`resize`](Self::resize)'s, if it changes at all — and a block no sheet holds panics here as
     /// it does in [`spanning`](MemberBuilder::spanning).
+    #[inline]
     pub fn set_span(&mut self, width: u8, height: u8) {
         self.record.span = span_byte(width, height);
     }
@@ -548,6 +591,7 @@ impl MemberMut<'_> {
     ///
     /// The blink: a hero flickering through the frames after a hit is hidden on every other one
     /// of them, and stepped, met and told on all of them alike.
+    #[inline]
     pub fn set_hidden(&mut self, hidden: bool) {
         if hidden {
             self.record.meta |= wire::HIDDEN;
@@ -569,6 +613,7 @@ impl MemberMut<'_> {
     ///
     /// Retiring a member twice, or asking the world to borrow it afterwards, is a bug in the cart
     /// and panics saying so.
+    #[inline]
     pub fn retire(self) {
         let slot = self.id.seat();
         *self.seated &= !(1 << slot);
@@ -580,6 +625,7 @@ impl MemberMut<'_> {
     }
 
     /// This member, read rather than changed — what every getter above answers through.
+    #[inline]
     fn read(&self) -> Member<'_> {
         Member {
             id: self.id,
