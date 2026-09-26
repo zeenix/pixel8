@@ -1,4 +1,7 @@
-//! The handle a cart keeps: which seat in the cast, and which occupancy of it.
+//! The handle a cart keeps — which seat in the cast, and which occupancy of it — and the two
+//! views the world lends out for it: one to read the seat, one to change it.
+
+use core::fmt;
 
 use super::{
     wire,
@@ -7,20 +10,20 @@ use super::{
 };
 use crate::{motion::floor_i16, BitFlags, SpriteFlag, SpriteId};
 
-/// One member of a [`World`](super::World)'s cast: a seat, and the right to ask about whoever is
-/// in it.
+/// One member of a [`World`](super::World)'s cast: a seat, and the right to ask the world to
+/// borrow whoever is in it.
 ///
 /// What [`MemberBuilder::enlist`] hands back and the cart keeps beside its own game data.
 /// Two bytes, [`Copy`], and nothing else: the position, the velocity, the rectangle, the contacts
-/// and the look are all the world's, and every one of them is asked of the handle, handed the
-/// world it was enlisted into to reach them — `hero.pos(&world)`, `hero.contacts(&world)`,
-/// `hero.set_velocity(&mut world, v)`.
+/// and the look are all the world's, and every one of them is asked of the seat this id names,
+/// borrowed from the world it was enlisted into — [`world.member(hero)`](World::member) to read
+/// it, [`world.member_mut(hero)`](World::member_mut) to change it.
 ///
 /// ```no_run
-/// # use pixel8::physics::{Member, World};
+/// # use pixel8::physics::{Member, MemberId, World};
 /// struct Hero {
 ///     /// Where the hero is, how fast, and what it last ran into: all of it the world's.
-///     member: Member,
+///     member: MemberId,
 ///     /// And what is the cart's own, which the world has never heard of.
 ///     coins: u16,
 /// }
@@ -33,33 +36,34 @@ use crate::{motion::floor_i16, BitFlags, SpriteFlag, SpriteId};
 /// # Some(hero) }
 /// ```
 ///
-/// A member is only ever as good as its seat. [`retire`](Self::retire) empties the seat and the
-/// handle to it goes stale on the spot: asking the world anything with a stale one is a bug in the
-/// cart, and it is answered with a panic naming the seat rather than with somebody else's
-/// position. A cart that would rather ask than know asks [`seated`](Self::seated).
+/// A member is only ever as good as its seat. [`retire`](MemberMut::retire) empties the seat and
+/// the id to it goes stale on the spot: asking the world to borrow anything with a stale one is a
+/// bug in the cart, and it is answered with a panic naming the seat rather than with somebody
+/// else's position. A cart that would rather ask than know asks
+/// [`get_member`](World::get_member).
 ///
-/// Handles are the world's own: one from a different [`World`] means the seat of that number in
+/// Ids are the world's own: one from a different [`World`] means the seat of that number in
 /// *this* one, which is a member the cart never meant. Carts with two scenes going at once keep
-/// their handles with the world they came from.
+/// their ids with the world they came from.
 ///
 /// The occupancy is a byte, so a seat let for the two hundred and fifty-seventh time comes round to
-/// a number it has used before, and a handle kept unasked-about across all of them would answer for
+/// a number it has used before, and an id kept unasked-about across all of them would answer for
 /// whoever holds the seat now. Which is a way of saying: retire a member and forget it, the way a
 /// cart does anyway.
 ///
 /// [`World`]: super::World
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[must_use = "a seat with no handle kept to it can never be retired"]
-pub struct Member {
+#[must_use = "a seat with no id kept to it can never be retired"]
+pub struct MemberId {
     /// Which of the world's `N` seats.
     pub(super) slot: u8,
-    /// Which occupancy of it: bumped every time the seat is emptied, so a handle to a member that
-    /// has left can be told from a handle to whoever was seated there next.
+    /// Which occupancy of it: bumped every time the seat is emptied, so an id to a member that
+    /// has left can be told from an id to whoever was seated there next.
     pub(super) generation: u8,
 }
 
-impl Member {
-    /// A handle to nobody: what a cart's state holds for somebody not yet enlisted.
+impl MemberId {
+    /// An id for nobody: what a cart's state holds for somebody not yet enlisted.
     ///
     /// The seat it names is past the sixty-four the wire carries, so no world has it and no
     /// [`enlist`](MemberBuilder::enlist) can ever hand it out. It is a `const`, which is the whole
@@ -67,20 +71,20 @@ impl Member {
     /// down as constants and gives them their seats in [`Game::boot`](crate::Game::boot), and this
     /// is what they hold until it does.
     ///
-    /// Asking the world anything with it is the same bug as asking with a retired handle, and
-    /// panics the same way — an actor that was never seated is not standing anywhere.
+    /// Asking the world to borrow anything with it is the same bug as asking with a retired id,
+    /// and panics the same way — an actor that was never seated is not standing anywhere.
     ///
     /// ```no_run
-    /// # use pixel8::physics::Member;
+    /// # use pixel8::physics::MemberId;
     /// struct Hero {
-    ///     member: Member,
+    ///     member: MemberId,
     ///     coins: u16,
     /// }
     ///
     /// impl Hero {
     ///     /// The hero as the cart ships: everything about it but a seat.
     ///     const fn waiting() -> Self {
-    ///         Self { member: Member::NOBODY, coins: 0 }
+    ///         Self { member: MemberId::NOBODY, coins: 0 }
     ///     }
     /// }
     /// ```
@@ -89,6 +93,34 @@ impl Member {
         generation: 0,
     };
 
+    /// Which seat of the cast this is, counting from zero.
+    ///
+    /// The stepping order is seat order — see [`enlist`](MemberBuilder::enlist) — so this is
+    /// the one thing a cart can read off an id: who moves before whom.
+    pub const fn seat(self) -> usize {
+        self.slot as usize
+    }
+}
+
+/// A member borrowed from its world, to be read.
+///
+/// What [`World::member`] and [`World::get_member`] hand back: the seat's whole story, without a
+/// call back to the world for each question asked of it. Borrowed shared, so a cart may hold as
+/// many of these at once as it has questions — a stomp told from a ram by comparing two members'
+/// [`bounds`](Self::bounds).
+#[derive(Clone, Copy)]
+pub struct Member<'a> {
+    /// The id the member was borrowed with.
+    pub(super) id: MemberId,
+    /// The seat's record: everything the step and the draw read of the member.
+    pub(super) record: &'a wire::Record,
+    /// What the member weighs, which never crosses the wire and so is kept beside the record.
+    pub(super) mass: f32,
+    /// Whether what means *wall* to the member is a rule of its own rather than the scene's.
+    pub(super) own_solid: bool,
+}
+
+impl Member<'_> {
     /// Describes a member `width` x `height` pixels at (`x`, `y`), covering that rectangle from
     /// the pixel it will draw at, and hands back the [`MemberBuilder`] the rest of it is
     /// described through.
@@ -102,7 +134,7 @@ impl Member {
     /// scene calls solid, told about everything it meets, free to walk off the map and of the
     /// weight nobody has to think about. [`MemberBuilder`]'s own builders say the rest, and
     /// [`enlist`](MemberBuilder::enlist) closes the description, seats it in a world and hands
-    /// over the handle the cart asks about the seat with.
+    /// over the id the cart asks the world about the seat with.
     ///
     /// ```no_run
     /// # use pixel8::physics::{Member, World};
@@ -135,61 +167,18 @@ impl Member {
         }
     }
 
-    /// Which seat of the cast this is, counting from zero.
-    ///
-    /// The stepping order is seat order — see [`enlist`](MemberBuilder::enlist) — so this is
-    /// the one thing a cart can read off a handle: who moves before whom.
-    pub const fn seat(self) -> usize {
-        self.slot as usize
-    }
-
-    /// Empties the member's seat: it leaves the cast, and the handle to it goes stale on the spot.
-    ///
-    /// What a cart does with a bullet that has left the screen, a badie that has been stomped, an
-    /// explosion that has burned out. The seat is the next one [`enlist`](MemberBuilder::enlist)
-    /// fills, and until it is filled it is nothing to anybody — the step carries it as a prop
-    /// covering no pixels, which nothing meets and no force reaches.
-    ///
-    /// The member is gone the moment this returns, so the meeting it died of has already been
-    /// reported to whoever it met: the whole cast is stepped where it stands, and nothing is
-    /// waiting on a picture of it.
-    ///
-    /// Retiring a member twice, or asking the world anything with its handle afterwards, is a bug
-    /// in the cart and panics saying so.
-    pub fn retire<const N: usize, F>(self, world: &mut World<N, F>)
-    where
-        F: Force,
-    {
-        let slot = world.seat(self);
-        world.vacate(slot);
-        // The seat is let again to somebody else, and the handle to whoever has just left it must
-        // not answer for them.
-        world.generations[slot] = world.generations[slot].wrapping_add(1);
-    }
-
-    /// Whether the member is still in the cast.
-    ///
-    /// The question to ask instead of finding out the hard way: everything else here panics on a
-    /// handle whose member has [retired](Self::retire), because a stale handle is a cart holding on
-    /// to somebody who left. A cart that would rather ask than know asks here.
-    pub fn seated<const N: usize, F>(self, world: &World<N, F>) -> bool
-    where
-        F: Force,
-    {
-        world.holds(self)
+    /// The [`MemberId`] this member was borrowed with — what the cart keeps to ask the world for
+    /// it again.
+    pub fn id(&self) -> MemberId {
+        self.id
     }
 
     /// Where the member is: its exact sub-pixel position.
     ///
     /// The truth for a cart's own arithmetic — which tile it is over, how far it is from something.
     /// What to *draw* at is [`draw_pos`](Self::draw_pos).
-    pub fn pos<const N: usize, F>(self, world: &World<N, F>) -> (f32, f32)
-    where
-        F: Force,
-    {
-        let record = &world.records[world.seat(self)];
-
-        (record.x, record.y)
+    pub fn pos(&self) -> (f32, f32) {
+        (self.record.x, self.record.y)
     }
 
     /// The coherent pixel the member draws at.
@@ -199,61 +188,16 @@ impl Member {
     /// head. It is [`Body`](crate::Body)'s phase-coherent pixel — a sub-pixel diagonal climbs a
     /// clean staircase through it instead of shimmering — and the step keeps it coherent across the
     /// wire, so a running jump climbs that same staircase in the console.
-    pub fn draw_pos<const N: usize, F>(self, world: &World<N, F>) -> (i16, i16)
-    where
-        F: Force,
-    {
-        let record = &world.records[world.seat(self)];
-
-        (record.rx, record.ry)
-    }
-
-    /// Puts the member at (`x`, `y`) — a teleport, not a movement.
-    ///
-    /// The drawn pixel is re-snapped to the floor of the new position rather than eased towards it,
-    /// because this is a jump: a respawn, a room the player has walked into, the rails a
-    /// [prop](MemberBuilder::prop) is driven along. The rectangle goes with it, keeping whatever
-    /// [offset](MemberBuilder::offset) it was given.
-    ///
-    /// Ordinary movement is not this. A member is moved by having a velocity
-    /// ([`set_velocity`](Self::set_velocity)) and being stepped: that is what is stopped by walls,
-    /// held inside limits and reported in contacts, and none of it happens here.
-    pub fn set_pos<const N: usize, F>(self, world: &mut World<N, F>, x: f32, y: f32)
-    where
-        F: Force,
-    {
-        let slot = world.seat(self);
-        let offset = world.offsets[slot];
-        let record = &mut world.records[slot];
-        (record.x, record.y) = (x, y);
-        (record.rx, record.ry) = (floor_i16(x), floor_i16(y));
-        (record.bx, record.by) = corner((record.rx, record.ry), offset);
+    pub fn draw_pos(&self) -> (i16, i16) {
+        (self.record.rx, self.record.ry)
     }
 
     /// What the member is travelling at, in pixels per update.
     ///
     /// After a step, what survived it: an axis that ran into something has been spent, so a fall
     /// that landed reads zero and something that walked into a wall is not still walking.
-    pub fn velocity<const N: usize, F>(self, world: &World<N, F>) -> Velocity
-    where
-        F: Force,
-    {
-        let record = &world.records[world.seat(self)];
-
-        Velocity::new(record.dx, record.dy)
-    }
-
-    /// Sets what the member is travelling at: what the cart means it to do this update.
-    ///
-    /// Where the buttons, the patrol and the jump all end up. It is written before
-    /// [`step`](World::step), which is what turns it into movement — and written afresh every
-    /// update by anything that leans on a wall, since the step spends the speed that ran into one.
-    pub fn set_velocity<const N: usize, F>(self, world: &mut World<N, F>, velocity: Velocity)
-    where
-        F: Force,
-    {
-        let record = &mut world.records[world.seat(self)];
-        (record.dx, record.dy) = (velocity.dx, velocity.dy);
+    pub fn velocity(&self) -> Velocity {
+        Velocity::new(self.record.dx, self.record.dy)
     }
 
     /// What the member's last step ran into: the sides it was stopped at, and the flags of
@@ -263,13 +207,8 @@ impl Member {
     /// the bottom of the level, on a floor tile and on a moving platform reads all three the same
     /// way. A [prop](MemberBuilder::prop) is never given contacts: the cart drives it, and there
     /// is nobody home to tell.
-    pub fn contacts<const N: usize, F>(self, world: &World<N, F>) -> Contacts
-    where
-        F: Force,
-    {
-        let record = &world.records[world.seat(self)];
-
-        Contacts::from_wire(record.sides, record.touched)
+    pub fn contacts(&self) -> Contacts {
+        Contacts::from_wire(self.record.sides, self.record.touched)
     }
 
     /// The rectangle the member covers, where it now stands.
@@ -283,76 +222,32 @@ impl Member {
     /// world has just moved.
     ///
     /// ```no_run
-    /// # use pixel8::physics::{Member, World};
-    /// # fn f(world: &World<4>, hero: Member, badie: Member) -> bool {
+    /// # use pixel8::physics::{MemberId, World};
+    /// # fn f(world: &World<4>, hero: MemberId, badie: MemberId) -> bool {
     /// // Level with the badie is a ram; anything else is the hero coming down on it.
-    /// hero.bounds(world).y() == badie.bounds(world).y()
+    /// world.member(hero).bounds().y() == world.member(badie).bounds().y()
     /// # }
     /// ```
-    pub fn bounds<const N: usize, F>(self, world: &World<N, F>) -> Bounds
-    where
-        F: Force,
-    {
-        let record = &world.records[world.seat(self)];
-
-        Bounds::new(record.bx, record.by, record.bw, record.bh)
-    }
-
-    /// Sets how big the member's rectangle is.
-    ///
-    /// For a hitbox that follows the animation — a crouch, a blast that grows, a hurtbox switched
-    /// off by giving it no size at all, which is a member nothing resolves and everything lets
-    /// through. Where the rectangle sits on the body is [`set_offset`](Self::set_offset).
-    pub fn resize<const N: usize, F>(self, world: &mut World<N, F>, width: u16, height: u16)
-    where
-        F: Force,
-    {
-        let record = &mut world.records[world.seat(self)];
-        (record.bw, record.bh) = (width, height);
-    }
-
-    /// Sets where the member's rectangle sits relative to the pixel it draws at — see
-    /// [`MemberBuilder::offset`].
-    pub fn set_offset<const N: usize, F>(self, world: &mut World<N, F>, dx: i16, dy: i16)
-    where
-        F: Force,
-    {
-        let slot = world.seat(self);
-        world.offsets[slot] = (dx, dy);
-        let record = &mut world.records[slot];
-        (record.bx, record.by) = corner((record.rx, record.ry), (dx, dy));
+    pub fn bounds(&self) -> Bounds {
+        Bounds::new(
+            self.record.bx,
+            self.record.by,
+            self.record.bw,
+            self.record.bh,
+        )
     }
 
     /// The rectangle the member may not leave, if it named one — see
     /// [`MemberBuilder::confined_to`].
-    pub fn confines<const N: usize, F>(self, world: &World<N, F>) -> Option<Bounds>
-    where
-        F: Force,
-    {
-        let record = &world.records[world.seat(self)];
-
-        (record.meta & wire::CONFINED != 0)
-            .then(|| Bounds::new(record.cx, record.cy, record.cw, record.ch))
-    }
-
-    /// Sets the rectangle the member may not leave, or takes its limits away — see
-    /// [`MemberBuilder::confined_to`].
-    ///
-    /// The room the player has just walked into, an arena closing in, a level that grows. `None`
-    /// is a member let go: free to walk off the map, which is what a bullet or a spent enemy wants.
-    pub fn set_confines<const N: usize, F>(self, world: &mut World<N, F>, confines: Option<Bounds>)
-    where
-        F: Force,
-    {
-        let record = &mut world.records[world.seat(self)];
-        match confines {
-            Some(limits) => {
-                record.meta |= wire::CONFINED;
-                (record.cx, record.cy) = (limits.x(), limits.y());
-                (record.cw, record.ch) = (limits.width(), limits.height());
-            }
-            None => record.meta &= !wire::CONFINED,
-        }
+    pub fn confines(&self) -> Option<Bounds> {
+        (self.record.meta & wire::CONFINED != 0).then(|| {
+            Bounds::new(
+                self.record.cx,
+                self.record.cy,
+                self.record.cw,
+                self.record.ch,
+            )
+        })
     }
 
     /// The cell the member wears, if any — see [`MemberBuilder::wearing`].
@@ -360,14 +255,230 @@ impl Member {
     /// One cell for both halves of a member's part in the scene: [`draw`](World::draw) draws the
     /// member from it and [`step`](World::step) steps it by the flags on it, so what is drawn and
     /// what is met can never be two different sprites.
-    pub fn sprite<const N: usize, F>(self, world: &World<N, F>) -> Option<SpriteId>
-    where
-        F: Force,
-    {
-        let record = &world.records[world.seat(self)];
-        match record.sprite {
+    pub fn sprite(&self) -> Option<SpriteId> {
+        match self.record.sprite {
             wire::UNWORN => None,
             id => Some(SpriteId(id as u8)),
+        }
+    }
+
+    /// The member's own answer to what means *wall* to it, where it gave one — see
+    /// [`MemberBuilder::stopped_by`].
+    ///
+    /// `None` is a member that goes by the scene's word, whatever
+    /// [`with_solid`](World::with_solid) declared it to be.
+    pub fn solid(&self) -> Option<BitFlags<SpriteFlag>> {
+        self.own_solid.then(|| {
+            BitFlags::from_bits(self.record.solid)
+                .expect("a seat's solid was written from real flags")
+        })
+    }
+
+    /// Which flags the member cares to be told about — see [`MemberBuilder::heeding`].
+    pub fn heeds(&self) -> BitFlags<SpriteFlag> {
+        BitFlags::from_bits(self.record.heeds).expect("a seat's heeds was written from real flags")
+    }
+
+    /// What the member weighs — see [`MemberBuilder::weighing`].
+    pub fn mass(&self) -> f32 {
+        self.mass
+    }
+
+    /// Which way round the member is drawn: mirrored across, and mirrored up and down — see
+    /// [`MemberBuilder::flipped`].
+    pub fn flip(&self) -> (bool, bool) {
+        (
+            self.record.meta & wire::FLIP_X != 0,
+            self.record.meta & wire::FLIP_Y != 0,
+        )
+    }
+
+    /// How many cells the member is drawn from, across and down — see [`MemberBuilder::spanning`].
+    pub fn span(&self) -> (u8, u8) {
+        ((self.record.span & 0x0f) + 1, (self.record.span >> 4) + 1)
+    }
+
+    /// Whether the member is left off the screen — see [`MemberBuilder::hidden`].
+    pub fn hidden(&self) -> bool {
+        self.record.meta & wire::HIDDEN != 0
+    }
+}
+
+/// Everything the member's getters answer, in their order, and whether it is a
+/// [prop](MemberBuilder::prop).
+impl fmt::Debug for Member<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Member")
+            .field("id", &self.id)
+            .field("pos", &self.pos())
+            .field("draw_pos", &self.draw_pos())
+            .field("velocity", &self.velocity())
+            .field("contacts", &self.contacts())
+            .field("bounds", &self.bounds())
+            .field("confines", &self.confines())
+            .field("sprite", &self.sprite())
+            .field("solid", &self.solid())
+            .field("heeds", &self.heeds())
+            .field("mass", &self.mass())
+            .field("flip", &self.flip())
+            .field("span", &self.span())
+            .field("hidden", &self.hidden())
+            .field("prop", &(self.record.meta & wire::PROP != 0))
+            .finish()
+    }
+}
+
+/// A member borrowed from its world, to be changed.
+///
+/// What [`World::member_mut`] and [`World::get_member_mut`] hand back: every setter a cart might
+/// write into the seat, and [`retire`](Self::retire) to empty it. Borrowed exclusively, so it is
+/// held for the few lines that change one member and let go before the world
+/// [steps](World::step) or another member is borrowed.
+pub struct MemberMut<'a> {
+    /// The id the member was borrowed with, and so the seat whose bit is its own in the words.
+    pub(super) id: MemberId,
+    /// The seat's record: everything the step and the draw read of the member.
+    pub(super) record: &'a mut wire::Record,
+    /// What the member weighs.
+    pub(super) mass: &'a mut f32,
+    /// Where the member's rectangle sits relative to the pixel it draws at.
+    pub(super) offset: &'a mut (i16, i16),
+    /// The world's word of which seats are taken, a bit apiece.
+    pub(super) seated: &'a mut u64,
+    /// The world's word of which members answered what is solid with a rule of their own.
+    pub(super) own_solid: &'a mut u64,
+    /// How many times the seat has been emptied.
+    pub(super) generation: &'a mut u8,
+    /// The scene's word for *wall*, which a member handed back to it goes by.
+    pub(super) scene_solid: BitFlags<SpriteFlag>,
+}
+
+impl MemberMut<'_> {
+    /// The [`MemberId`] this member was borrowed with — see [`Member::id`].
+    pub fn id(&self) -> MemberId {
+        self.read().id()
+    }
+
+    /// Where the member is — see [`Member::pos`].
+    pub fn pos(&self) -> (f32, f32) {
+        self.read().pos()
+    }
+
+    /// The coherent pixel the member draws at — see [`Member::draw_pos`].
+    pub fn draw_pos(&self) -> (i16, i16) {
+        self.read().draw_pos()
+    }
+
+    /// What the member is travelling at — see [`Member::velocity`].
+    pub fn velocity(&self) -> Velocity {
+        self.read().velocity()
+    }
+
+    /// What the member's last step ran into — see [`Member::contacts`].
+    pub fn contacts(&self) -> Contacts {
+        self.read().contacts()
+    }
+
+    /// The rectangle the member covers — see [`Member::bounds`].
+    pub fn bounds(&self) -> Bounds {
+        self.read().bounds()
+    }
+
+    /// The rectangle the member may not leave, if it named one — see [`Member::confines`].
+    pub fn confines(&self) -> Option<Bounds> {
+        self.read().confines()
+    }
+
+    /// The cell the member wears, if any — see [`Member::sprite`].
+    pub fn sprite(&self) -> Option<SpriteId> {
+        self.read().sprite()
+    }
+
+    /// The member's own answer to what means *wall* to it, where it gave one — see
+    /// [`Member::solid`].
+    pub fn solid(&self) -> Option<BitFlags<SpriteFlag>> {
+        self.read().solid()
+    }
+
+    /// Which flags the member cares to be told about — see [`Member::heeds`].
+    pub fn heeds(&self) -> BitFlags<SpriteFlag> {
+        self.read().heeds()
+    }
+
+    /// What the member weighs — see [`Member::mass`].
+    pub fn mass(&self) -> f32 {
+        self.read().mass()
+    }
+
+    /// Which way round the member is drawn — see [`Member::flip`].
+    pub fn flip(&self) -> (bool, bool) {
+        self.read().flip()
+    }
+
+    /// How many cells the member is drawn from, across and down — see [`Member::span`].
+    pub fn span(&self) -> (u8, u8) {
+        self.read().span()
+    }
+
+    /// Whether the member is left off the screen — see [`Member::hidden`].
+    pub fn hidden(&self) -> bool {
+        self.read().hidden()
+    }
+
+    /// Puts the member at (`x`, `y`) — a teleport, not a movement.
+    ///
+    /// The drawn pixel is re-snapped to the floor of the new position rather than eased towards it,
+    /// because this is a jump: a respawn, a room the player has walked into, the rails a
+    /// [prop](MemberBuilder::prop) is driven along. The rectangle goes with it, keeping whatever
+    /// [offset](MemberBuilder::offset) it was given.
+    ///
+    /// Ordinary movement is not this. A member is moved by having a velocity
+    /// ([`set_velocity`](Self::set_velocity)) and being stepped: that is what is stopped by walls,
+    /// held inside limits and reported in contacts, and none of it happens here.
+    pub fn set_pos(&mut self, x: f32, y: f32) {
+        (self.record.x, self.record.y) = (x, y);
+        (self.record.rx, self.record.ry) = (floor_i16(x), floor_i16(y));
+        (self.record.bx, self.record.by) = corner((self.record.rx, self.record.ry), *self.offset);
+    }
+
+    /// Sets what the member is travelling at: what the cart means it to do this update.
+    ///
+    /// Where the buttons, the patrol and the jump all end up. It is written before
+    /// [`step`](World::step), which is what turns it into movement — and written afresh every
+    /// update by anything that leans on a wall, since the step spends the speed that ran into one.
+    pub fn set_velocity(&mut self, velocity: Velocity) {
+        (self.record.dx, self.record.dy) = (velocity.dx, velocity.dy);
+    }
+
+    /// Sets how big the member's rectangle is.
+    ///
+    /// For a hitbox that follows the animation — a crouch, a blast that grows, a hurtbox switched
+    /// off by giving it no size at all, which is a member nothing resolves and everything lets
+    /// through. Where the rectangle sits on the body is [`set_offset`](Self::set_offset).
+    pub fn resize(&mut self, width: u16, height: u16) {
+        (self.record.bw, self.record.bh) = (width, height);
+    }
+
+    /// Sets where the member's rectangle sits relative to the pixel it draws at — see
+    /// [`MemberBuilder::offset`].
+    pub fn set_offset(&mut self, dx: i16, dy: i16) {
+        *self.offset = (dx, dy);
+        (self.record.bx, self.record.by) = corner((self.record.rx, self.record.ry), (dx, dy));
+    }
+
+    /// Sets the rectangle the member may not leave, or takes its limits away — see
+    /// [`MemberBuilder::confined_to`].
+    ///
+    /// The room the player has just walked into, an arena closing in, a level that grows. `None`
+    /// is a member let go: free to walk off the map, which is what a bullet or a spent enemy wants.
+    pub fn set_confines(&mut self, confines: Option<Bounds>) {
+        match confines {
+            Some(limits) => {
+                self.record.meta |= wire::CONFINED;
+                (self.record.cx, self.record.cy) = (limits.x(), limits.y());
+                (self.record.cw, self.record.ch) = (limits.width(), limits.height());
+            }
+            None => self.record.meta &= !wire::CONFINED,
         }
     }
 
@@ -377,48 +488,49 @@ impl Member {
     /// the step. Cells carrying the same flags change how the member looks and nothing about what
     /// everybody meets, which is what a walk cycle wants; a badie that turns into a puff of smoke
     /// changes both.
-    pub fn set_sprite<const N: usize, F>(self, world: &mut World<N, F>, sprite: Option<SpriteId>)
-    where
-        F: Force,
-    {
-        let record = &mut world.records[world.seat(self)];
-        record.sprite = match sprite {
+    pub fn set_sprite(&mut self, sprite: Option<SpriteId>) {
+        self.record.sprite = match sprite {
             Some(sprite) => sprite.0 as u16,
             None => wire::UNWORN,
         };
     }
 
-    /// Which way round the member is drawn: mirrored across, and mirrored up and down — see
-    /// [`MemberBuilder::flipped`].
-    pub fn flip<const N: usize, F>(self, world: &World<N, F>) -> (bool, bool)
-    where
-        F: Force,
-    {
-        let meta = world.records[world.seat(self)].meta;
+    /// Sets what means *wall* to the member, or hands it back to the scene's word — see
+    /// [`MemberBuilder::stopped_by`].
+    ///
+    /// `None` is the scene's word as it stands now ([`with_solid`](World::with_solid)), and the
+    /// member follows it from here on.
+    pub fn set_solid(&mut self, solid: Option<BitFlags<SpriteFlag>>) {
+        let slot = self.id.seat();
+        let word = match solid {
+            Some(solid) => {
+                *self.own_solid |= 1 << slot;
+                solid
+            }
+            None => {
+                *self.own_solid &= !(1 << slot);
+                self.scene_solid
+            }
+        };
+        self.record.solid = word.bits();
+    }
 
-        (meta & wire::FLIP_X != 0, meta & wire::FLIP_Y != 0)
+    /// Sets which flags the member cares to be told about — see [`MemberBuilder::heeding`].
+    pub fn set_heeds(&mut self, heeds: impl Into<BitFlags<SpriteFlag>>) {
+        self.record.heeds = heeds.into().bits();
+    }
+
+    /// Sets what the member weighs: a crate that fills with water, a ship that burns its fuel off.
+    pub fn set_mass(&mut self, mass: f32) {
+        *self.mass = mass;
     }
 
     /// Sets which way round the member is drawn — see [`MemberBuilder::flipped`].
     ///
     /// The walker turning round: written in the update that turned it, beside the velocity that
     /// sends it back the way it came.
-    pub fn set_flip<const N: usize, F>(self, world: &mut World<N, F>, flip_x: bool, flip_y: bool)
-    where
-        F: Force,
-    {
-        let record = &mut world.records[world.seat(self)];
-        record.meta = mirrored(record.meta, flip_x, flip_y);
-    }
-
-    /// How many cells the member is drawn from, across and down — see [`MemberBuilder::spanning`].
-    pub fn span<const N: usize, F>(self, world: &World<N, F>) -> (u8, u8)
-    where
-        F: Force,
-    {
-        let span = world.records[world.seat(self)].span;
-
-        ((span & 0x0f) + 1, (span >> 4) + 1)
+    pub fn set_flip(&mut self, flip_x: bool, flip_y: bool) {
+        self.record.meta = mirrored(self.record.meta, flip_x, flip_y);
     }
 
     /// Sets how many cells the member is drawn from, across and down — see
@@ -428,117 +540,60 @@ impl Member {
     /// cell taller. It is the look alone — the rectangle the member is met by is
     /// [`resize`](Self::resize)'s, if it changes at all — and a block no sheet holds panics here as
     /// it does in [`spanning`](MemberBuilder::spanning).
-    pub fn set_span<const N: usize, F>(self, world: &mut World<N, F>, width: u8, height: u8)
-    where
-        F: Force,
-    {
-        let record = &mut world.records[world.seat(self)];
-        record.span = span_byte(width, height);
-    }
-
-    /// Whether the member is left off the screen — see [`MemberBuilder::hidden`].
-    pub fn hidden<const N: usize, F>(self, world: &World<N, F>) -> bool
-    where
-        F: Force,
-    {
-        world.records[world.seat(self)].meta & wire::HIDDEN != 0
+    pub fn set_span(&mut self, width: u8, height: u8) {
+        self.record.span = span_byte(width, height);
     }
 
     /// Hides the member, or shows it again — see [`MemberBuilder::hidden`].
     ///
     /// The blink: a hero flickering through the frames after a hit is hidden on every other one
     /// of them, and stepped, met and told on all of them alike.
-    pub fn set_hidden<const N: usize, F>(self, world: &mut World<N, F>, hidden: bool)
-    where
-        F: Force,
-    {
-        let record = &mut world.records[world.seat(self)];
+    pub fn set_hidden(&mut self, hidden: bool) {
         if hidden {
-            record.meta |= wire::HIDDEN;
+            self.record.meta |= wire::HIDDEN;
         } else {
-            record.meta &= !wire::HIDDEN;
+            self.record.meta &= !wire::HIDDEN;
         }
     }
 
-    /// The member's own answer to what means *wall* to it, where it gave one — see
-    /// [`MemberBuilder::stopped_by`].
+    /// Empties the member's seat: it leaves the cast, and the id to it goes stale on the spot.
     ///
-    /// `None` is a member that goes by the scene's word, whatever
-    /// [`with_solid`](World::with_solid) declared it to be.
-    pub fn solid<const N: usize, F>(self, world: &World<N, F>) -> Option<BitFlags<SpriteFlag>>
-    where
-        F: Force,
-    {
-        let slot = world.seat(self);
-
-        (world.own_solid & (1 << slot) != 0).then(|| {
-            BitFlags::from_bits(world.records[slot].solid)
-                .expect("a seat's solid was written from real flags")
-        })
-    }
-
-    /// Sets what means *wall* to the member, or hands it back to the scene's word — see
-    /// [`MemberBuilder::stopped_by`].
+    /// What a cart does with a bullet that has left the screen, a badie that has been stomped, an
+    /// explosion that has burned out. The seat is the next one [`enlist`](MemberBuilder::enlist)
+    /// fills, and until it is filled it is nothing to anybody — the step carries it as a prop
+    /// covering no pixels, which nothing meets and no force reaches.
     ///
-    /// `None` is the scene's word as it stands now ([`with_solid`](World::with_solid)), and the
-    /// member follows it from here on.
-    pub fn set_solid<const N: usize, F>(
-        self,
-        world: &mut World<N, F>,
-        solid: Option<BitFlags<SpriteFlag>>,
-    ) where
-        F: Force,
-    {
-        let slot = world.seat(self);
-        let word = match solid {
-            Some(solid) => {
-                world.own_solid |= 1 << slot;
-                solid
-            }
-            None => {
-                world.own_solid &= !(1 << slot);
-                world.solid
-            }
-        };
-        world.records[slot].solid = word.bits();
+    /// The member is gone the moment this returns, so the meeting it died of has already been
+    /// reported to whoever it met: the whole cast is stepped where it stands, and nothing is
+    /// waiting on a picture of it.
+    ///
+    /// Retiring a member twice, or asking the world to borrow it afterwards, is a bug in the cart
+    /// and panics saying so.
+    pub fn retire(self) {
+        let slot = self.id.seat();
+        *self.seated &= !(1 << slot);
+        *self.own_solid &= !(1 << slot);
+        *self.record = wire::VACANT;
+        *self.mass = 1.0;
+        *self.offset = (0, 0);
+        *self.generation = self.generation.wrapping_add(1);
     }
 
-    /// Which flags the member cares to be told about — see [`MemberBuilder::heeding`].
-    pub fn heeds<const N: usize, F>(self, world: &World<N, F>) -> BitFlags<SpriteFlag>
-    where
-        F: Force,
-    {
-        BitFlags::from_bits(world.records[world.seat(self)].heeds)
-            .expect("a seat's heeds was written from real flags")
+    /// This member, read rather than changed — what every getter above answers through.
+    fn read(&self) -> Member<'_> {
+        Member {
+            id: self.id,
+            record: self.record,
+            mass: *self.mass,
+            own_solid: *self.own_solid & (1 << self.id.seat()) != 0,
+        }
     }
+}
 
-    /// Sets which flags the member cares to be told about — see [`MemberBuilder::heeding`].
-    pub fn set_heeds<const N: usize, F>(
-        self,
-        world: &mut World<N, F>,
-        heeds: impl Into<BitFlags<SpriteFlag>>,
-    ) where
-        F: Force,
-    {
-        let record = &mut world.records[world.seat(self)];
-        record.heeds = heeds.into().bits();
-    }
-
-    /// What the member weighs — see [`MemberBuilder::weighing`].
-    pub fn mass<const N: usize, F>(self, world: &World<N, F>) -> f32
-    where
-        F: Force,
-    {
-        world.masses[world.seat(self)]
-    }
-
-    /// Sets what the member weighs: a crate that fills with water, a ship that burns its fuel off.
-    pub fn set_mass<const N: usize, F>(self, world: &mut World<N, F>, mass: f32)
-    where
-        F: Force,
-    {
-        let slot = world.seat(self);
-        world.masses[slot] = mass;
+/// The member as [`Member`] prints it, wrapped in `MemberMut(..)`.
+impl fmt::Debug for MemberMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("MemberMut").field(&self.read()).finish()
     }
 }
 
@@ -550,7 +605,7 @@ impl Member {
 /// solid, told about everything it meets, free to walk off the map and of the weight nobody has
 /// to think about — a whole member already, in everything but a seat. Every builder here says one
 /// more thing about it, and [`enlist`](Self::enlist) closes the description, claims the lowest
-/// empty seat and hands back the [`Member`] handle.
+/// empty seat and hands back the [`MemberId`].
 ///
 /// `Copy`, so one description seats as many members as a cart enlists from it: a gun that fires
 /// the same shot over and over keeps one description and enlists a fresh bullet from it every
@@ -591,8 +646,8 @@ impl MemberBuilder {
     /// The same member, already travelling.
     ///
     /// Standing still is the default, and what most members want: a velocity is written afresh
-    /// every update with [`set_velocity`](Member::set_velocity), out of the buttons or a patrol or
-    /// whatever else the cart is thinking.
+    /// every update with [`set_velocity`](MemberMut::set_velocity), out of the buttons or a patrol
+    /// or whatever else the cart is thinking.
     pub fn moving(mut self, dx: f32, dy: f32) -> Self {
         (self.record.dx, self.record.dy) = (dx, dy);
 
@@ -615,7 +670,7 @@ impl MemberBuilder {
     /// Wearing nothing — the default — is a member nobody is stopped by, nobody is told about, and
     /// nobody sees. It is still stopped by everything, and still told everything: a sensor needs no
     /// flag of its own. A member whose look changes with its state changes what it wears with
-    /// [`set_sprite`](Member::set_sprite); two walk-cycle cells carrying the same flag change
+    /// [`set_sprite`](MemberMut::set_sprite); two walk-cycle cells carrying the same flag change
     /// nothing anybody meets, which is the usual case.
     pub fn wearing(mut self, sprite: SpriteId) -> Self {
         self.record.sprite = sprite.0 as u16;
@@ -628,7 +683,7 @@ impl MemberBuilder {
     /// Which way a member faces is part of how it looks, and the world [draws](World::draw) it
     /// that way. Nothing about the step reads it: the rectangle stays where it is, and the flags
     /// everybody else meets are the worn cell's either way round. A member that turns as it walks
-    /// turns with [`set_flip`](Member::set_flip), in the update that turned it.
+    /// turns with [`set_flip`](MemberMut::set_flip), in the update that turned it.
     pub fn flipped(mut self, flip_x: bool, flip_y: bool) -> Self {
         self.record.meta = mirrored(self.record.meta, flip_x, flip_y);
 
@@ -721,7 +776,7 @@ impl MemberBuilder {
     /// Saying nothing — the default — is a member free to leave, which is what a bullet or a spent
     /// enemy wants: it walks off the map, and the cart retires it when
     /// [`Bounds::on_screen`](super::Bounds::on_screen) says it has gone. A room the player walks
-    /// into changes the limits with [`set_confines`](Member::set_confines).
+    /// into changes the limits with [`set_confines`](MemberMut::set_confines).
     pub fn confined_to(mut self, confines: Bounds) -> Self {
         self.record.meta |= wire::CONFINED;
         (self.record.cx, self.record.cy) = (confines.x(), confines.y());
@@ -750,10 +805,10 @@ impl MemberBuilder {
     /// A prop stands in everybody's way exactly as any member does — the rectangle it covers and
     /// the flags on the cell it wears — and is otherwise left alone: no force reaches it, nothing
     /// resolves it, and its contacts are never written. The cart drives it wherever it likes, on
-    /// whatever rails it likes, with [`set_pos`](Member::set_pos) before the world steps. A hazard
-    /// patrolling a fixed beat, a lift on a track, a door: things the world must know about without
-    /// being asked to drive them. It is [drawn](World::draw) like anybody else, wherever the cart
-    /// last put it.
+    /// whatever rails it likes, with [`set_pos`](MemberMut::set_pos) before the world steps. A
+    /// hazard patrolling a fixed beat, a lift on a track, a door: things the world must know about
+    /// without being asked to drive them. It is [drawn](World::draw) like anybody else, wherever
+    /// the cart last put it.
     pub fn prop(mut self) -> Self {
         self.record.meta |= wire::PROP;
 
@@ -766,7 +821,7 @@ impl MemberBuilder {
     /// member is met and never drawn. It is in the cast like anybody else — stepped, stopping
     /// whoever its cell is a wall to, and told what it meets — and [`World::draw`] leaves it off
     /// the screen. An invisible wall, a trigger wearing a flagged cell, a hero blinking through the
-    /// frames after a hit, with [`set_hidden`](Member::set_hidden) on every other one of them.
+    /// frames after a hit, with [`set_hidden`](MemberMut::set_hidden) on every other one of them.
     pub fn hidden(mut self) -> Self {
         self.record.meta |= wire::HIDDEN;
 
@@ -788,18 +843,18 @@ impl MemberBuilder {
 
     /// Closes the description, claims the lowest empty seat of `world`'s cast for it — standing
     /// where it was described to, covering the rectangle it was given, and looking and answering
-    /// exactly as it was told to — and hands back the [`Member`] handle the cart asks about the
-    /// seat with.
+    /// exactly as it was told to — and hands back the [`MemberId`] the cart asks the world about
+    /// the seat with.
     ///
     /// The lowest empty seat, always: a cast seated once, in the order the scene works, keeps that
     /// order — and it is the order the step goes in, so a lift enlisted before its rider carries it
-    /// the same update. A seat freed by [`retire`](Member::retire) is the next one filled.
+    /// the same update. A seat freed by [`retire`](MemberMut::retire) is the next one filled.
     ///
     /// `None` is a full house: all `N` seats are taken, and the scene has to make room before it
     /// can take anybody else on. A cart that spawns as it goes — bullets, sparks — either sizes `N`
     /// for its worst frame or takes `None` as *not this frame*.
-    #[must_use = "a seat with no handle kept to it can never be retired"]
-    pub fn enlist<const N: usize, F>(self, world: &mut World<N, F>) -> Option<Member>
+    #[must_use = "a seat with no id kept to it can never be retired"]
+    pub fn enlist<const N: usize, F>(self, world: &mut World<N, F>) -> Option<MemberId>
     where
         F: Force,
     {

@@ -1,5 +1,5 @@
 use pixel8::{
-    physics::{Bounds, Member},
+    physics::{Bounds, Member, MemberId},
     Button, Context, Graphics, SpriteId, SCREEN_WIDTH,
 };
 
@@ -23,7 +23,7 @@ const START_Y: f32 = 80.0;
 #[derive(Debug)]
 pub struct Hero {
     /// The hero's seat in the scene.
-    member: Member,
+    member: MemberId,
     /// Whether the buttons are asking the hero to walk, which is what the walk cycle is
     /// drawn from. Not the velocity: the step zeroes an axis that ran into a wall, and a
     /// hero leaning on one is still walking as far as the animation is concerned.
@@ -36,7 +36,7 @@ impl Hero {
     /// needs a seat. A constant, so the cart's whole opening state is one.
     pub const fn waiting() -> Self {
         Self {
-            member: Member::NOBODY,
+            member: MemberId::NOBODY,
             walking: false,
             dead: false,
         }
@@ -66,44 +66,45 @@ impl Hero {
     }
 
     /// The hero's seat, for the comparison in `lib.rs` that tells a stomp from a ram.
-    pub fn member(&self) -> Member {
+    pub fn member(&self) -> MemberId {
         self.member
     }
 
     /// Gives the seat back, at the end of a run.
     pub fn retire(&self, scene: &mut Scene) {
-        self.member.retire(scene);
+        scene.member_mut(self.member).retire();
     }
 
     /// Whether the hero is standing on something: floor tiles, and the bottom of the level for a
     /// level not floored across its whole width. This one is, so only the tiles ever answer here.
     pub fn grounded(&self, scene: &Scene) -> bool {
-        self.member.contacts(scene).below()
+        scene.member(self.member).contacts().below()
     }
 
     /// Whether the hero's last step met the badie. `BADIE` is deliberately no wall of the
     /// hero's; what the meeting costs is decided in `lib.rs`, where the badie lives.
     pub fn met_badie(&self, scene: &Scene) -> bool {
-        self.member.contacts(scene).touches(BADIE)
+        scene.member(self.member).contacts().touches(BADIE)
     }
 
     /// What the buttons ask for, written into the hero's velocity before the world runs.
     pub fn steer(&mut self, ctx: &mut Context, scene: &mut Scene) {
-        let mut velocity = self.member.velocity(scene);
+        let mut hero = scene.member_mut(self.member);
+        let mut velocity = hero.velocity();
         // Horizontal movement (pixels per frame), written afresh every update: a wall
         // the step walks into zeroes it, and the buttons put it straight back.
         if ctx.is_button_down(Button::Left) {
             velocity.dx = -HERO_SPEED;
-            self.member.set_flip(scene, true, false);
+            hero.set_flip(true, false);
         } else if ctx.is_button_down(Button::Right) {
             velocity.dx = HERO_SPEED;
-            self.member.set_flip(scene, false, false);
+            hero.set_flip(false, false);
         } else {
             velocity.dx = 0.0;
         }
         // Taken here, from the buttons, rather than from what survives the step.
         self.walking = velocity.dx != 0.0;
-        self.member.set_velocity(scene, velocity);
+        hero.set_velocity(velocity);
 
         // Jump before the world runs, so the push is part of the same update's movement.
         if self.grounded(scene)
@@ -119,7 +120,7 @@ impl Hero {
     /// and a fall fast enough to clear one in a single update would land inside it.
     pub fn pick_up(&mut self, ctx: &mut Context, scene: &Scene) -> Option<Taken> {
         // Coins & trophy: sample the hitbox center.
-        let (x, y) = self.member.pos(scene);
+        let (x, y) = scene.member(self.member).pos();
         let cx = (x as i16 + 4) / 8;
         let cy = (y as i16 + 4) / 8;
         match ctx.map_tile(cx, cy) {
@@ -137,15 +138,17 @@ impl Hero {
     }
 
     pub fn jump(&mut self, ctx: &mut Context, scene: &mut Scene) {
-        let mut velocity = self.member.velocity(scene);
+        let mut hero = scene.member_mut(self.member);
+        let mut velocity = hero.velocity();
         velocity.dy = -3.25;
-        self.member.set_velocity(scene, velocity);
+        hero.set_velocity(velocity);
         ctx.sfx(JUMP_SFX);
     }
 
     // Camera follows the player across the level.
     pub fn center(&self, gfx: &mut Graphics, scene: &Scene) {
-        let cam = (self.member.pos(scene).0 - 60.0).clamp(8.0, (LEVEL_WIDTH - SCREEN_WIDTH) as f32);
+        let x = scene.member(self.member).pos().0;
+        let cam = (x - 60.0).clamp(8.0, (LEVEL_WIDTH - SCREEN_WIDTH) as f32);
         gfx.camera(cam as i16, 0);
     }
 
@@ -160,9 +163,10 @@ impl Hero {
         } else {
             HERO_SPRITE
         };
-        self.member.set_sprite(scene, Some(sprite));
+        let mut hero = scene.member_mut(self.member);
+        hero.set_sprite(Some(sprite));
         // If hero dies, we show them flashing in & out of existence.
-        self.member.set_hidden(scene, self.dead && !is_alt_frame);
+        hero.set_hidden(self.dead && !is_alt_frame);
     }
 
     pub fn die(&mut self) {

@@ -1,4 +1,7 @@
-use pixel8::{physics::Member, BitFlags, SpriteFlag};
+use pixel8::{
+    physics::{Member, MemberId},
+    BitFlags, SpriteFlag,
+};
 
 use crate::{
     constants::{
@@ -11,7 +14,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Badie {
     /// The badie's seat in the scene.
-    member: Member,
+    member: MemberId,
 }
 
 impl Badie {
@@ -32,13 +35,13 @@ impl Badie {
     }
 
     /// The badie's seat: its rectangle is what the hero's ram-or-stomp is told apart by.
-    pub fn member(&self) -> Member {
+    pub fn member(&self) -> MemberId {
         self.member
     }
 
     /// Gives the seat back — stomped, or the run over.
     pub fn retire(self, scene: &mut Scene) {
-        self.member.retire(scene);
+        scene.member_mut(self.member).retire();
     }
 
     /// Our badie patrols horizontally back and forth between two points, turning at each end.
@@ -46,21 +49,22 @@ impl Badie {
     pub fn patrol(&self, scene: &mut Scene) {
         // The badie faces the way it walks; the world's flip is the one copy of that fact,
         // so the patrol reads it back instead of keeping one of its own.
-        let (mut heading_right, _) = self.member.flip(scene);
-        let x = self.member.pos(scene).0;
+        let mut badie = scene.member_mut(self.member);
+        let (mut heading_right, _) = badie.flip();
+        let x = badie.pos().0;
         if x < BADIE_END_X {
             heading_right = true;
         } else if x > BADIE_START_X {
             heading_right = false;
         }
-        self.member.set_flip(scene, heading_right, false);
-        let mut velocity = self.member.velocity(scene);
+        badie.set_flip(heading_right, false);
+        let mut velocity = badie.velocity();
         velocity.dx = if heading_right {
             BADIE_SPEED
         } else {
             -BADIE_SPEED
         };
-        self.member.set_velocity(scene, velocity);
+        badie.set_velocity(velocity);
     }
 
     /// What the badie looks like this frame, written into its seat for the world to draw.
@@ -72,6 +76,6 @@ impl Badie {
             GameMode::InGame { .. } if (frame / 4).is_multiple_of(2) => BADIE_ALT_SPRITE,
             GameMode::Ended { .. } | GameMode::InGame { .. } => BADIE_SPRITE,
         };
-        self.member.set_sprite(scene, Some(sprite));
+        scene.member_mut(self.member).set_sprite(Some(sprite));
     }
 }

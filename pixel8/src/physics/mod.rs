@@ -7,16 +7,17 @@
 //!
 //! A [`World`] *owns* the scene's moving matter. A cart describes each member in turn with
 //! [`Member::builder`] — where this one stands, how big it is, what it wears, what stops it —
-//! [enlists](MemberBuilder::enlist) it into the world, and keeps the [`Member`] handle it gets back
+//! [enlists](MemberBuilder::enlist) it into the world, and keeps the [`MemberId`] it gets back
 //! beside its own game data. Where each member is, how fast, what rectangle it covers and what it
-//! last ran into are the world's, stored once, and asked of the handle, handed the world:
-//! `hero.draw_pos(&world)`, `hero.contacts(&world)`, `hero.set_velocity(&mut world, v)`. Forces act
-//! on velocity, never on position, and no member moves itself. One [`step`](World::step) an update
-//! runs the scene's weather over every velocity, stops whatever ran into the map's tiles or into
-//! the rest of the cast, holds each member inside the rectangle it may not leave, moves the bodies
-//! by what survived, and writes down what everybody met. One call a scene, an update. And one
-//! [`draw`](World::draw) a frame puts the whole cast on screen, where the step left it and looking
-//! the way the update said, so a cart's `draw` is one call and whatever it paints of its own.
+//! last ran into are the world's, stored once, and asked of the member the id names, borrowed from
+//! the world: `world.member(hero).draw_pos()`, `world.member(hero).contacts()`,
+//! `world.member_mut(hero).set_velocity(v)`. Forces act on velocity, never on position, and no
+//! member moves itself. One [`step`](World::step) an update runs the scene's weather over every
+//! velocity, stops whatever ran into the map's tiles or into the rest of the cast, holds each
+//! member inside the rectangle it may not leave, moves the bodies by what survived, and writes down
+//! what everybody met. One call a scene, an update. And one [`draw`](World::draw) a frame puts the
+//! whole cast on screen, where the step left it and looking the way the update said, so a cart's
+//! `draw` is one call and whatever it paints of its own.
 //!
 //! The weather belongs to the scene rather than to the things in it: the same gust that bends the
 //! whole cast is one [`Wind`] the world [owns](World::with_forces), driven where it lives.
@@ -29,7 +30,7 @@
 //!
 //! ```no_run
 //! use pixel8::{
-//!     physics::{Atmosphere, Gravity, Member, Wind, World},
+//!     physics::{Atmosphere, Gravity, Member, MemberId, Wind, World},
 //!     *,
 //! };
 //!
@@ -37,7 +38,7 @@
 //!     // The scene: sixteen seats of leaf, and the whole of the weather they fall through — the
 //!     // pull, the air, and a wind that gusts and so cannot be a constant.
 //!     world: World<16, (Gravity, Atmosphere, Wind)>,
-//!     leaves: [Member; 16],
+//!     leaves: [MemberId; 16],
 //!     // The cart's own, which the world has never heard of: how many leaves the player caught.
 //!     caught: u16,
 //! }
@@ -161,11 +162,11 @@
 //! something that has left the screen altogether.
 //!
 //! ```no_run
-//! # use pixel8::physics::{Bounds, Member, World};
+//! # use pixel8::physics::{Bounds, MemberId, World};
 //! /// A bullet against the doors the level put down once — and nothing at all once it is off
 //! /// screen.
-//! fn hit(world: &World<8>, bullet: Member, doors: &[Bounds]) -> bool {
-//!     let bounds = bullet.bounds(world);
+//! fn hit(world: &World<8>, bullet: MemberId, doors: &[Bounds]) -> bool {
+//!     let bounds = world.member(bullet).bounds();
 //!
 //!     bounds.on_screen() && doors.iter().any(|door| bounds.overlaps(*door))
 //! }
@@ -224,14 +225,14 @@
 //! question. [`World::new`] is unchanged and reads the map as it always has.
 //!
 //! ```no_run
-//! # use pixel8::{physics::{Member, World}, *};
+//! # use pixel8::{physics::{Member, MemberId, World}, *};
 //! # const AIRCRAFT: SpriteFlag = SpriteFlag::Flag0;
 //! # const ENEMY_SHOT: SpriteFlag = SpriteFlag::Flag1;
 //! // The level scrolls past behind the fight; nothing on it is in anybody's way.
 //! const SKY: World<32> = World::mapless();
 //!
 //! // And she is rammed and she is shot, and the rest of the sky is somebody else's business.
-//! # fn f(sky: &mut World<32>) -> Member {
+//! # fn f(sky: &mut World<32>) -> MemberId {
 //! Member::builder(60.0, 100.0, 8, 8)
 //!     .heeding(AIRCRAFT | ENEMY_SHOT)
 //!     .enlist(sky)
@@ -250,11 +251,11 @@
 //! can pass through one — which is exactly why it is there.
 //!
 //! ```no_run
-//! # use pixel8::{physics::{Gravity, Member, World}, *};
+//! # use pixel8::{physics::{Gravity, MemberId, World}, *};
 //! # const WATER: SpriteFlag = SpriteFlag::Flag3;
-//! # fn f(world: &mut World<4, Gravity>, ctx: &Context, hero: Member) {
+//! # fn f(world: &mut World<4, Gravity>, ctx: &Context, hero: MemberId) {
 //! world.step(ctx);
-//! let contacts = hero.contacts(world);
+//! let contacts = world.member(hero).contacts();
 //! let (grounded, swimming) = (contacts.below(), contacts.touches(WATER));
 //! # }
 //! ```
@@ -262,7 +263,7 @@
 //! ## The cast, and the order it is in
 //!
 //! The cast is the world's own: `N` seats, filled by [`enlist`](MemberBuilder::enlist) and emptied
-//! by [`retire`](Member::retire), and nothing to gather at the top of an update. Three things
+//! by [`retire`](MemberMut::retire), and nothing to gather at the top of an update. Three things
 //! follow, and they are the whole of the contract:
 //!
 //! * **Same frame.** Everybody is where they are. A member meets its neighbours at the rectangles
@@ -285,11 +286,11 @@
 //!
 //! And one refinement for the things a cart drives itself: a member that says it is a
 //! [prop](MemberBuilder::prop) is met and never moved. Its rectangle and its flags stand in
-//! everybody's way from wherever the cart last [put](Member::set_pos) it — a hazard patrolling a
-//! fixed beat, a lift on a track — and the forces, the walls and the contacts all pass it by.
+//! everybody's way from wherever the cart last [put](MemberMut::set_pos) it — a hazard patrolling
+//! a fixed beat, a lift on a track — and the forces, the walls and the contacts all pass it by.
 //!
 //! ```no_run
-//! # use pixel8::{physics::{Bounds, Gravity, Member, World}, *};
+//! # use pixel8::{physics::{Bounds, Gravity, Member, MemberId, World}, *};
 //! /// Walls and floors are whatever the cart flagged as such in the sprite editor.
 //! const SOLID: SpriteFlag = SpriteFlag::Flag0;
 //! /// And this walker's own sprite is flagged `WALKER`, which is how everybody else's step reports
@@ -300,7 +301,7 @@
 //!
 //! struct Walkers {
 //!     world: World<3, Gravity>,
-//!     walkers: [Member; 3],
+//!     walkers: [MemberId; 3],
 //! }
 //!
 //! impl Walkers {
@@ -327,8 +328,10 @@
 //!     /// What the buttons ask for, written into each velocity before the world runs.
 //!     fn steer(&mut self, ctx: &Context) {
 //!         for walker in self.walkers {
-//!             let mut velocity = walker.velocity(&self.world);
-//!             if walker.contacts(&self.world).below() && ctx.is_button_pressed(Button::O) {
+//!             // Borrowed for the few lines that change it, and let go before the next one.
+//!             let mut walker = self.world.member_mut(walker);
+//!             let mut velocity = walker.velocity();
+//!             if walker.contacts().below() && ctx.is_button_pressed(Button::O) {
 //!                 velocity.dy = -3.25;
 //!             }
 //!             velocity.dx = if ctx.is_button_down(Button::Left) {
@@ -338,7 +341,7 @@
 //!             } else {
 //!                 0.0
 //!             };
-//!             walker.set_velocity(&mut self.world, velocity);
+//!             walker.set_velocity(velocity);
 //!         }
 //!     }
 //!
@@ -377,10 +380,10 @@
 //! a member is enlisted under, rather than enforced by a call an update can forget; the sides it
 //! was held at arrive in the same [`Contacts`], so a hold at the bottom of the level reads
 //! [`below`](Contacts::below) as a floor tile does. A room the player walks into changes them with
-//! [`Member::set_confines`].
+//! [`MemberMut::set_confines`].
 //!
 //! Saying nothing — the default — is a member free to leave, which is what a bullet or a spent
-//! enemy wants: it walks off the map, and the cart [retires](Member::retire) it when
+//! enemy wants: it walks off the map, and the cart [retires](MemberMut::retire) it when
 //! [`Bounds::on_screen`] says it has gone.
 //!
 //! # Drawing
@@ -388,10 +391,10 @@
 //! The world draws its cast as it steps it. One [`World::draw`] a frame puts every member on
 //! screen where the last step left it, and what it draws is the member's *look*, which is the
 //! world's like everything else about it: the cell it [wears](MemberBuilder::wearing), which way
-//! round it faces ([`flipped`](MemberBuilder::flipped), [`set_flip`](Member::set_flip)), how many
-//! cells of the sheet it spans ([`spanning`](MemberBuilder::spanning),
-//! [`set_span`](Member::set_span)), and whether it is shown at all
-//! ([`hidden`](MemberBuilder::hidden), [`set_hidden`](Member::set_hidden)). A member that wears
+//! round it faces ([`flipped`](MemberBuilder::flipped), [`set_flip`](MemberMut::set_flip)), how
+//! many cells of the sheet it spans ([`spanning`](MemberBuilder::spanning),
+//! [`set_span`](MemberMut::set_span)), and whether it is shown at all
+//! ([`hidden`](MemberBuilder::hidden), [`set_hidden`](MemberMut::set_hidden)). A member that wears
 //! nothing is not drawn: nobody is stopped by it, nobody is told about it, and nobody sees it
 //! either.
 //!
@@ -401,19 +404,20 @@
 //! game by `&self` — there is nothing left to decide, and only the showing to do:
 //!
 //! ```no_run
-//! # use pixel8::{physics::{Member, World}, *};
+//! # use pixel8::{physics::{Member, MemberId, World}, *};
 //! /// Two cells of a walk, flagged alike on the sheet: which one is worn changes how the walker
 //! /// looks and nothing about what it is met as.
 //! const WALK: [SpriteId; 2] = [SpriteId(16), SpriteId(17)];
 //!
 //! struct Stroll {
 //!     world: World<1>,
-//!     walker: Member,
+//!     walker: MemberId,
 //! }
 //!
 //! impl Game for Stroll {
 //!     fn update(&mut self, ctx: &mut Context) {
-//!         let mut velocity = self.walker.velocity(&self.world);
+//!         let mut walker = self.world.member_mut(self.walker);
+//!         let mut velocity = walker.velocity();
 //!         velocity.dx = if ctx.is_button_down(Button::Left) {
 //!             -1.0
 //!         } else if ctx.is_button_down(Button::Right) {
@@ -421,15 +425,15 @@
 //!         } else {
 //!             0.0
 //!         };
-//!         self.walker.set_velocity(&mut self.world, velocity);
+//!         walker.set_velocity(velocity);
 //!         // How it looks, said beside how it moves: facing the way it was last sent, and a step
 //!         // of the walk for every four pixels it has come.
 //!         if velocity.dx != 0.0 {
-//!             self.walker.set_flip(&mut self.world, velocity.dx < 0.0, false);
+//!             walker.set_flip(velocity.dx < 0.0, false);
 //!         }
-//!         let (x, _) = self.walker.draw_pos(&self.world);
+//!         let (x, _) = walker.draw_pos();
 //!         let stride = WALK[(x / 4).rem_euclid(2) as usize];
-//!         self.walker.set_sprite(&mut self.world, Some(stride));
+//!         walker.set_sprite(Some(stride));
 //!
 //!         self.world.step(ctx);
 //!     }
@@ -528,7 +532,7 @@ pub use force::{Force, Subject};
 pub use gravity::Gravity;
 #[doc(hidden)]
 pub use kinetic::Kinetic;
-pub use member::{Member, MemberBuilder};
+pub use member::{Member, MemberBuilder, MemberId, MemberMut};
 pub use velocity::Velocity;
 pub use wind::Wind;
 pub use world::World;

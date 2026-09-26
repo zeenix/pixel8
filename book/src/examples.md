@@ -42,7 +42,7 @@ here, in a few hundred lines split into small modules:
   **[`Gravity`]**, and each actor is described by a **[`MemberBuilder`]** — the
   **[`Bounds`]** it covers, the rectangle the hero may never leave
   (**[`confined_to`]**), the **[`wearing`]** cell that says the badie is a badie
-  — and **[enlisted][`enlist`]** in it, keeping the **[`Member`]** handle that
+  — and **[enlisted][`enlist`]** in it, keeping the **[`MemberId`]** handle that
   comes back beside its own game data. A single **[`step`]** an update pulls the
   hero down, stops it at the solid tiles, holds it inside the level, patrols the
   badie and tells each of them what it met; one **[`draw`]** a frame puts both
@@ -121,9 +121,9 @@ candle, point it another way for an exhaust trail.
 [`step`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.step
 [`World`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html
 [`MemberBuilder`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.MemberBuilder.html
-[`Member`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Member.html
+[`MemberId`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.MemberId.html
 [`enlist`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.MemberBuilder.html#method.enlist
-[`retire`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.Member.html#method.retire
+[`retire`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.MemberMut.html#method.retire
 [`draw`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.World.html#method.draw
 [`confined_to`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.MemberBuilder.html#method.confined_to
 [`wearing`]: https://docs.rs/pixel8/latest/pixel8/physics/struct.MemberBuilder.html#method.wearing

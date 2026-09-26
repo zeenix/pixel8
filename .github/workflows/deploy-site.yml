@@ -36,11 +36,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install latest mdbook
+        # Asked with the workflow's token: an anonymous lookup shares the runner's address and
+        # its rate limit, and `-f`/`-e` stop the step at whichever request failed.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          tag=$(curl -sS 'https://api.github.com/repos/rust-lang/mdbook/releases/latest' | jq -r '.tag_name')
+          tag=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" \
+            'https://api.github.com/repos/rust-lang/mdbook/releases/latest' | jq -er '.tag_name')
           url="https://github.com/rust-lang/mdbook/releases/download/${tag}/mdbook-${tag}-x86_64-unknown-linux-gnu.tar.gz"
           mkdir mdbook
-          curl -sSL "$url" | tar -xz --directory=./mdbook
+          curl -fsSL "$url" | tar -xz --directory=./mdbook
           echo "$(pwd)/mdbook" >> "$GITHUB_PATH"
 
       # The whole site build — book, cart exports, shelf, redirects — lives
