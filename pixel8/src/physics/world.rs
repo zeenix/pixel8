@@ -138,8 +138,10 @@ pub struct World<const N: usize, F: Force = ()> {
     /// body and, honouring the wire's in/out split, leaves the rectangle's corner alone, so this
     /// is what puts it back on the body afterwards.
     pub(super) offsets: [(i16, i16); N],
-    /// How many times each seat has been emptied, so a handle to somebody who has left can be told
-    /// from a handle to whoever was seated there next.
+    /// Each seat's count, moved on as the seat is taken and again as it is emptied: odd for
+    /// exactly as long as somebody sits there, so the ids handed out, every one of them odd, never
+    /// name an empty seat, and one to somebody who has left can be told from one to whoever was
+    /// seated there next.
     pub(super) generations: [u8; N],
     /// Which seats are taken, a bit apiece. A `u64` covers every `N` there can be, the wire's
     /// ceiling being sixty-four.
@@ -348,6 +350,8 @@ impl<const N: usize, F: Force> World<N, F> {
         }
 
         self.seated |= 1 << slot;
+        // Odd from here until the seat is emptied: the count the id below is handed.
+        self.generations[slot] = self.generations[slot].wrapping_add(1);
         // Solid is settled here, between the description's own rule and the scene's word at the
         // moment of claiming, exactly as it is for a member told a new rule after it is seated.
         let word = solid.unwrap_or(self.solid);
@@ -755,9 +759,9 @@ impl<const N: usize, F: Force> World<N, F> {
     /// hero. Loud, and exactly where it happened.
     ///
     /// The check is on every [`member`](Self::member)/[`member_mut`](Self::member_mut) a cart
-    /// calls in an update, so its hot half is spelled to inline there — a compare and a taken
-    /// seat — and the panic lives in [`stale`], cold and out of line, where it costs nothing
-    /// until it fires.
+    /// calls in an update, so its hot half is spelled to inline there — the seat in range and
+    /// its count the id's — and the panic lives in [`stale`], cold and out of line, where it
+    /// costs nothing until it fires.
     #[inline(always)]
     pub(super) fn seat(&self, id: MemberId) -> usize {
         if !self.holds(id) {
@@ -769,11 +773,14 @@ impl<const N: usize, F: Force> World<N, F> {
 
     /// Whether `id` names somebody actually in the cast: a seat of this world's, taken, and
     /// taken by the very member the id was made for.
+    ///
+    /// The seat's count answers both at once: an empty seat's is even and no id's ever is, so an
+    /// id matching it is the member sitting there now.
     #[inline(always)]
     pub(super) fn holds(&self, id: MemberId) -> bool {
         let slot = id.slot as usize;
 
-        slot < N && self.seated & (1 << slot) != 0 && self.generations[slot] == id.generation
+        slot < N && self.generations[slot] == id.generation
     }
 
     /// The step itself, over a map and a sprite sheet handed in rather than reached for.
@@ -2016,7 +2023,7 @@ mod tests {
         let read = format!("{:?}", world.member(member));
         assert!(
             read.starts_with(
-                "Member { id: MemberId { slot: 0, generation: 0 }, pos: (4.0, 8.0), \
+                "Member { id: MemberId { slot: 0, generation: 1 }, pos: (4.0, 8.0), \
                  draw_pos: (4, 8), velocity: Velocity { dx: 1.0, dy: -2.0 },"
             ),
             "{read}"
@@ -2083,6 +2090,31 @@ mod tests {
 
         assert!(world.get_member(MemberId::NOBODY).is_none());
         assert!(world.get_member_mut(MemberId::NOBODY).is_none());
+    }
+
+    #[test]
+    fn an_id_is_nobody_in_a_world_built_afresh() {
+        // What a restart that rebuilds its world, rather than retiring the cast, leaves behind:
+        // ids to seats that are all empty again, and nobody in the new world answers to them.
+        let mut first: World<2> = World::new();
+        let member = pebble(&mut first, 0.0, 0.0);
+        let fresh: World<2> = World::new();
+        assert!(fresh.get_member(member).is_none());
+    }
+
+    #[test]
+    fn a_seat_s_ids_come_round_on_its_hundred_and_twenty_ninth_letting() {
+        let mut world: World<1> = World::new();
+        let first = pebble(&mut world, 0.0, 0.0);
+        world.member_mut(first).retire();
+        // Lettings two to a hundred and twenty-eight, each a new id.
+        for _ in 1..128 {
+            let id = pebble(&mut world, 0.0, 0.0);
+            assert_ne!(id, first);
+            world.member_mut(id).retire();
+        }
+
+        assert_eq!(pebble(&mut world, 0.0, 0.0), first);
     }
 
     #[test]

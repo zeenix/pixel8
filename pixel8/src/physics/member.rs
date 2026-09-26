@@ -46,8 +46,8 @@ use crate::{motion::floor_i16, BitFlags, SpriteFlag, SpriteId};
 /// *this* one, which is a member the cart never meant. Carts with two scenes going at once keep
 /// their ids with the world they came from.
 ///
-/// The occupancy is a byte, so a seat let for the two hundred and fifty-seventh time comes round to
-/// a number it has used before, and an id kept unasked-about across all of them would answer for
+/// A seat's ids come round again: one let for the hundred and twenty-ninth time is handed the id
+/// it was handed the first time, and an id kept unasked-about across all of them would answer for
 /// whoever holds the seat now. Which is a way of saying: retire a member and forget it, the way a
 /// cart does anyway.
 ///
@@ -57,8 +57,10 @@ use crate::{motion::floor_i16, BitFlags, SpriteFlag, SpriteId};
 pub struct MemberId {
     /// Which of the world's `N` seats.
     pub(super) slot: u8,
-    /// Which occupancy of it: bumped every time the seat is emptied, so an id to a member that
-    /// has left can be told from an id to whoever was seated there next.
+    /// Which occupancy of it: the seat's count as it was taken. The count moves on as the seat
+    /// is taken and again as it is emptied, so it is odd for exactly as long as somebody sits
+    /// there: no id is ever an empty seat's count, and an id to a member that has left can be
+    /// told from an id to whoever was seated there next.
     pub(super) generation: u8,
 }
 
@@ -364,7 +366,7 @@ pub struct MemberMut<'a> {
     pub(super) seated: &'a mut u64,
     /// The world's word of which members answered what is solid with a rule of their own.
     pub(super) own_solid: &'a mut u64,
-    /// How many times the seat has been emptied.
+    /// The seat's count, which retiring moves on.
     pub(super) generation: &'a mut u8,
     /// The scene's word for *wall*, which a member handed back to it goes by.
     pub(super) scene_solid: BitFlags<SpriteFlag>,
@@ -621,6 +623,7 @@ impl MemberMut<'_> {
         *self.record = wire::VACANT;
         *self.mass = 1.0;
         *self.offset = (0, 0);
+        // Even again, like every empty seat's count, so no id handed out answers to it.
         *self.generation = self.generation.wrapping_add(1);
     }
 
