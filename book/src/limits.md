@@ -60,8 +60,8 @@ Two crates cover most of what `std` would have given you:
 
 - **[`heapless`](https://docs.rs/heapless)** — fixed-capacity `Vec<T, N>`,
   `String<N>`, maps and more. The platformer keeps its collected coins in a
-  `heapless::Vec<Taken, MAX_TAKEN>` and formats HUD text with
-  `heapless::format!`.
+  `heapless::Vec<Taken, MAX_TAKEN>`; its HUD text uses the SDK's own
+  `printf!` instead.
 - **[`libm`](https://docs.rs/libm)** — the float functions `core` lacks:
   `libm::sqrtf`, `sinf`, `floorf`... You often don't need it: converting a
   sub-pixel `f32` position for a draw call is just `x as i16`.

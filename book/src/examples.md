@@ -56,7 +56,7 @@ here, in a few hundred lines split into small modules:
 - the best score kept in **[storage](storage.md)** across runs;
 - win/lose **music held inside the game-state enum** — leaving the state
   drops the [`PlayingMusic`](audio.md#playing-music) handle, stopping the song;
-- `heapless::Vec` and `heapless::format!` in a `#![no_std]` cart.
+- `heapless::Vec` and the SDK's `printf!` in a `#![no_std]` cart.
 
 [Source](https://github.com/zeenix/pixel8/tree/main/examples/platformer/src).
 
