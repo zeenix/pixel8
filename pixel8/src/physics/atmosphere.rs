@@ -105,8 +105,8 @@ impl Default for Atmosphere {
 /// A density fit to take a share by: outside `0.0..=1.0` there is no share to take, and `NaN` is
 /// not a density at all — it reads as a vacuum, the quiet answer everywhere else here.
 const fn clamped(density: f32) -> f32 {
-    // Written out rather than `f32::clamp`, which is not `const`; the `NaN` falls through both
-    // comparisons to the vacuum.
+    // Written out rather than `f32::clamp`, which would hand a `NaN` back; here it falls through
+    // both comparisons to the vacuum.
     if density > 1.0 {
         1.0
     } else if density > 0.0 {
