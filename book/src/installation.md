@@ -62,10 +62,11 @@ pixel8-tui run mygame.png     # boot, load, and run immediately
 ```
 
 Terminals with [sixel](https://en.wikipedia.org/wiki/Sixel) support (foot,
-WezTerm, Konsole, iTerm2, xterm...) get real pixels; everywhere else the
-screen is drawn with unicode half-blocks. `Ctrl+Q` quits. On Linux, game
-input needs either a terminal with the kitty keyboard protocol or read access
-to `/dev/input` (one-time: `sudo usermod -aG input $USER`). See
+WezTerm, Konsole, iTerm2, xterm with `-ti vt340`...) get real pixels;
+everywhere else the screen is drawn with unicode half-blocks. `Ctrl+Q`
+quits. On Linux, game input needs either a terminal with the kitty keyboard
+protocol or read access to `/dev/input` (one-time:
+`sudo usermod -aG input $USER`). See
 [docs/TUI.md](https://github.com/zeenix/pixel8/blob/main/docs/TUI.md) for the
 details and tuning knobs.
 
