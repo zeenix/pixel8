@@ -272,7 +272,7 @@ impl Collider {
         let (x, y) = self.position;
         // The four pixels this step can put a corner of the box on, floored once each. A float
         // floored to a pixel is a handful of instructions on a wasm target, and placing the box
-        // where each axis begins and ends used to redo the same two of them three times over.
+        // where each axis begins and ends would otherwise repeat the same two three times over.
         let (from_x, from_y) = (floor(x), floor(y));
         let to_x = floor(x + velocity.dx);
         // The pixels the box covers before it moves, worked out once: a solid neighbour it is
@@ -376,8 +376,8 @@ impl Collider {
         let (mut flags, mut stopped) = self.tiles_under(swept, reach, wall_hunting, tiles);
 
         // The three rectangles the walk below asks about, unpacked into their four edges apiece
-        // before anybody is asked anything. Every one of those edges used to be worked out inside
-        // the comparison that wanted it — a saturating `i16` addition and the narrowing and
+        // before anybody is asked anything. Every one of those edges would otherwise be worked out
+        // inside the comparison that wanted it — a saturating `i16` addition and the narrowing and
         // widening around it, four of them an overlap — and every neighbour asked for all three.
         // Taken out here they are ordinary `i32` locals the loop compares, which is the whole of
         // what an overlap is.
@@ -552,8 +552,8 @@ fn floor(value: f32) -> i16 {
 ///
 /// The near ones as they are and the far ones as [`Bounds::right`] and [`Bounds::bottom`] give
 /// them, saturating and all. Worked out once per rectangle and then compared as often as the walk
-/// needs, rather than worked out again inside each comparison — which is where the arithmetic of a
-/// crowded scene used to go.
+/// needs, rather than worked out again inside each comparison — which is where a crowded scene's
+/// arithmetic would otherwise go.
 #[inline(always)]
 fn edges(bounds: Bounds) -> (i32, i32, i32, i32) {
     (
@@ -687,8 +687,8 @@ fn fenced((near, far): (i32, i32), tiles: u16) -> Option<(i32, i32)> {
 /// A side is asked about as a span of tiles rather than as a handful of pixels sampled a tile
 /// apart, which is the same set of tiles and a great deal less arithmetic: two shifts a side
 /// instead of a division per sample, no iterator to build per row, and a tile asked about once
-/// where the near and the far sample used to land in the same one. A sprite-sized 8-pixel side is
-/// one tile or two, so the four corners are all an ordinary entity ever costs — the same four the
+/// where sampling by pixel could land the near and the far sample on the same one. A sprite-sized
+/// 8-pixel side is one tile or two, so the four corners are all an ordinary entity ever costs — the
 /// hand-rolled version of this in every platformer checks — and a wider box crosses the tiles
 /// under its middle as well, which is exactly what stops it straddling one.
 ///
@@ -1243,12 +1243,12 @@ mod tests {
 
     #[test]
     fn a_side_crosses_the_tiles_a_pixel_walk_of_it_lands_in() {
-        // The span replaced a walk that sampled the side every eight pixels and at its far end.
-        // Whatever such a walk lands in, the span holds — and holds nothing besides — so no box
-        // anywhere is stopped by a tile it was not stopped by before, or let through one it was.
-        // The walk is taken over the pixels the side really covers, in arithmetic wide enough to
-        // hold them: a side can begin at the bottom of the space and reach the top, where its far
-        // edge saturates exactly as a `Bounds`'s does.
+        // The span this test pins agrees with a walk that samples the side every eight pixels and
+        // at its far end: whatever such a walk lands in, the span holds — and holds nothing
+        // besides — so no box is ever stopped by a tile the walk would miss, or let through one
+        // the walk would catch. The walk is taken over the pixels the side really covers, in
+        // arithmetic wide enough to hold them: a side can begin at the bottom of the space and
+        // reach the top, where its far edge saturates exactly as a `Bounds`'s does.
         for start in [i16::MIN, -300, -8, -1, 0, 1, 120, i16::MAX - 40] {
             for size in [1u16, 2, 8, 9, 16, 24, 40, 128, 32768, u16::MAX] {
                 let (near, far) = crossed(start, size);

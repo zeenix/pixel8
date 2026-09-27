@@ -499,7 +499,7 @@ mod tests {
         let bytes: [u8; RECORD] = unsafe { core::mem::transmute(record) };
 
         // The step's own route: read what a raw client wrote, change what a step decides, and
-        // write the answer back into those same bytes — exactly what `step_the_cast` does.
+        // write the answer back into those same bytes — exactly what `step_hosted` does.
         let mut answered = Record::read(&bytes);
         (answered.x, answered.y) = (5.0, 6.0);
         (answered.rx, answered.ry) = (5, 6);
