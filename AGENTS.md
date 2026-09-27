@@ -134,8 +134,8 @@ Commit messages, atomic commits, and top-down module ordering are covered in
 `CONTRIBUTING.md` (see the top of this file). Project-specific note:
 
 - Audio is feature-gated (`audio`, on by default). Code must still build and run
-  (silently) with `--no-default-features` on the console/runtime for machines without
-  ALSA.
+  (silently) with `audio` off, for machines without ALSA: `--no-default-features`
+  on the runtime, `--no-default-features --features window` on the console.
 - The windowed frontend is feature-gated too (`window`, on by default; it gates the
   `pixel8` binary and winit/wgpu). The console library must keep building with
   `--no-default-features` and with each feature alone — that featureless build is

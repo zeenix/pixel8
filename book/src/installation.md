@@ -40,11 +40,12 @@ You should land at the boot console — a black 128×128 screen with a `>`
 prompt. Type `help` and press Enter. If you see the command list, you're
 done; skip ahead to [Your first cart](first-cart.md).
 
-On a machine without a sound card (or without ALSA headers), install a silent
-console instead:
+On a machine without a sound card (or without ALSA headers), install a
+silent console instead. `--no-default-features` also turns off the
+windowed frontend, so name `window` again to keep it:
 
 ```sh
-cargo install pixel8-console --no-default-features
+cargo install pixel8-console --no-default-features --features window
 ```
 
 Everything works identically, minus audio output.

@@ -238,7 +238,7 @@ headers for audio:
 rustup target add wasm32-unknown-unknown
 sudo apt install libasound2-dev        # debian/ubuntu
 sudo dnf install alsa-lib-devel        # fedora
-# (or build silent with `--no-default-features`)
+# (or build silent with `--no-default-features --features window`)
 cargo console                          # alias for: cargo run --release -p pixel8-console
 cargo tui                              # alias for: cargo run --release -p pixel8-tui
 ```
