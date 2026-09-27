@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.0 - 2026-09-27
+
+### ✨ Added
+- Let the World draw its cast.
+- Let the console draw a whole cast in one call.
+- Size the step by the cast it is handed.
+- Step the whole cast through one World, on the console's side.
+- Give a Kinetic one rectangle, and judge everything against it.
+- Add an explosion to the plume effects.
+- Add a physics module: gravity, wind, air and mass for cart entities.
+- Add fire and smoke plume effects to the SDK.
+
+### 💥 Breaking
+- Keep a MemberId, and borrow the member from the world.
+- Make and ask a member through Member.
+- Ship a cart's opening state as data, and boot into it.
+- Give the World the cast to keep.
+
+### ♻️ Changed
+- Reformat the kinetic fixture cart.
+- Add icon to the README.
+- Remove a redundant empty line.
+
+### 📦 Dependencies
+- Port the runtime to wasmi 2.0.
+
+### 📝 Documentation
+- Call the built-in font 4x7, the cell it is drawn in.
+- Tell xterm users to start it as a VT340 for sixels.
+- Count the ABI's fifty imports in the README.
+- Keep the window in a silent console build.
+- Build the published libraries with all features on docs.rs.
+- Add a campfire example cart.
+- Point the README, agents guide and SDK docs at the tutorial book.
+
+### 🐛 Fixed
+- Translate cart wasm eagerly, off the frame budget.
+
+### 🔒️ Security
+- Clip every draw sweep before walking it.
+
+### ✅ Testing
+- Pin the draw's crossing with the fixture cart.
+- Pin what a frame's fuel actually buys.
+
 ## 0.1.0 - 2026-07-13
 
 ### Added
