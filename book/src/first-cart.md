@@ -41,7 +41,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-pixel8 = { version = "0.1", default-features = false }
+pixel8 = { version = "0.2", default-features = false }
 
 [workspace]
 
