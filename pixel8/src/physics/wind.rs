@@ -92,7 +92,7 @@ impl Wind {
     ///
     /// A gusty wind needs [`update`](Self::update) once an update or it never moves off where it
     /// started.
-    pub fn with_gusts(mut self, range: RangeInclusive<f32>) -> Self {
+    pub const fn with_gusts(mut self, range: RangeInclusive<f32>) -> Self {
         let (start, end) = (*range.start(), *range.end());
         // A `NaN` end puts the two in no order at all, and every clamp below would panic on it.
         // A wind that simply stays steady is the quiet way to read a range that means nothing.
@@ -132,7 +132,7 @@ impl Wind {
     /// A member's [mass](super::MemberBuilder::weighing) divides it: exposure is how much of the
     /// wind a thing catches, mass is how much there is of it to shift, and the wind's grip is
     /// the one over the other.
-    pub fn with_exposure(mut self, exposure: f32) -> Self {
+    pub const fn with_exposure(mut self, exposure: f32) -> Self {
         self.set_exposure(exposure);
         self
     }
@@ -201,7 +201,7 @@ impl Wind {
 
     /// Changes how hard the wind grips what it pushes while the game runs — a diver leaving the
     /// water, a cart that swaps in a heavier entity. `exposure` is clamped to `0.0..=1.0`.
-    pub fn set_exposure(&mut self, exposure: f32) {
+    pub const fn set_exposure(&mut self, exposure: f32) {
         self.exposure = exposure.clamp(0.0, 1.0);
     }
 
@@ -645,5 +645,25 @@ mod tests {
         assert_eq!(wind.direction(), Direction::Down);
         assert_eq!(wind.speed(), speed);
         assert_eq!(wind.blow(), (0.0, -speed));
+    }
+
+    /// `new`, `with_direction`, `with_gusts` and `with_exposure` are all `const`; building the
+    /// whole chain as a module-level constant is what pins that — any of the four losing its
+    /// `const` fails the build here rather than downstream, in a cart.
+    const BREEZE: Wind = Wind::new(0.4)
+        .with_direction(Direction::Right)
+        .with_gusts(-0.05..=0.7)
+        .with_exposure(0.8);
+
+    #[test]
+    fn a_const_built_wind_reads_the_same_as_one_built_at_runtime() {
+        let runtime = Wind::new(0.4)
+            .with_direction(Direction::Right)
+            .with_gusts(-0.05..=0.7)
+            .with_exposure(0.8);
+        assert_eq!(BREEZE.direction(), runtime.direction());
+        assert_eq!(BREEZE.speed(), runtime.speed());
+        assert_eq!(BREEZE.base_speed(), runtime.base_speed());
+        assert_eq!(BREEZE.exposure(), runtime.exposure());
     }
 }

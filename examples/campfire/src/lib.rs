@@ -13,7 +13,7 @@ use smoker::Smoker;
 
 use crate::owl::Owl;
 
-game!(Campfire = defer Campfire::new());
+game!(Campfire = Campfire::new());
 
 /// A campfire and nothing else, out of one of the SDK's plume effects: a fire whose spent flames
 /// carry on as smoke, so the column reads as a single effect rather than a fire with smoke on top.
@@ -33,11 +33,11 @@ struct Campfire {
 }
 
 impl Campfire {
-    /// Built at start-up rather than shipped placed — the `defer` form of `game!` — because the
-    /// plumes and the gusting wind are put together by ordinary constructors, and a constant may
-    /// call none of them. The cost is the stack: for a moment the whole campfire exists twice,
-    /// once here and once in the static it is moved into.
-    fn new() -> Self {
+    /// Built as a constant and shipped placed in the cart's memory image — the preset form of
+    /// `game!`. Every constructor here is a `const fn`, the plumes and the gusting wind included,
+    /// so nothing runs to assemble the campfire: it is there from the moment the cart is
+    /// instantiated. The one thing a constant cannot do, starting the ambience, is `boot`'s.
+    const fn new() -> Self {
         Self {
             fire: SmokingFire::new(FIRE_X, FIRE_Y),
             wind: Wind::new(WIND_SPEED).with_gusts(WIND_GUSTS),

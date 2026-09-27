@@ -21,7 +21,7 @@
 </p>
 
 Pixel8 (pronounced "pixelate") is a tiny, self-contained game console that never existed: a 128x128
-screen, 16 fixed colors, a 4x6 pixel font, four audio channels, 256 sprites, a 128x64 tile map — and
+screen, 16 fixed colors, a 4x7 pixel font, four audio channels, 256 sprites, a 128x64 tile map — and
 a Rust compiler where the Lua interpreter would be. You write a little Rust, it compiles to
 WebAssembly, and it runs inside the console's sandbox at a steady 60 fps (or 30, the cart's choice).
 Carts are shareable PNG images with the game embedded inside.
@@ -101,9 +101,9 @@ pixel8-tui run mygame.png     boot, load, and run immediately
 ```
 
 Terminals with [sixel](https://en.wikipedia.org/wiki/Sixel) support (foot, WezTerm, Konsole,
-iTerm2, xterm...) get real pixels via a pure-Rust encoder; everywhere else the screen is drawn
-with unicode half-blocks. `Ctrl+Q` quits. On Linux, game input needs either a terminal with the
-kitty keyboard protocol or read access to `/dev/input` (one-time:
+iTerm2, xterm with `-ti vt340`...) get real pixels via a pure-Rust encoder; everywhere else the
+screen is drawn with unicode half-blocks. `Ctrl+Q` quits. On Linux, game input needs either a
+terminal with the kitty keyboard protocol or read access to `/dev/input` (one-time:
 `sudo usermod -aG input $USER`). See
 [docs/TUI.md](https://github.com/zeenix/pixel8/blob/main/docs/TUI.md) for input details and
 tuning knobs.
@@ -185,7 +185,7 @@ pixel8 verify <cart.png>          run 60 frames headless
 ## The sandbox
 
 Carts execute inside [wasmi](https://github.com/wasmi-labs/wasmi) with no WASI, no filesystem, no
-network and no host memory access. The only imports a cart gets are the ~26 small, C-like functions
+network and no host memory access. The only imports a cart gets are the ~50 small, C-like functions
 of the Pixel8 ABI ([docs/ABI.md](https://github.com/zeenix/pixel8/blob/main/docs/ABI.md)) — draw,
 input, audio, map, log. Fuel metering turns infinite loops into a friendly error screen instead of a
 hung console.
@@ -238,7 +238,7 @@ headers for audio:
 rustup target add wasm32-unknown-unknown
 sudo apt install libasound2-dev        # debian/ubuntu
 sudo dnf install alsa-lib-devel        # fedora
-# (or build silent with `--no-default-features`)
+# (or build silent with `--no-default-features --features window`)
 cargo console                          # alias for: cargo run --release -p pixel8-console
 cargo tui                              # alias for: cargo run --release -p pixel8-tui
 ```

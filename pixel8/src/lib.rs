@@ -788,7 +788,7 @@ impl Graphics {
         unsafe { ffi::set_fill_pattern(0, 0, 0) }
     }
 
-    /// Print text with the built-in 4x6 font. Returns the x position (as `i16`)
+    /// Print text with the built-in 4x7 font. Returns the x position (as `i16`)
     /// after the last glyph. For `format!`-style arguments, see
     /// [`printf!`](crate::printf).
     pub fn print(&mut self, text: &str, x: i16, y: i16, color: Color) -> i16 {

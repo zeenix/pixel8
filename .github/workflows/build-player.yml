@@ -1,19 +1,25 @@
 # Build the handheld cart player as fully-static musl binaries for
-# aarch64/armv7 devices (PowKiddy RGB10S, Anbernic RG351/353, ...) on
-# every push to main and on pull requests, smoke-test the same code on
-# the host, and upload a ready-to-copy ports bundle as an artifact.
+# aarch64/armv7 devices (PowKiddy RGB10S, Anbernic RG351/353, ...),
+# smoke-test the same code on the host, and upload a ready-to-copy
+# ports bundle as an artifact. Runs on demand and when a
+# pixel8-player release is published (release-plz tags each crate
+# on its own; the handheld job below filters to just that one).
 
 name: build handheld player
 
 on:
   workflow_dispatch:
   release:
+    types: [published]
 
 permissions:
   contents: read
 
 jobs:
   handheld:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'pixel8-player-')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

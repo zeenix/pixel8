@@ -52,13 +52,17 @@ raw evdev button indices via `PIXEL8_SELECT` / `PIXEL8_START`.
      carts/                  put your .png carts here
    ```
 
-   These chips are 64-bit, but many firmwares (ArkOS on the RGB10S)
-   run a **32-bit armhf userland**, while others (some ROCKNIX builds)
-   are aarch64. The bundle ships both; `Pixel8.sh` picks by the ELF class of
-   `/bin/sh` (the userland's own arch) rather than `uname -m` or the
-   kernel's loaders, which mislead on a 64-bit kernel running a 32-bit
-   rootfs. Force it with `PIXEL8_ARCH=armhf` or `aarch64`. (Give a 32-bit
-   device an aarch64 binary and its `binfmt_misc` routes it through
+   These chips are 64-bit, but many firmwares (ArkOS on the RGB10S) run
+   a **32-bit armhf userland**, while others (some ROCKNIX builds) are
+   aarch64. The bundle ships both; `Pixel8.sh` does not guess the
+   userland's arch from `uname -m` or the kernel's loaders, which report
+   the kernel and so mislead on a 64-bit kernel running a 32-bit rootfs.
+   Instead it runs each candidate binary with `--probe` — a cheap
+   self-test that exits before opening the display or input devices —
+   trying aarch64 then armhf, and uses the first one that actually
+   executes, logging every attempt to `pixel8/log.txt`. Force the arch
+   with `PIXEL8_ARCH=armhf` or `aarch64`. (Give a 32-bit device an
+   aarch64 binary and its `binfmt_misc` routes it through
    `qemu-aarch64-static`, which then fails to find an aarch64 loader —
    that's the tell.)
 

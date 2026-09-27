@@ -29,7 +29,8 @@ By default the compressed Rust **source is embedded** in the cart, so anyone
 can turn your cartridge back into an editable project — the console's
 `import mygame.png mydir`, or `pixel8 extract mygame.png mydir` headless.
 This is how fantasy-console culture spreads: play a cart, crack it open, see
-how it's made. Export with `--no-source` if you'd rather not.
+how it's made. Export with `-nosrc` (`--no-source` headless) if you'd
+rather not.
 
 It's good hygiene to check a cart before sharing:
 

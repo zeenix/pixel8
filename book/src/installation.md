@@ -40,11 +40,12 @@ You should land at the boot console — a black 128×128 screen with a `>`
 prompt. Type `help` and press Enter. If you see the command list, you're
 done; skip ahead to [Your first cart](first-cart.md).
 
-On a machine without a sound card (or without ALSA headers), install a silent
-console instead:
+On a machine without a sound card (or without ALSA headers), install a
+silent console instead. `--no-default-features` also turns off the
+windowed frontend, so name `window` again to keep it:
 
 ```sh
-cargo install pixel8-console --no-default-features
+cargo install pixel8-console --no-default-features --features window
 ```
 
 Everything works identically, minus audio output.
@@ -61,10 +62,11 @@ pixel8-tui run mygame.png     # boot, load, and run immediately
 ```
 
 Terminals with [sixel](https://en.wikipedia.org/wiki/Sixel) support (foot,
-WezTerm, Konsole, iTerm2, xterm...) get real pixels; everywhere else the
-screen is drawn with unicode half-blocks. `Ctrl+Q` quits. On Linux, game
-input needs either a terminal with the kitty keyboard protocol or read access
-to `/dev/input` (one-time: `sudo usermod -aG input $USER`). See
+WezTerm, Konsole, iTerm2, xterm with `-ti vt340`...) get real pixels;
+everywhere else the screen is drawn with unicode half-blocks. `Ctrl+Q`
+quits. On Linux, game input needs either a terminal with the kitty keyboard
+protocol or read access to `/dev/input` (one-time:
+`sudo usermod -aG input $USER`). See
 [docs/TUI.md](https://github.com/zeenix/pixel8/blob/main/docs/TUI.md) for the
 details and tuning knobs.
 

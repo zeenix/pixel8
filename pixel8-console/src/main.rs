@@ -14,6 +14,7 @@ use pixel8_console::{
 use pixel8_console::{
     frame_duration, gpu,
     shell::{Key, Mods},
+    TickPacer,
 };
 use pixel8_runtime::{
     cart::{self, Cart},
@@ -379,7 +380,7 @@ fn run_windowed(load: Option<String>, auto_run: bool) -> Result<()> {
         shell,
         mods: Mods::default(),
         last_title: String::new(),
-        next_tick: Instant::now(),
+        pacer: TickPacer::new(Instant::now()),
         #[cfg(feature = "audio")]
         _audio_out: audio_out,
     };
@@ -404,7 +405,7 @@ struct App {
     shell: Shell,
     mods: Mods,
     last_title: String,
-    next_tick: Instant,
+    pacer: TickPacer,
     #[cfg(feature = "audio")]
     _audio_out: Option<pixel8_runtime::audio::AudioOutput>,
 }
@@ -551,16 +552,11 @@ impl ApplicationHandler for App {
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
-        let mut ticked = false;
         let frame = frame_duration(self.shell.tick_fps());
-        while Instant::now() >= self.next_tick {
+        let mut ticked = false;
+        while self.pacer.tick_due(now, frame) {
             self.shell.tick();
-            self.next_tick += frame;
             ticked = true;
-            // Don't death-spiral after a long stall.
-            if now > self.next_tick + frame * 10 {
-                self.next_tick = now + frame;
-            }
         }
         if self.shell.want_exit {
             event_loop.exit();
@@ -578,7 +574,7 @@ impl ApplicationHandler for App {
                 w.request_redraw();
             }
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_tick));
+        event_loop.set_control_flow(ControlFlow::WaitUntil(self.pacer.next_tick()));
     }
 }
 

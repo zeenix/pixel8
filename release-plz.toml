@@ -82,7 +82,9 @@ protect_breaking_commits = true
 commit_preprocessors = [
     # Remove scope prefix (e.g., "platformer: ") but keep gitmoji emojis.
     # Pattern handles emojis with variation selectors (U+FE0F) and ZWJ sequences (U+200D).
-    { pattern = "^((?:[\\p{Emoji_Presentation}\\p{Extended_Pictographic}](?:\\u{FE0F}|\\u{200D})?)+) [\\w, -]+: ", replace = "$1 " },
+    # A scope is one word, or a comma-separated list of them ("zbus, zvariant: "), so a subject
+    # that merely has a colon in it ("Add a physics module: gravity, …") keeps every word.
+    { pattern = "^((?:[\\p{Emoji_Presentation}\\p{Extended_Pictographic}](?:\\u{FE0F}|\\u{200D})?)+) [\\w-]+(?:, ?[\\w-]+)*: ", replace = "$1 " },
     # Extract issue refs from commit body using $COMMIT_SHA.
     # Matches: "Fixes #123", "Closes issue #123", "Resolves bug #123", etc.
     # Appends issue ref with "||" delimiter so template can insert period before it.
@@ -103,6 +105,8 @@ commit_parsers = [
     { message = "^[Mm]erge", skip = true },
     { message = "^🔖", skip = true },
     { message = "^[\\p{Emoji}\\p{Emoji_Presentation}\\p{Extended_Pictographic}]+$", skip = true },
+    # Skip compiler and linter warning fixes: they change nothing a user of the crates can see.
+    { message = "^🚨", skip = true },
 
     # Features.
     { message = "^✨", group = "<!-- 00 -->✨ Added" },

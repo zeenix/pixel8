@@ -159,7 +159,7 @@ heapless = "0.9"
 ```
 
 See [`examples/platformer`](../examples/platformer) for a worked example: it
-builds its HUD text with `heapless::format!`.
+keeps everything the hero has picked up in a `heapless::Vec`.
 
 [`heapless`]: https://docs.rs/heapless
 

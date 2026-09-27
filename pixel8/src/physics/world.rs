@@ -93,14 +93,11 @@ use crate::{BitFlags, Context, Graphics, SpriteFlag, SpriteId};
 /// and [borrows](Self::member) the member it names from the world for the rest.
 ///
 /// It is not a saving in bytes and does not pretend to be one. A seat is the forty-four bytes of
-/// its record plus nine the world keeps alongside, `N` of them for as long as the world lives,
-/// where those same fields used to sit in the cart's own structs — some twenty-two bytes an entity
-/// — and the wire's records were borrowed from the stack for the length of one call. What it buys
-/// is that there is only ever *one* of everything: nothing is copied into a buffer before the
-/// crossing and nothing is read back out of one after it, because the buffer is the state. A cart
-/// no longer gathers a cast of borrows an update, and the old friction of a fixed-capacity vector
-/// whose `Drop` kept those borrows alive to the end of the block — the reason a cart used to hand
-/// its cast to a function of its own — is gone with them.
+/// its record plus nine the world keeps alongside — four for its mass, four for its rectangle's
+/// offset, one for its generation — and there are `N` of them for as long as the world lives.
+/// What that buys is that there is only ever *one* of everything: the records are the very buffer
+/// the `step_cast`/`draw_cast` host imports read and write in place, so nothing is copied into a
+/// buffer before the crossing and nothing is read back out of one after it.
 ///
 /// # The seats, and the order they are in
 ///
@@ -810,8 +807,8 @@ impl<const N: usize, F: Force> World<N, F> {
         // What every cast member is worth to everybody else, taken once at the top: the rectangle
         // it covers and the flags its cell carries. Each member is then resolved against the rest
         // of the cast several times over — once to be pushed out of it, once for each axis it
-        // moves along — and every one of those questions used to go back through the cast's `dyn`
-        // for a rectangle and a sheet lookup that had not changed since the last one. That is the
+        // moves along — and asking each of those questions through the cast's `dyn` would repeat a
+        // rectangle and a sheet lookup that had not changed since the last one. That is the
         // n-squared this takes out: one question a member a step, and plain loads after it.
         //
         // Two arrays rather than one of pairs, and the difference is measurable: a rectangle is
@@ -1192,7 +1189,7 @@ impl<F: Fn(SpriteId) -> BitFlags<SpriteFlag>> Neighbours<'_, '_, F> {
 fn hold(entity: &mut dyn Kinetic, limits: Bounds, velocity: &mut Velocity) -> BitFlags<Contact> {
     let bounds = entity.bounds();
     // One look at the body for both of what it is asked, since every question a member is put
-    // through the cast's `dyn` costs a call the resolution used to have inlined.
+    // through the cast's `dyn` is a call, and nothing across that indirection can be inlined.
     let body = entity.body();
     let (x, y) = body.pos();
 

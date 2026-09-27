@@ -112,11 +112,15 @@ from your game.
 </div>
 
 A step-sequencer for sound effects: 64 slots, 32 steps each. The top bar
-picks the slot and sets its speed, loop points and waveform (eight of them —
-the last is a custom wave you can draw yourself). Below is the pitch view
-shown above: drag out a graph of pitch bars, with a volume strip underneath.
-`Tab` switches to a tracker view (the same 32 steps as a note table, entered
-with piano keys) and to the wave designer; `Space` previews the sound.
+picks the slot and sets its speed and loop points. Below is the pitch view
+shown above: pick one of the eight built-in waveforms from the palette and
+drag out a graph of pitch bars in it, with a volume strip underneath. `Tab`
+switches to a tracker view (the same 32 steps as a note table, entered with
+piano keys). There, move to a note's waveform column (the right arrow key,
+or a click), press `i` and type a digit from 0 to 7: the note turns into an
+instrument note that plays the waveform of that slot, one of the first
+eight. Those eight slots also get a button in the top bar that opens the
+wave designer, for drawing their waveform by hand. `Space` previews the sound.
 
 ### Music
 

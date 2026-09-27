@@ -44,8 +44,13 @@ cargo +nightly fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-CI (`.github/workflows/ci.yml`) runs three jobs that must stay green: `fmt` (nightly),
-`clippy` (`-D warnings`), and `test` (workspace). Match them locally before pushing.
+CI (`.github/workflows/ci.yml`) runs six jobs that must stay green: `fmt` (nightly
+`cargo fmt --check`, plus the example/fixture carts), `clippy` (`-D warnings` across
+the workspace, every SDK/player feature shape, and the example/fixture carts),
+`test` (`cargo test --workspace`, the SDK's per-feature tests, `cargo package`),
+`no-alsa` (those same shapes with `audio` off, built and tested on a runner with
+no ALSA headers), `book` (builds the mdbook tutorial), and `doc` (`cargo doc` with
+`-D warnings` for `pixel8` and `pixel8-runtime`). Match them locally before pushing.
 
 ## Workspace layout
 
@@ -71,7 +76,9 @@ The workspace excludes `examples/` (those are standalone wasm crates). Six membe
 - **`pixel8-runtime/`** — the heart. Modules: `fb` (128x128 indexed framebuffer),
   `font`, `palette`, `vm` (wasmi + ABI linking + fuel metering), `input`, `audio`
   (4-ch synth + cpal layer behind the `audio` feature), `assets`, `project`, `cart`
-  (PNG codec), `pico8` (importer), `ui`.
+  (PNG codec), `pico8` (importer), `ui`, `storage` (cart save-file key-value store),
+  `clipboard` (clipboard data model + native JSON codec), `wire` (serde codecs that
+  keep the JSON human-readable).
 - **`pixel8-console/`** — the console: a library (shell + editors) plus the windowed
   desktop frontend. **The binary it builds is named `pixel8`, not `pixel8-console`.**
   `lib.rs` exports `shell.rs` (the mode machine), `builder.rs`, `webexport.rs`, `ui.rs`
@@ -134,8 +141,8 @@ Commit messages, atomic commits, and top-down module ordering are covered in
 `CONTRIBUTING.md` (see the top of this file). Project-specific note:
 
 - Audio is feature-gated (`audio`, on by default). Code must still build and run
-  (silently) with `--no-default-features` on the console/runtime for machines without
-  ALSA.
+  (silently) with `audio` off, for machines without ALSA: `--no-default-features`
+  on the runtime, `--no-default-features --features window` on the console.
 - The windowed frontend is feature-gated too (`window`, on by default; it gates the
   `pixel8` binary and winit/wgpu). The console library must keep building with
   `--no-default-features` and with each feature alone — that featureless build is

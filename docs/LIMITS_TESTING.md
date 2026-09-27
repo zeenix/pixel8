@@ -85,7 +85,7 @@ Enable only the compute probe, then ramp `N`:
 prints, in the scrollback:
 
 ```text
-** error in update **
+** Error in update **
 update() ran too long
 (infinite loop?)
 ```
@@ -94,10 +94,10 @@ The header is red and the message lines are orange. Press `Esc` / type as usual
 to carry on.
 
 **Web player.** The canvas switches to the shared error screen: a red top bar
-reading `pixel8`, the heading `** runtime error **`, and the message:
+reading `Pixel8`, the heading `** Runtime error **`, and the message:
 
 ```text
-runtime error in update:
+Runtime error in update:
 update() ran too long
 (infinite loop?)
 ```
@@ -105,8 +105,8 @@ update() ran too long
 with a `press f5 to restart` hint at the bottom. Pressing **F5** reloads the
 page and reboots the cart.
 
-**Handheld player.** Same shared error screen (red bar, `** runtime error **`, the
-`runtime error in update:` text), with a `hold o+x to exit` hint at the bottom;
+**Handheld player.** Same shared error screen (red bar, `** Runtime error **`, the
+`Runtime error in update:` text), with a `hold o+x to exit` hint at the bottom;
 hold both action buttons to return to the picker. The same line is also written
 to stderr as `pixel8-player: runtime error: …`.
 
@@ -138,7 +138,7 @@ Enable only the memory probe, then ramp `N`:
 **Desktop console.** Back in the console scrollback:
 
 ```text
-** error in update **
+** Error in update **
 update() ran out of memory
 (128K limit)
 ```
@@ -148,7 +148,7 @@ update() ran out of memory
 **Web player.** The shared error screen on the canvas:
 
 ```text
-runtime error in update:
+Runtime error in update:
 update() ran out of memory
 (128K limit)
 ```
