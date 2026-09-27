@@ -50,6 +50,7 @@ use image::{imageops, DynamicImage, RgbaImage};
 use pixel8_console::{
     frame_duration, sdk_path,
     shell::{Key, Mods, Shell},
+    TickPacer,
 };
 use pixel8_runtime::fb::{Framebuffer, HEIGHT, WIDTH};
 use std::{
@@ -150,7 +151,7 @@ struct Tui {
     frame_cache: FrameCache,
     layout: Layout,
     max_scale: u32,
-    next_tick: Instant,
+    pacer: TickPacer,
     quit: bool,
     /// Whether the terminal reports having focus; raw key state is only
     /// applied while it does, so typing elsewhere can't drive a cart.
@@ -175,7 +176,7 @@ impl Tui {
             // real terminal.
             layout: Layout::compute(backend, 80, 24, None, max_scale),
             max_scale,
-            next_tick: Instant::now(),
+            pacer: TickPacer::new(Instant::now()),
             quit: false,
             focused: true,
             last_title: String::new(),
@@ -183,17 +184,18 @@ impl Tui {
         }
     }
 
-    /// The tick/present loop, paced exactly like the windowed console:
-    /// catch up on missed ticks, then present at most one frame.
+    /// The tick/present loop, paced exactly like the windowed console: each
+    /// pass runs the ticks already due when it began, then presents at
+    /// most one frame.
     fn run_loop(&mut self) -> Result<()> {
         self.relayout()?;
-        self.next_tick = Instant::now();
+        self.pacer = TickPacer::new(Instant::now());
         loop {
             self.pump_events()?;
             let frame = frame_duration(self.shell.tick_fps());
             let now = Instant::now();
             let mut ticked = false;
-            while Instant::now() >= self.next_tick {
+            while self.pacer.tick_due(now, frame) {
                 match &mut self.buttons {
                     ButtonTracker::Direct => {}
                     // Fresh physical key state straight from the kernel.
@@ -212,12 +214,7 @@ impl Tui {
                     }
                 }
                 self.shell.tick();
-                self.next_tick += frame;
                 ticked = true;
-                // Don't death-spiral after a long stall.
-                if now > self.next_tick + frame * 10 {
-                    self.next_tick = now + frame;
-                }
             }
             if self.quit || self.shell.want_exit {
                 return Ok(());
@@ -241,7 +238,10 @@ impl Tui {
         loop {
             // Once the tick is due this is a zero-timeout poll, i.e. it
             // only drains what is already buffered and then returns.
-            let timeout = self.next_tick.saturating_duration_since(Instant::now());
+            let timeout = self
+                .pacer
+                .next_tick()
+                .saturating_duration_since(Instant::now());
             if !event::poll(timeout)? {
                 return Ok(());
             }
