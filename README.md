@@ -21,7 +21,7 @@
 </p>
 
 Pixel8 (pronounced "pixelate") is a tiny, self-contained game console that never existed: a 128x128
-screen, 16 fixed colors, a 4x6 pixel font, four audio channels, 256 sprites, a 128x64 tile map — and
+screen, 16 fixed colors, a 4x7 pixel font, four audio channels, 256 sprites, a 128x64 tile map — and
 a Rust compiler where the Lua interpreter would be. You write a little Rust, it compiles to
 WebAssembly, and it runs inside the console's sandbox at a steady 60 fps (or 30, the cart's choice).
 Carts are shareable PNG images with the game embedded inside.

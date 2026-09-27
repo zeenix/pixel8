@@ -41,7 +41,7 @@ fn draw(&self, gfx: &mut Graphics) {
     gfx.circle(64, 80, 10, Color::YELLOW);                // outline, radius
     gfx.circle_fill(64, 80, 6, Color::ORANGE);
     gfx.ellipse_fill(20, 70, 30, 16, Color::GREEN).unwrap(); // inside a w x h box
-    gfx.print("score", 2, 2, Color::WHITE);               // 4x6 pixel font
+    gfx.print("score", 2, 2, Color::WHITE);               // 4x7 pixel font
 }
 ```
 

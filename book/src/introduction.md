@@ -4,7 +4,7 @@
 game machine — screen, controls, sound chip, editors and all — that never
 existed as hardware and lives entirely in software, dreamed up with the charm
 and the limits of a 1980s handheld. Pixel8's particulars: a 128×128 screen,
-16 fixed colors, a 4×6 pixel font, 256 sprites, a 128×64 tile map, four audio
+16 fixed colors, a 4×7 pixel font, 256 sprites, a 128×64 tile map, four audio
 channels — and where other fantasy consoles build in an interpreter for a
 scripting language, Pixel8 has a **Rust** compiler. You write a little Rust,
 it compiles to WebAssembly, and it runs sandboxed inside the console at a
