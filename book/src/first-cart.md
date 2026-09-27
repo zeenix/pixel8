@@ -53,8 +53,9 @@ panic = "abort"
 
 The one dependency is the SDK. `default-features = false` makes the cart
 `#![no_std]` — the normal way Pixel8 carts are written, and what keeps them
-tiny (the examples weigh 1–5 KiB). The release profile is pre-tuned to shrink
-the WebAssembly.
+tiny: examples run from about 1 KiB to about 45 KiB for the platformer, all
+well inside the 128 KiB cap. The release profile is pre-tuned to shrink the
+WebAssembly.
 
 ## The game, line by line
 
