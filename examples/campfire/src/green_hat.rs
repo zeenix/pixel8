@@ -6,7 +6,7 @@ pub struct GreenHat {
 }
 
 impl GreenHat {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             last_updated: 0.0,
             lean_in: false,

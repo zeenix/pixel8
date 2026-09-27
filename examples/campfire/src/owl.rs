@@ -6,7 +6,7 @@ pub struct Owl {
 }
 
 impl Owl {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             last_updated: 0.0,
             eyes_closed: false,

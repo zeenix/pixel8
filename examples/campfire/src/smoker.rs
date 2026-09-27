@@ -7,7 +7,7 @@ pub struct Smoker {
 }
 
 impl Smoker {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             smoke: Smoke::new(EXTENDED_SMOKE_X, EXTENDED_SMOKE_Y)
                 .with_direction(Direction::UpLeft)
