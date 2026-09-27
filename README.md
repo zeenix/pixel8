@@ -185,7 +185,7 @@ pixel8 verify <cart.png>          run 60 frames headless
 ## The sandbox
 
 Carts execute inside [wasmi](https://github.com/wasmi-labs/wasmi) with no WASI, no filesystem, no
-network and no host memory access. The only imports a cart gets are the ~26 small, C-like functions
+network and no host memory access. The only imports a cart gets are the ~50 small, C-like functions
 of the Pixel8 ABI ([docs/ABI.md](https://github.com/zeenix/pixel8/blob/main/docs/ABI.md)) — draw,
 input, audio, map, log. Fuel metering turns infinite loops into a friendly error screen instead of a
 hung console.
