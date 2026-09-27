@@ -45,7 +45,7 @@ in a browser, and can be taken apart by whoever it reaches:
 | sfx       | 64 slots, 32 steps, 8 waveforms   |
 | music     | 64 patterns, 4 channels           |
 | framerate | 60 fps (or 30, the cart's choice) |
-| cart      | one PNG file, at most 128 KiB     |
+| cart      | one PNG; its wasm at most 128 KiB |
 
 Like the consoles it dreams of, Pixel8 is small on purpose. A blank canvas the
 size of the ocean is paralyzing; 128×128 pixels and 16 colors you can fill by
