@@ -105,6 +105,8 @@ commit_parsers = [
     { message = "^[Mm]erge", skip = true },
     { message = "^🔖", skip = true },
     { message = "^[\\p{Emoji}\\p{Emoji_Presentation}\\p{Extended_Pictographic}]+$", skip = true },
+    # Skip compiler and linter warning fixes: they change nothing a user of the crates can see.
+    { message = "^🚨", skip = true },
 
     # Features.
     { message = "^✨", group = "<!-- 00 -->✨ Added" },
