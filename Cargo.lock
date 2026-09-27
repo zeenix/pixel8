@@ -1802,7 +1802,7 @@ checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
 
 [[package]]
 name = "pixel8"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "heapless",
  "serde_json",
@@ -1810,7 +1810,7 @@ dependencies = [
 
 [[package]]
 name = "pixel8-console"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "pixel8-player"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -1837,7 +1837,7 @@ dependencies = [
 
 [[package]]
 name = "pixel8-runtime"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1853,7 +1853,7 @@ dependencies = [
 
 [[package]]
 name = "pixel8-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -1866,7 +1866,7 @@ dependencies = [
 
 [[package]]
 name = "pixel8-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pixel8-runtime",
  "wat",

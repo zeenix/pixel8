@@ -19,7 +19,7 @@ audio = ["dep:cpal"]
 anyhow.workspace = true
 # The SDK itself, for the physics engine behind the `step_cast` import: the console runs the very
 # code carts and tests do, so the two sides of that wire can never drift.
-pixel8 = { path = "../pixel8", version = "0.1.0", default-features = false, features = ["std", "physics"] }
+pixel8 = { path = "../pixel8", version = "0.2.0", default-features = false, features = ["std", "physics"] }
 serde.workspace = true
 wasmi.workspace = true
 crc32fast.workspace = true

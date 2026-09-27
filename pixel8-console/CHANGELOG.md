@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.0 - 2026-09-27
+
+### ✨ Added
+- Let the World draw its cast.
+- Show the F1 overlay's worst second, not its latest frame.
+- Give a Kinetic one rectangle, and judge everything against it.
+- Add an explosion to the plume effects.
+- Add a physics module: gravity, wind, air and mass for cart entities.
+- Let the map editor stamp multi-sprite blocks.
+- Add fire and smoke plume effects to the SDK.
+- Add pause and stop controls to web exports.
+
+### 💥 Breaking
+- Ship a cart's opening state as data, and boot into it.
+
+### ♻️ Changed
+- Format editor comments with current nightly.
+- Add icon to the README.
+- Remove a redundant empty line.
+- Zoom the map view out with the brush size.
+- Show a whole 8x8 block on the sprite strip.
+
+### 📝 Documentation
+- Call the built-in font 4x7, the cell it is drawn in.
+- Tell xterm users to start it as a VT340 for sixels.
+- Count the ABI's fifty imports in the README.
+- Keep the window in a silent console build.
+- Build the published libraries with all features on docs.rs.
+- Point the README, agents guide and SDK docs at the tutorial book.
+
+### 🐛 Fixed
+- Let input through while the console catches up on ticks.
+- Join up a dragged pencil stroke in the sprite editor.
+
 ## 0.1.0 - 2026-07-13
 
 ### Added
