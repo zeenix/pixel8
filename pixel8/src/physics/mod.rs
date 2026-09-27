@@ -36,7 +36,7 @@
 //!
 //! struct Autumn {
 //!     // The scene: sixteen seats of leaf, and the whole of the weather they fall through — the
-//!     // pull, the air, and a wind that gusts and so cannot be a constant.
+//!     // pull, the air, and a wind that gusts, and so changes from one update to the next.
 //!     world: World<16, (Gravity, Atmosphere, Wind)>,
 //!     leaves: [MemberId; 16],
 //!     // The cart's own, which the world has never heard of: how many leaves the player caught.

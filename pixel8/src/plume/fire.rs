@@ -24,15 +24,15 @@ impl<const SCALE: usize, const LIFETIME: usize> Fire<SCALE, LIFETIME> {
     ///
     /// The base is the middle of the bed the flames rise from — for a campfire, the logs — and
     /// is where they are widest; they narrow as they travel.
-    pub fn new(x: i16, y: i16) -> Self {
+    pub const fn new(x: i16, y: i16) -> Self {
         Self {
             plume: Plume::new(x, y, FIRE_SPEED, Some(DEFAULT_LIFETIME)),
         }
     }
 
     /// Sets which way the flames burn, to chain onto [`new`](Self::new).
-    pub fn with_direction(mut self, direction: Direction) -> Self {
-        self.set_direction(direction);
+    pub const fn with_direction(mut self, direction: Direction) -> Self {
+        self.plume.set_direction(direction);
         self
     }
 
@@ -42,7 +42,7 @@ impl<const SCALE: usize, const LIFETIME: usize> Fire<SCALE, LIFETIME> {
     /// This is what keeps a small fire from burning as a solid lump — see
     /// [Thinning a small plume](super#thinning-a-small-plume). `puffs` is clamped to
     /// `1..=LIFETIME`, and `LIFETIME` (the default) is a puff an update.
-    pub fn with_puffs(mut self, puffs: usize) -> Self {
+    pub const fn with_puffs(mut self, puffs: usize) -> Self {
         self.plume.set_puffs(puffs);
         self
     }
@@ -130,3 +130,24 @@ const FIRE_COLOR_STOPS: [(usize, Color); 4] = [
 
 /// How fast flame particles rise, in sub-pixel units per update at [`FULL_SCALE`].
 pub(super) const FIRE_SPEED: Range<i32> = SUBPIXELS / 2..SUBPIXELS * 3 / 2;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `new`, `with_direction` and `with_puffs` are all `const`; building the whole chain as a
+    /// module-level constant is what pins that — losing constness on any of the three fails the
+    /// build here rather than downstream, in a cart.
+    const FIRE: Fire<5> = Fire::new(3, 4)
+        .with_direction(Direction::Left)
+        .with_puffs(3);
+
+    /// `Fire` has no getters to read a built one back through, so a constant that exists and
+    /// runs like any other fire is the whole of what there is to check.
+    #[test]
+    fn the_const_built_fire_runs_like_any_other() {
+        let mut fire = FIRE;
+        let mut ctx = Context { _private: () };
+        fire.update(&mut ctx);
+    }
+}

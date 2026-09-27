@@ -27,15 +27,15 @@ impl<const SCALE: usize, const LIFETIME: usize> Smoke<SCALE, LIFETIME> {
     /// A new smoke plume based at the pixel position (`x`, `y`) — the middle of the bed it rises
     /// from — billowing upwards. Point it another way with
     /// [`with_direction`](Self::with_direction).
-    pub fn new(x: i16, y: i16) -> Self {
+    pub const fn new(x: i16, y: i16) -> Self {
         Self {
             plume: Plume::new(x, y, SMOKE_SPEED, None),
         }
     }
 
     /// Sets which way the smoke billows, to chain onto [`new`](Self::new).
-    pub fn with_direction(mut self, direction: Direction) -> Self {
-        self.set_direction(direction);
+    pub const fn with_direction(mut self, direction: Direction) -> Self {
+        self.plume.set_direction(direction);
         self
     }
 
@@ -45,7 +45,7 @@ impl<const SCALE: usize, const LIFETIME: usize> Smoke<SCALE, LIFETIME> {
     /// This is what turns the smallest scales from a solid lump into a wisp — see
     /// [Thinning a small plume](super#thinning-a-small-plume). `puffs` is clamped to
     /// `1..=LIFETIME`, and `LIFETIME` (the default) is a puff an update.
-    pub fn with_puffs(mut self, puffs: usize) -> Self {
+    pub const fn with_puffs(mut self, puffs: usize) -> Self {
         self.plume.set_puffs(puffs);
         self
     }
@@ -126,3 +126,24 @@ const SMOKE_COLOR_STOPS: [(usize, Color); 2] = [(8, Color::LIGHT_GREY), (20, Col
 /// How fast smoke particles drift, in sub-pixel units per update at [`FULL_SCALE`] — half a
 /// fire's pace.
 const SMOKE_SPEED: Range<i32> = SUBPIXELS / 4..SUBPIXELS * 3 / 4;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `new`, `with_direction` and `with_puffs` are all `const`; building the whole chain as a
+    /// module-level constant is what pins that — losing constness on any of the three fails the
+    /// build here rather than downstream, in a cart.
+    const SMOKE: Smoke<5> = Smoke::new(3, 4)
+        .with_direction(Direction::Left)
+        .with_puffs(3);
+
+    /// `Smoke` has no getters to read a built one back through, so a constant that exists and
+    /// runs like any other plume is the whole of what there is to check.
+    #[test]
+    fn the_const_built_smoke_runs_like_any_other() {
+        let mut smoke = SMOKE;
+        let mut ctx = Context { _private: () };
+        smoke.update(&mut ctx);
+    }
+}

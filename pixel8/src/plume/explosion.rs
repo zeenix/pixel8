@@ -36,7 +36,7 @@ impl<const SCALE: usize, const SPARKS: usize> Explosion<SCALE, SPARKS> {
     ///
     /// Nothing has gone off yet: the sparks are thrown by the first [`update`](Self::update), so
     /// an explosion can be built wherever it is convenient and blow when it is next run.
-    pub fn new(x: i16, y: i16) -> Self {
+    pub const fn new(x: i16, y: i16) -> Self {
         // In `new` rather than in `update`, so that an explosion too big fails the build of the
         // cart that asks for one, not of the cart that gets around to setting it off.
         const {
@@ -62,7 +62,7 @@ impl<const SCALE: usize, const SPARKS: usize> Explosion<SCALE, SPARKS> {
     ///
     /// The default is the ash grey of debris, which is what most things throw off. A fireball is
     /// [`Color::YELLOW`] or [`Color::ORANGE`]; something that shatters is the color it was.
-    pub fn with_color(mut self, color: Color) -> Self {
+    pub const fn with_color(mut self, color: Color) -> Self {
         self.color = color;
         self
     }
@@ -309,6 +309,31 @@ mod tests {
                 (life - full).abs() <= 1,
                 "a burst at scale {scale} lasts {life} updates against {full}"
             );
+        }
+    }
+
+    /// `new` and `with_color` are both `const`; building the whole chain as a module-level
+    /// constant is what pins that — losing constness on either fails the build here rather than
+    /// downstream, in a cart.
+    const BLAST: Explosion<5, 10> = Explosion::new(3, 4).with_color(Color::YELLOW);
+
+    /// The constant and the same chain called at start-up throw the same burst: `ffi::rnd`
+    /// returns 0.0 natively, so nothing here tells the two apart.
+    #[test]
+    fn a_const_built_explosion_matches_the_same_chain_run_at_start_up() {
+        let mut from_const = BLAST;
+        let mut from_call: Explosion<5, 10> = Explosion::new(3, 4).with_color(Color::YELLOW);
+        assert_eq!(from_const.x, from_call.x);
+        assert_eq!(from_const.y, from_call.y);
+        assert_eq!(from_const.color, from_call.color);
+
+        let mut ctx = Context { _private: () };
+        from_const.update(&mut ctx);
+        from_call.update(&mut ctx);
+        for (a, b) in from_const.sparks.iter().zip(from_call.sparks.iter()) {
+            assert_eq!(a.x_step, b.x_step);
+            assert_eq!(a.y_step, b.y_step);
+            assert_eq!(a.radius, b.radius);
         }
     }
 }

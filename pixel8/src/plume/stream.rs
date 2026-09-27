@@ -92,7 +92,7 @@ pub(super) struct Plume<const SCALE: usize, const LIFETIME: usize> {
 }
 
 impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
-    pub(super) fn new(x: i16, y: i16, speed: Range<i32>, slow_after: Option<usize>) -> Self {
+    pub(super) const fn new(x: i16, y: i16, speed: Range<i32>, slow_after: Option<usize>) -> Self {
         // In `new` rather than in `update`, so that a plume too big or too long-lived fails the
         // build of the cart that asks for one, not of the cart that gets around to running it.
         const {
@@ -119,7 +119,8 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
             forced: STARTING_FORCED,
             x,
             y,
-            direction: Direction::default(),
+            // `Default::default` is a trait method and not `const`; `Up` is what it resolves to.
+            direction: Direction::Up,
             #[cfg(feature = "physics")]
             drift: None,
             speed,
@@ -136,8 +137,15 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
     /// Only ever called before the plume runs, so there are no generations spawned under the old
     /// interval for the age arithmetic to get wrong. A particle then lives `puffs` whole
     /// intervals, which is `LIFETIME` rounded down — up to a puff's worth short of it.
-    pub(super) fn set_puffs(&mut self, puffs: usize) {
-        let puffs = puffs.clamp(1, LIFETIME);
+    pub(super) const fn set_puffs(&mut self, puffs: usize) {
+        // Written out rather than `usize::clamp`, which is `Ord::clamp` and not `const`.
+        let puffs = if puffs < 1 {
+            1
+        } else if puffs > LIFETIME {
+            LIFETIME
+        } else {
+            puffs
+        };
         self.interval = (LIFETIME / puffs) as u8;
         self.life = (puffs * (LIFETIME / puffs)) as u8;
     }
@@ -156,7 +164,7 @@ impl<const SCALE: usize, const LIFETIME: usize> Plume<SCALE, LIFETIME> {
 
     /// Points the plume a new way. Particles already let go of keep the direction they were
     /// spawned with, so the plume bends rather than swinging around.
-    pub(super) fn set_direction(&mut self, direction: Direction) {
+    pub(super) const fn set_direction(&mut self, direction: Direction) {
         self.direction = direction;
     }
 
